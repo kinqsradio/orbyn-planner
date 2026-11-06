@@ -6,14 +6,26 @@
  * Until the Rust code arrives through WebAssembly, keep the two in step; repeat.test.ts ports the
  * Rust tests one to one. Dates are `YYYY-MM-DD` strings, so string order is date order.
  *
- * A monthly rule on the 31st skips months without a 31st, and a yearly rule on 29 February repeats
- * only in leap years, as RFC 5545 does.
+ * Rules a port must match exactly (the same list is in repeat.rs):
+ *
+ * - Repeats work on dates. A timed task or event repeats at the same local wall time on each date.
+ * - Weeks start on Monday (ISO 8601). "Every 2 weeks on Monday and Sunday" counts in Monday-to-Sunday
+ *   weeks from the week containing the start.
+ * - The start is the first date the series *may* fall on. Unlike RFC 5545's DTSTART, a start that
+ *   does not match the rule (a Saturday start for "every Monday") is not itself an occurrence.
+ * - A monthly rule on the 31st skips months without a 31st, and a yearly rule on 29 February repeats
+ *   only in leap years, as RFC 5545 does. Skipped months do not count towards a count end.
+ * - An until date is inclusive.
+ * - One query returns at most MAX_OCCURRENCES dates, and a walk looks at most MAX_STEPS periods from
+ *   the start (about 500 years of a daily rule), after which the series has no more occurrences.
+ * - Skipping a date that is already skipped changes nothing.
+ * - A split at the first occurrence is refused (SplitAtFirst): edit the whole series instead.
  */
 
 /** The most occurrences one call returns, so a bad range cannot run away. */
 export const MAX_OCCURRENCES = 1000;
 /** The most periods a walk looks at before giving up. */
-const MAX_STEPS = 200_000;
+export const MAX_STEPS = 200_000;
 
 export type Frequency = "daily" | "weekly" | "monthly" | "yearly";
 /** A day of the week, stored as "mon" … "sun". */
@@ -48,7 +60,8 @@ export type RepeatErrorCode =
   | "ZeroCount"
   | "EndsBeforeStart"
   | "WeekdaysNotWeekly"
-  | "NotAnOccurrence";
+  | "NotAnOccurrence"
+  | "SplitAtFirst";
 
 const MESSAGES: Record<RepeatErrorCode, string> = {
   ZeroInterval: "repeat every 1 or more",
@@ -56,6 +69,7 @@ const MESSAGES: Record<RepeatErrorCode, string> = {
   EndsBeforeStart: "a repeat cannot end before it starts",
   WeekdaysNotWeekly: "weekdays only apply to weekly repeats",
   NotAnOccurrence: "that date is not part of this repeat",
+  SplitAtFirst: "this is the first time it repeats: edit the whole series instead",
 };
 
 export class RepeatError extends Error {
@@ -210,10 +224,21 @@ export function isOccurrence(series: Series, date: string): boolean {
   return nextOnOrAfter(series, date) === date;
 }
 
-/** "This one only": removes one date from the series. Returns the changed series. */
+/** "This one only": removes one date from the series. Skipping a skipped date changes nothing. Returns the changed series. */
 export function skip(series: Series, date: string): Series {
+  if (series.skipped.includes(date)) return series;
   if (!isOccurrence(series, date)) throw new RepeatError("NotAnOccurrence");
   return { ...series, skipped: [...new Set([...series.skipped, date])].sort() };
+}
+
+/** The first date the rule falls on, counting skipped ones; null for a series with none. */
+export function firstOccurrence(series: Series): string | null {
+  let first: string | null = null;
+  walk(series, (d) => {
+    first = d;
+    return false;
+  });
+  return first;
 }
 
 /** Occurrences before `at`, counting skipped ones, as a count end does. */
@@ -233,8 +258,9 @@ function rawCountBefore(series: Series, at: string): number {
  * together repeat the same number of times as before.
  */
 export function splitAt(series: Series, at: string): [Series, Series] {
-  if (at <= series.start || !isOccurrence(series, at)) throw new RepeatError("NotAnOccurrence");
+  if (!isOccurrence(series, at)) throw new RepeatError("NotAnOccurrence");
   const before = rawCountBefore(series, at);
+  if (before === 0) throw new RepeatError("SplitAtFirst");
   const first: Series = { ...series, repeat: { ...series.repeat }, skipped: series.skipped.filter((d) => d < at) };
   const following: Series = {
     start: at,

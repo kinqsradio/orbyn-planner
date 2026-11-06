@@ -80,3 +80,26 @@ export function formatDue(due: string, now: Date): string {
   }
   return hasTime ? `${day} ${formatTime(date)}` : day;
 }
+
+/** The first day of the week containing `d`: Monday, or Sunday. */
+export function weekStartOf(d: Date, first: "mon" | "sun"): Date {
+  const back = first === "mon" ? (d.getDay() + 6) % 7 : d.getDay();
+  return addDays(startOfDay(d), -back);
+}
+
+/** ISO 8601 week number: the week with the year's first Thursday is week 1. */
+export function isoWeek(d: Date): number {
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7));
+  const yearStart = Date.UTC(t.getUTCFullYear(), 0, 1);
+  return Math.ceil(((t.getTime() - yearStart) / 86_400_000 + 1) / 7);
+}
+
+/** `YYYY-MM-DD` to a local Date at midnight. */
+export function dateOf(day: string): Date {
+  return parseDue(day.slice(0, 10)).date;
+}
+
+export function shortDay(d: Date): string {
+  return `${WEEKDAYS[d.getDay()]!.slice(0, 3)} ${d.getDate()}`;
+}

@@ -75,7 +75,7 @@ export function TaskRow({ task, layout = "tasks", extra }: { task: Task; layout?
 }
 
 /** A Today row: time, check, title, and what matters about it. */
-export function TodayRow({ task, late }: { task: Task; late?: number }) {
+export function TodayRow({ task, late, compact = false }: { task: Task; late?: number; compact?: boolean }) {
   const { lists } = usePlanner();
   const { open } = useTaskActions(task);
   const now = useNow();
@@ -93,11 +93,11 @@ export function TodayRow({ task, late }: { task: Task; late?: number }) {
   else meta = list && !list.isInbox ? list.name : (list?.name ?? "");
 
   return (
-    <li className={task.done ? "row done" : "row"} data-done={task.done}>
-      <span className="time">{time}</span>
+    <li className={task.done ? "row done" : "row"} data-done={task.done} style={compact ? { gridTemplateColumns: "16px minmax(0,1fr) auto" } : undefined}>
+      {!compact && <span className="time">{time}</span>}
       <Check task={task} />
       <button type="button" className="what link-btn" onClick={open}>{task.title}</button>
-      <span className="meta" style={act ? { color: "var(--amber)", fontWeight: 500 } : undefined}>{meta}</span>
+      <span className="meta" style={act ? { color: "var(--amber)", fontWeight: 500 } : undefined}>{compact ? (parsed?.hasTime ? formatTime(parsed.date) : "") : meta}</span>
     </li>
   );
 }

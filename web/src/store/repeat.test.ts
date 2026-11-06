@@ -9,6 +9,7 @@ import {
   repeatEvery,
   skip,
   splitAt,
+  validate,
   type Day,
   type End,
   type Frequency,
@@ -108,7 +109,94 @@ describe("repeat rules (ported from orbyn-planner repeat.rs)", () => {
     const [a, b] = splitAt(first, date(2026, 11, 4));
     expect(a.repeat.end).toEqual({ type: "count", value: 3 });
     expect(b.repeat.end).toEqual({ type: "count", value: 7 });
-    expect(code(() => splitAt(first, date(2026, 11, 1)))).toBe("NotAnOccurrence");
+    expect(code(() => splitAt(first, date(2026, 11, 1)))).toBe("SplitAtFirst");
+  });
+
+  it("a_start_off_the_rule_is_not_an_occurrence_and_cannot_be_split_to_nothing", () => {
+    // Saturday start, every Monday, five times.
+    const s = series(date(2026, 11, 7), "weekly", (r) => {
+      r.weekdays = ["mon"];
+      r.end = { type: "count", value: 5 };
+    });
+    expect(isOccurrence(s, date(2026, 11, 7))).toBe(false);
+    expect(occurrences(s, date(2026, 11, 1), date(2027, 1, 1))).toHaveLength(5);
+    expect(code(() => splitAt(s, date(2026, 11, 9)))).toBe("SplitAtFirst");
+    const [first, rest] = splitAt(s, date(2026, 11, 16));
+    expect(first.repeat.end).toEqual({ type: "count", value: 1 });
+    expect(rest.repeat.end).toEqual({ type: "count", value: 4 });
+    expect(code(() => validate(first))).toBeNull();
+    expect(code(() => validate(rest))).toBeNull();
+  });
+
+  it("weeks_start_on_monday", () => {
+    // Sunday start, Monday and Sunday every 2 weeks.
+    const s = series(date(2026, 11, 8), "weekly", (r) => {
+      r.interval = 2;
+      r.weekdays = ["mon", "sun"];
+    });
+    expect(occurrences(s, date(2026, 11, 1), date(2026, 11, 30))).toEqual([date(2026, 11, 8), date(2026, 11, 16), date(2026, 11, 22), date(2026, 11, 30)]);
+  });
+
+  it("skipping_twice_is_a_no_op", () => {
+    let s = series(date(2026, 11, 7), "daily");
+    s = skip(s, date(2026, 11, 8));
+    s = skip(s, date(2026, 11, 8));
+    expect(s.skipped).toHaveLength(1);
+  });
+
+  it("a_split_never_loses_or_doubles_an_occurrence", () => {
+    const MASK = (1n << 64n) - 1n;
+    let state = 7n;
+    // SplitMix64, as in the Rust test, so both sides draw the same cases.
+    const next = (): bigint => {
+      state = (state + 0x9e3779b97f4a7c15n) & MASK;
+      let z = state;
+      z = ((z ^ (z >> 30n)) * 0xbf58476d1ce4e5b9n) & MASK;
+      z = ((z ^ (z >> 27n)) * 0x94d049bb133111ebn) & MASK;
+      return z ^ (z >> 31n);
+    };
+    const below = (n: number): number => Number(next() % BigInt(n));
+    const plusDays = (d: string, n: number) => {
+      const [y, m, dd] = d.split("-").map(Number) as [number, number, number];
+      const t = new Date(Date.UTC(y, m - 1, dd + n));
+      return date(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate());
+    };
+    const days: Day[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+    const frequencies: Frequency[] = ["daily", "weekly", "monthly", "yearly"];
+    // Under two years, so a daily rule stays below MAX_OCCURRENCES.
+    const [from, to] = [date(2026, 1, 1), date(2027, 11, 30)];
+    let checked = 0;
+    for (let i = 0; i < 3000; i++) {
+      const start = plusDays(date(2026, 1, 1), below(400));
+      const frequency = frequencies[below(4)]!;
+      const repeat = repeatEvery(frequency);
+      repeat.interval = 1 + below(3);
+      if (frequency === "weekly" && below(2) === 0) {
+        const count = 1 + below(3);
+        repeat.weekdays = Array.from({ length: count }, () => days[below(7)]!);
+      }
+      const kind = below(3);
+      repeat.end =
+        kind === 0
+          ? { type: "never" }
+          : kind === 1
+            ? { type: "count", value: 1 + below(20) }
+            : { type: "until", value: plusDays(start, 30 + below(900)) };
+      let original = newSeries(start, repeat);
+      const all = occurrences(original, from, to);
+      const picked = all.filter(() => below(5) === 0);
+      for (const d of picked) original = skip(original, d);
+      const kept = occurrences(original, from, to);
+      if (kept.length < 2) continue;
+      const at = kept[1 + below(kept.length - 1)]!;
+      const [first, second] = splitAt(original, at);
+      validate(first);
+      validate(second);
+      const joined = [...occurrences(first, from, to), ...occurrences(second, from, to)];
+      expect(joined, `split of ${JSON.stringify(original)} at ${at}`).toEqual(kept);
+      checked += 1;
+    }
+    expect(checked, `only ${checked} cases had a split point`).toBeGreaterThan(1000);
   });
 
   it("a_huge_range_stops_at_the_limit", () => {

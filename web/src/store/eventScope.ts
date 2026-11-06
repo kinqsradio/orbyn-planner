@@ -1,6 +1,6 @@
 import { makeDue, parseDue } from "../lib/dates";
 import type { Occurrence } from "./occurrences";
-import { newSeries, skip, splitAt, type Repeat, type Series } from "./repeat";
+import { firstOccurrence, newSeries, skip, splitAt, type Repeat, type Series } from "./repeat";
 import type { CalendarEvent, EventPatch, PlannerStore } from "./types";
 
 /** Which events an edit or delete reaches: "This event", "This and following", "All events". */
@@ -10,7 +10,8 @@ export type Scope = "this" | "following" | "all";
 export type OccurrenceEdit = Omit<EventPatch, "repeat"> & { repeat?: Repeat | null };
 
 const minutes = (value: string): number => parseDue(value).date.getTime() / 60_000;
-const startsSeries = (e: CalendarEvent, date: string) => !e.repeat || e.repeat.start === date;
+/** "This and following" on the first occurrence is the same as "All events". */
+const startsSeries = (e: CalendarEvent, date: string) => !e.repeat || firstOccurrence(e.repeat) === date;
 
 /** The event's own first start and end after the occurrence on `occ.date` moved to `start`/`end`. */
 function moveBase(event: CalendarEvent, occ: Occurrence, start: string, end: string): { start: string; end: string } {
