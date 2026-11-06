@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { getHealth } from "../../api/engine";
 import { Icon } from "../../components/Icon";
+import { formatTime } from "../../lib/dates";
 
 export type SyncStatus =
   | { kind: "synced"; devices: number }
@@ -8,11 +9,60 @@ export type SyncStatus =
   | { kind: "connected" }
   | { kind: "syncing" }
   | { kind: "offline"; waiting: number }
-  | { kind: "error" };
+  | { kind: "error" }
+  /** Changes did not reach this device's storage. Red: a failure. */
+  | { kind: "unsaved"; reason: string }
+  /** IndexedDB is missing, so nothing outlives this visit. */
+  | { kind: "memory" };
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-export function SyncLine({ status, onRetry }: { status: SyncStatus; onRetry?: () => void }) {
+export interface WaitingChange {
+  id: string;
+  label: string;
+  /** ISO time of the last local edit. */
+  at: string;
+}
+
+/** The offline pill; tapping it lists the changes that have not left this device. */
+function OfflinePill({ status, waiting }: { status: Extract<SyncStatus, { kind: "offline" }>; waiting: WaitingChange[] }) {
+  const [open, setOpen] = useState(false);
+  const text = status.waiting === 0 ? "Offline" : `Offline · ${plural(status.waiting, "change", "changes")} waiting`;
+  if (status.waiting === 0 || waiting.length === 0) {
+    return (
+      <p className="pillx offline" role="status">
+        <Icon name="x" small />
+        {text}
+      </p>
+    );
+  }
+  return (
+    <div className="sync-wrap">
+      <p role="status" style={{ display: "contents" }}>
+        <button type="button" className="pillx offline" aria-expanded={open} onClick={() => setOpen(!open)}>
+          <Icon name="x" small />
+          {text}
+        </button>
+      </p>
+      {open && (
+        <div className="card popover" role="region" aria-label="Waiting to sync">
+          <b>Waiting to sync</b>
+          <span className="t3">
+            This device is offline. Your changes are saved here and reach your other devices as soon as you’re back online.
+          </span>
+          {waiting.slice(0, 5).map((w) => (
+            <div className="kv" key={w.id} style={{ borderTop: "1px solid var(--line)", height: 38 }}>
+              <span style={{ color: "var(--t1)" }}>{w.label}</span>
+              <b>Edited {formatTime(new Date(w.at))}</b>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function SyncLine({ status, onRetry, waiting = [] }: { status: SyncStatus; onRetry?: () => void; waiting?: WaitingChange[] }) {
   switch (status.kind) {
     case "synced":
       return <p className="pillx" role="status">Synced · {plural(status.devices, "device", "devices")}</p>;
@@ -26,12 +76,16 @@ export function SyncLine({ status, onRetry }: { status: SyncStatus; onRetry?: ()
         </p>
       );
     case "offline":
+      return <OfflinePill status={status} waiting={waiting} />;
+    case "unsaved":
       return (
-        <p className="pillx offline" role="status">
-          <Icon name="x" small />
-          {status.waiting === 0 ? "Offline" : `Offline · ${plural(status.waiting, "change", "changes")} waiting`}
+        <p className="pillx red" role="status" title={status.reason}>
+          Couldn’t save on this device
+          <span className="sr-only"> {status.reason}</span>
         </p>
       );
+    case "memory":
+      return <p className="pillx" role="status">Not saved on this device</p>;
     case "error":
       return (
         <p className="pillx red" role="status">
@@ -42,6 +96,13 @@ export function SyncLine({ status, onRetry }: { status: SyncStatus; onRetry?: ()
         </p>
       );
   }
+}
+
+/** Storage trouble comes first: when changes are not safe on this device, no other state is worth showing. */
+export function withPersistence(status: SyncStatus, persistence: { status: string; reason?: string }): SyncStatus {
+  if (persistence.status === "failed") return { kind: "unsaved", reason: persistence.reason ?? "" };
+  if (persistence.status === "memory") return { kind: "memory" };
+  return status;
 }
 
 /** Seconds until the next health check: slowing down while healthy, quick to retry a failure. */

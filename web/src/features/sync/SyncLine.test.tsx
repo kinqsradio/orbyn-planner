@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SyncLine, healthDelay, useSyncStatus, type SyncStatus } from "./SyncLine";
+import { SyncLine, healthDelay, useSyncStatus, withPersistence, type SyncStatus } from "./SyncLine";
 
 const cases: [SyncStatus, string][] = [
   [{ kind: "synced", devices: 2 }, "Synced · 2 devices"],
@@ -10,6 +10,8 @@ const cases: [SyncStatus, string][] = [
   [{ kind: "offline", waiting: 3 }, "Offline · 3 changes waiting"],
   [{ kind: "offline", waiting: 1 }, "Offline · 1 change waiting"],
   [{ kind: "error" }, "Couldn’t sync ·"],
+  [{ kind: "unsaved", reason: "This device is out of storage." }, "Couldn’t save on this device"],
+  [{ kind: "memory" }, "Not saved on this device"],
 ];
 
 describe("SyncLine", () => {
@@ -131,5 +133,22 @@ describe("useSyncStatus", () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(await screen.findByText("Connected")).toBeInTheDocument();
+  });
+});
+
+describe("withPersistence", () => {
+  it("puts storage trouble ahead of every other state", () => {
+    const offline: SyncStatus = { kind: "offline", waiting: 2 };
+    expect(withPersistence(offline, { status: "ok" })).toBe(offline);
+    expect(withPersistence(offline, { status: "memory" })).toEqual({ kind: "memory" });
+    expect(withPersistence(offline, { status: "failed", reason: "Full" })).toEqual({ kind: "unsaved", reason: "Full" });
+  });
+
+  it("the unsaved pill is red and never claims the changes are saved", () => {
+    render(<SyncLine status={{ kind: "unsaved", reason: "This device is out of storage." }} />);
+    const pill = screen.getByRole("status");
+    expect(pill).toHaveClass("red");
+    expect(pill.textContent).not.toMatch(/saved here|are saved/i);
+    expect(pill).toHaveTextContent("This device is out of storage.");
   });
 });
