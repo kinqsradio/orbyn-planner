@@ -63,7 +63,9 @@ export interface SchedulerOptions {
   /** Keys already shown by an earlier leader, so a hand-over does not repeat them. */
   shown?: Iterable<string>;
   /** Called with the key of each reminder this scheduler shows or skips for quiet hours. */
-  onShown?: (key: string) => void;
+  onShown?: (key: string) => void | Promise<void>;
+  /** Called when `onShown` could not record a key, so the person can be told a reminder may repeat. */
+  onShownError?: (key: string, error: unknown) => void;
 }
 
 /**
@@ -119,7 +121,12 @@ export class ReminderScheduler {
   private show(r: Reminder): void {
     if (this.shown.has(r.key)) return;
     this.shown.add(r.key);
-    this.options.onShown?.(r.key);
+    try {
+      const done = this.options.onShown?.(r.key);
+      if (done) void done.catch((e: unknown) => this.options.onShownError?.(r.key, e));
+    } catch (e) {
+      this.options.onShownError?.(r.key, e);
+    }
     if (inQuietHours(this.options.now(), this.options.quiet())) return;
     this.options.notify(r);
   }

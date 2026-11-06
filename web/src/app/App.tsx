@@ -104,7 +104,7 @@ function Shell() {
   const now = useNow();
   const due = dueCount(tasks, now);
   useSubscriptionRefresh();
-  useReminders();
+  useReminders((message) => ui.showToast(message));
   const project = /^\/projects\/([^/]+)$/.exec(path);
   const page = project ? () => <ProjectPage id={decodeURIComponent(project[1]!)} /> : (PAGES[path === "/" ? "/today" : path] ?? PAGES["/today"]!);
   const inMore = MORE.some((item) => item.path === path);

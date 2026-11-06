@@ -50,15 +50,17 @@ function useLeader(active: boolean): boolean {
  * While the app is open, shows a browser notification for each task reminder, if the person turned
  * reminders on in Settings and the browser allows it. This never asks for permission: Settings does.
  */
-export function useReminders(): void {
+export function useReminders(onProblem?: (message: string) => void): void {
   const { tasks } = usePlanner();
   const { prefs } = usePrefs();
   const quiet = useRef(prefs.quiet);
   const latest = useRef(tasks);
   const scheduler = useRef<ReminderScheduler | null>(null);
+  const problem = useRef(onProblem);
   useEffect(() => {
     quiet.current = prefs.quiet;
     latest.current = tasks;
+    problem.current = onProblem;
   });
   const wanted = prefs.reminders && permissionState() === "granted";
   const enabled = useLeader(wanted);
@@ -75,6 +77,7 @@ export function useReminders(): void {
         quiet: () => quiet.current,
         shown,
         onShown: (key) => rememberShown(key),
+        onShownError: () => problem.current?.("Couldn’t save that a reminder was shown, so it may appear again if another tab takes over."),
         notify: (r: Reminder) => {
           try {
             new Notification(r.task.title, { body: r.task.due ? `Due ${formatDue(r.task.due, new Date())}` : "", tag: r.key });
