@@ -64,7 +64,11 @@ button { cursor: pointer; }
 .ic.sm { width: 13px; height: 13px; }
 
 /* Shell */
-.app { height: 100dvh; display: grid; grid-template-columns: 224px minmax(0, 1fr); min-height: 0; }
+.app { height: 100dvh; display: grid; grid-template-columns: 224px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); min-height: 0; }
+/* Live regions and other helpers stay out of the grid, so the sidebar and the
+   sheet always fill the window. */
+.toast-live { position: fixed; inset: auto 0 0 auto; width: 0; height: 0; overflow: visible; pointer-events: none; }
+.toast-live > * { pointer-events: auto; }
 .side { display: flex; flex-direction: column; gap: 1px; padding: 12px 10px 10px; min-width: 0; }
 .side .primary { display: flex; flex-direction: column; gap: 1px; flex: 1; min-height: 0; }
 .search {
@@ -307,7 +311,7 @@ textarea.field { height: auto; padding: 8px 12px; resize: vertical; line-height:
 .dialog-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
 [role="option"] { cursor: pointer; }
 .toast {
-  position: fixed; left: 50%; bottom: 24px; z-index: 50; transform: translateX(-50%); display: flex; align-items: center; gap: 14px;
+  position: fixed; left: 50%; bottom: 76px; z-index: 50; transform: translateX(-50%); display: flex; align-items: center; gap: 14px;
   padding: 8px 14px; border-radius: 10px; background: var(--btn); color: var(--btnt); font-size: 12.5px;
 }
 .toast-action { padding: 4px; border: 0; background: none; color: inherit; font-weight: 500; text-decoration: underline; text-underline-offset: 2px; }
