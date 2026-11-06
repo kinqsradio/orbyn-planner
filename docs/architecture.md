@@ -53,3 +53,25 @@ Accounts are optional in v1. Signed out, the person sees the landing page, and "
 - **Engine address.** Production builds refuse a plain `http://` engine URL; development accepts it for localhost and 127.0.0.1 only. Feed subscriptions go through the engine (`POST /v1/feeds/fetch`), since the page's policy forbids fetching other sites.
 - **Not yet.** Code signing and notarisation, auto-update and background reminders.
 
+## The engine's WebAssembly module
+
+Accounts, device keys and the sync engine's saved state run on orbyn-engine's `orbyn-wasm` crate, not on code in the planner.
+
+- **Built and committed.** `web/src/generated/wasm/` holds the package (`orbyn_wasm.js`, its `.d.ts`, `orbyn_wasm_bg.wasm`), built by `npm run wasm` from `ORBYN_ENGINE_DIR` as the engine's `crates/orbyn-wasm/README.md` describes: `cargo build -p orbyn-wasm --release --target wasm32-unknown-unknown`, then `wasm-bindgen --target web`. `web/wasm.lock.json` pins the Rust toolchain and the wasm-bindgen CLI (which must equal the crate version in the engine's `Cargo.lock`; the script checks); build-machine paths are remapped so the bytes are the same anywhere. `manifest.json` beside it records the engine commit, the Rust and wasm-bindgen versions and the sha256 of each file. `npm run wasm:check` rebuilds and compares, and CI runs it (on Linux, against the engine's main), like `generate:check`: the glue and the type files must equal a fresh build exactly, since any change to the module's interface shows there. The `.wasm` is compared byte for byte too; the same source can lay out its data differently on another operating system (a Linux build of the same commit differed from the macOS one in the order of the data segment, with identical glue), so when only those bytes differ the check passes with a warning if the manifest's engine commit and toolchain are the ones in use, and fails otherwise. After a change to the engine's `orbyn-wasm`, `orbyn-client`, `orbyn-auth-client`, `orbyn-crypto` or contracts, run `npm run wasm` and commit the result. Needs `cargo install wasm-bindgen-cli --version 0.2.130 --locked` and `rustup target add wasm32-unknown-unknown --toolchain 1.99.1`.
+- **Loaded only when accounts are used.** `src/api/realCrypto.ts` imports the module dynamically, and only when the build has an engine address (`VITE_ENGINE_URL`). Vite puts the glue and the `.wasm` in chunks of their own; a build without an address drops the import and ships no WebAssembly at all (a test builds both ways). `createAuthServices({ ready })` holds the first read of a saved session until the module has loaded. `WasmAuthCrypto` is the adapter, and the compiler checks the real module against its shapes. `FakeAuthCrypto` stays for unit tests and is never bundled.
+- **Content security policy.** Compiling WebAssembly needs `'wasm-unsafe-eval'` in `script-src`. The desktop app's policy (`desktop/src-tauri/tauri.conf.json` and `desktop/scripts/engine.mjs`) has it, and no `'unsafe-eval'`. The web build sets no policy of its own; a host that adds one must allow the same.
+- **What the real module does that a fake should too.** Every disagreement in the pairing (the digits, a nonce against its commitment, the signature, an approval older than ten minutes, keys the server swapped, a step out of order) is the one code `mismatch`; only a second use is `already_finished`. Any failure of the sign-in protocol, a wrong password or a malformed answer, is `auth_failed`. A wrapping secret under 32 bytes is `invalid_wrap_secret`; a wrong secret, other keys or changed bytes are `open_failed`; bad JSON is `invalid_json`. The planner checks an approval's age itself to say "ran out of time".
+
+### Running the end-to-end test
+
+`src/e2e/engine.e2e.test.ts` signs up, signs in on a second device, pairs with the digits compared by the test, removes a device, and checks a cancel and a refusal, all against a real engine with the real module. It runs only when `ORBYN_E2E_ENGINE` is set.
+
+```bash
+cd ../orbyn-engine
+docker compose build
+SETUP=$(docker compose run --rm server auth-setup | tail -1)
+ORBYN_AUTH_SETUP="$SETUP" docker compose up -d
+cd ../orbyn-planner/web
+ORBYN_E2E_ENGINE=http://localhost:8080 npx vitest run src/e2e
+```
+

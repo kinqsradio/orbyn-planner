@@ -34,4 +34,19 @@ describe("no fake in the app", () => {
     // And the app does know it cannot sign in without the real module.
     expect(code).toContain("Sign-in isn't available in this build yet");
   }, 120_000);
+
+  async function files(define?: Record<string, string>): Promise<string[]> {
+    const root = new URL("../..", import.meta.url).pathname;
+    const result = await build({ root, logLevel: "silent", build: { write: false }, define });
+    const outputs = Array.isArray(result) ? result : "output" in result ? [result] : [];
+    return outputs.flatMap((r) => r.output).map((o) => o.fileName);
+  }
+
+  it("a build without an engine address ships no WebAssembly; one with it loads it from a chunk of its own", async () => {
+    const without = await files({ "import.meta.env.VITE_ENGINE_URL": "undefined" });
+    expect(without.filter((f) => /\.wasm$|orbyn_wasm/.test(f))).toEqual([]);
+    const withEngine = await files({ "import.meta.env.VITE_ENGINE_URL": JSON.stringify("https://engine.example.com") });
+    expect(withEngine.some((f) => /orbyn_wasm.*\.wasm$/.test(f))).toBe(true);
+    expect(withEngine.some((f) => /orbyn_wasm.*\.js$/.test(f))).toBe(true);
+  }, 240_000);
 });

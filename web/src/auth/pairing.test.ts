@@ -74,7 +74,7 @@ describe("the approval functions of the stand-in crypto", () => {
 
   it("the same digits on both sides, and the approver reveals only after it has the new device's nonce", () => {
     const a = approverEngine.startApproval(pending(), NOW);
-    expect(() => a.reveal(viewFrom(a))).toThrow(/out_of_order/);
+    expect(() => a.reveal(viewFrom(a))).toThrow(/^mismatch/);
     const d = deviceEngine.joinApproval(viewFrom(a), NOW);
     const nonce = a.reveal(viewFrom(a, { device_nonce: d.nonce.nonce }));
     expect(d.sas(viewFrom(a, { device_nonce: d.nonce.nonce, approver_nonce: nonce.nonce }))).toBe(a.sas());
@@ -83,11 +83,11 @@ describe("the approval functions of the stand-in crypto", () => {
   it("keys the server swapped make the approver refuse, and a changed nonce fails the commitment", () => {
     const a = approverEngine.startApproval(pending(), NOW);
     const d = deviceEngine.joinApproval(viewFrom(a), NOW);
-    expect(() => a.reveal(viewFrom(a, { device_nonce: d.nonce.nonce, device_signing_key: approverKeys.signingKey() }))).toThrow(/keys_changed/);
+    expect(() => a.reveal(viewFrom(a, { device_nonce: d.nonce.nonce, device_signing_key: approverKeys.signingKey() }))).toThrow(/^mismatch/);
     const nonce = a.reveal(viewFrom(a, { device_nonce: d.nonce.nonce }));
     const forged = encodeBytes(new Uint8Array(32).fill(9));
     expect(forged).not.toBe(nonce.nonce);
-    expect(() => d.sas(viewFrom(a, { approver_nonce: forged }))).toThrow(/commitment_mismatch/);
+    expect(() => d.sas(viewFrom(a, { approver_nonce: forged }))).toThrow(/^mismatch/);
   });
 
   it("the new device cannot finish before the approver confirmed, nor with wrong typed digits, nor twice", () => {
@@ -95,10 +95,10 @@ describe("the approval functions of the stand-in crypto", () => {
     const d = deviceEngine.joinApproval(viewFrom(a), NOW);
     const nonce = a.reveal(viewFrom(a, { device_nonce: d.nonce.nonce }));
     const base = viewFrom(a, { device_nonce: d.nonce.nonce, approver_nonce: nonce.nonce });
-    expect(() => deviceEngine.finishApproval(d, base, undefined, NOW)).toThrow(/not_confirmed/);
+    expect(() => deviceEngine.finishApproval(d, base, undefined, NOW)).toThrow(/^mismatch/);
     const confirm = approverEngine.confirmApproval(a, { devices: [], removals: [] });
     const confirmed = { ...base, signature: confirm.signature, endorsement: confirm.endorsement ?? null };
-    expect(() => deviceEngine.finishApproval(d, confirmed, "000000", NOW)).toThrow(/wrong_code/);
+    expect(() => deviceEngine.finishApproval(d, confirmed, "000000", NOW)).toThrow(/^mismatch/);
     expect(() => deviceEngine.finishApproval(d, confirmed, undefined, NOW)).toThrow(/already_finished/); // one attempt
     expect(() => approverEngine.confirmApproval(a, { devices: [], removals: [] })).toThrow(/already_finished/);
   });
@@ -124,6 +124,6 @@ describe("the approval functions of the stand-in crypto", () => {
 
   it("an approval older than ten minutes is refused on joining", () => {
     const a = approverEngine.startApproval(pending(), NOW);
-    expect(() => deviceEngine.joinApproval(viewFrom(a), NOW + 601)).toThrow(/approval_expired/);
+    expect(() => deviceEngine.joinApproval(viewFrom(a), NOW + 601)).toThrow(/^mismatch/);
   });
 });

@@ -34,7 +34,7 @@ export interface WasmSyncEngine {
  */
 export interface OrbynWasmModule {
   /** The initialiser wasm-bindgen exports; it fetches and compiles the `.wasm` file. */
-  default?: (input?: unknown) => Promise<unknown>;
+  default?: (...args: never[]) => Promise<unknown>;
   startRegistration(password: Uint8Array): PendingRegistration;
   finishRegistration(pending: PendingRegistration, password: Uint8Array, response: Uint8Array): Uint8Array;
   startLogin(password: Uint8Array): PendingLogin;

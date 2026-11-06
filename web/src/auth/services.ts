@@ -20,6 +20,8 @@ export interface AuthServices {
   engine: EngineHost;
   /** Tabs tell each other when one signs out, so the others drop their session too. */
   signedOut: { post(): void; listen(listener: () => void): () => void };
+  /** Settles when the crypto this build uses has loaded (or failed to); nothing reads a saved session before. */
+  ready: Promise<void>;
   /** How a waiting device or approver asks the server again: back off from `firstMs` to `maxMs`, give up after `totalMs`. */
   poll: PollSchedule;
 }
@@ -42,6 +44,7 @@ export interface AuthServiceOptions {
   poll?: PollSchedule;
   wrapSecret?: () => Promise<Uint8Array>;
   lock?: Lock;
+  ready?: Promise<void>;
 }
 
 export function createAuthServices(options: AuthServiceOptions = {}): AuthServices {
@@ -77,5 +80,5 @@ export function createAuthServices(options: AuthServiceOptions = {}): AuthServic
       return () => channel.close();
     },
   };
-  return { api, tokens, keys, crypto, now, poll: options.poll ?? DEFAULT_POLL, wrapSecret, engine, signedOut };
+  return { api, tokens, keys, crypto, now, poll: options.poll ?? DEFAULT_POLL, wrapSecret, engine, signedOut, ready: options.ready ?? Promise.resolve() };
 }

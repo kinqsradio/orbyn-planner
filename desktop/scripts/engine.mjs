@@ -40,7 +40,9 @@ export function contentSecurityPolicy(engineUrl, { dev = false, allowLocalHttp =
   if (dev) connect.push("http://localhost:5173", "ws://localhost:5173");
   return [
     "default-src 'self'",
-    "script-src 'self'",
+    // 'wasm-unsafe-eval' lets the page compile the engine's WebAssembly module (sign-in and device keys). It does
+    // not allow eval() or inline scripts.
+    "script-src 'self' 'wasm-unsafe-eval'",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data:",
     "font-src 'self' data:",

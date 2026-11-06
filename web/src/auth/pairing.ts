@@ -109,6 +109,8 @@ export function* delays(poll: PollSchedule): Generator<number> {
   }
 }
 
+/** An approval is good for ten minutes. */
+const APPROVAL_SECS = 600;
 const nowSecs = (services: AuthServices) => Math.floor(services.now() / 1000);
 /** The approval is at another step: another tab of this device got there first. */
 const isOutOfOrder = (e: unknown) => e instanceof ApiFailure && (e.status === 409 || e.code === "approval_out_of_order");
@@ -225,7 +227,8 @@ export class ApproverController extends Controller<ApproverState> {
     } else if (isGone(error)) {
       reason = "closed";
       message = REASONS.closed;
-    } else if (error instanceof Error && /^keys_changed:/.test(error.message)) {
+    } else if (error instanceof Error && /^mismatch:/.test(error.message)) {
+      // The module's one code for any disagreement; at this end it means the keys the server showed are not the ones this device started with.
       reason = "mismatch";
       message = "The keys the server showed for the new device changed, so this approval was closed.";
     } else if (error instanceof ApiFailure) {
@@ -313,6 +316,12 @@ export class DeviceController extends Controller<DeviceState> {
         return (this.state as DeviceState).phase === "closed";
       }
       if (this.approvalId !== view.id) {
+        // The module refuses an approval older than ten minutes with its generic `mismatch`, so the age is checked here to say so.
+        if (nowSecs(this.services) - view.created_at > APPROVAL_SECS) {
+          this.dead.add(view.id);
+          await this.close("expired", false);
+          return true;
+        }
         this.set({ phase: "joining" });
         const pairing = await this.services.engine.run(this.session, (e) => e.joinApproval(view, nowSecs(this.services)));
         this.approvalId = view.id;
@@ -396,8 +405,8 @@ export class DeviceController extends Controller<DeviceState> {
   private async fail(error: unknown): Promise<void> {
     const text = error instanceof Error ? error.message : "";
     if (error instanceof ApiFailure && error.code === "wrong_code") return this.close("mismatch");
-    if (/^(commitment_mismatch|wrong_code|invalid_signature):/.test(text)) return this.close("mismatch");
-    if (/^approval_expired:/.test(text)) return this.close("expired");
+    // The module has one code for every disagreement: the digits, a nonce against its commitment, the signature.
+    if (/^mismatch:/.test(text)) return this.close("mismatch");
     if (isGone(error)) return this.close("closed", false);
     return this.close("failed");
   }
