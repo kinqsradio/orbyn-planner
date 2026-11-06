@@ -88,9 +88,8 @@ describe("two tabs on one database", () => {
     await c.flush();
     expect(c.getState().tasks.map((t) => t.title)).toEqual(["keeps the clock honest"]);
     await vi.waitFor(() => expect(b.getState().tasks.map((t) => t.title)).toEqual(["keeps the clock honest"]));
-    const entry = (await stored()).outbox.filter((e) => e.id === task.id);
-    expect(entry).toHaveLength(1);
-    expect(entry[0]).toMatchObject({ op: "delete", changedFields: {} });
+    // Never synced, so the purge leaves nothing to send.
+    expect((await stored()).outbox.filter((e) => e.id === task.id)).toHaveLength(0);
   });
 
   it("reloads when another tab upgrades the database", async () => {
