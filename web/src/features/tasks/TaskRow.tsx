@@ -2,6 +2,7 @@ import { useNow } from "../../app/clock";
 import { useUi } from "../../app/ui";
 import { formatTime, parseDue } from "../../lib/dates";
 import { usePlanner } from "../../store/context";
+import { shownTags, TagChip } from "./TagChips";
 import type { Task } from "../../store/types";
 import { dueText, needsAction } from "./selectors";
 import { useComplete } from "./useComplete";
@@ -38,9 +39,10 @@ const priorityLabel = (t: Task) => (t.priority === "none" ? "" : t.priority[0]!.
 
 /** One aligned table row: Tasks (list, due, priority), a list's own tasks, or Completed. */
 export function TaskRow({ task, layout = "tasks", extra }: { task: Task; layout?: "tasks" | "list" | "completed"; extra?: string }) {
-  const { lists } = usePlanner();
+  const { lists, tags } = usePlanner();
   const { open } = useTaskActions(task);
   const now = useNow();
+  const chips = shownTags(task, tags);
   const list = lists.find((l) => l.id === task.listId);
   const due = (
     <span className={needsAction(task, now) ? "due amber" : "due"}>{task.done && layout === "list" ? "Done" : dueText(task, now)}</span>
@@ -56,7 +58,10 @@ export function TaskRow({ task, layout = "tasks", extra }: { task: Task; layout?
   return (
     <li className={`tr ${layout}${task.done ? " done" : ""}`} data-row-id={task.id} style={{ gridTemplateColumns: columns }} data-done={task.done}>
       <span><Check task={task} /></span>
-      <button type="button" className="tt link-btn" onClick={open}>{task.title}</button>
+      <span className="ttwrap">
+        <button type="button" className="tt link-btn" onClick={open}>{task.title}</button>
+        {chips.map((t) => <TagChip key={t.id} tag={t} />)}
+      </span>
       {layout === "tasks" && (
         <>
           <span>{tag}</span>

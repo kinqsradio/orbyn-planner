@@ -32,6 +32,11 @@ describe.skipIf(!engineUrl)("record sync against a real engine", () => {
       await until("the task to reach B", () => b.store.getState().tasks.some((t) => t.id === task.id));
       expect(a.store.getState().outbox).toEqual([]);
 
+      // A tag (a record in the account's settings zone) and a `tag:<id>` field on the task reach B.
+      const tag = a.store.addTag("Errands", "c4");
+      a.store.setTaskTag(task.id, tag.id, true);
+      await until("the tag and its field to reach B", () => b.store.getState().tags.some((t) => t.id === tag.id) && b.store.getState().tasks.find((t) => t.id === task.id)?.tags.includes(tag.id) === true);
+
       // Both edit while offline, different fields and the same one.
       aOnline.on = false;
       bOnline.on = false;

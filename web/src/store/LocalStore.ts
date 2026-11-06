@@ -1,5 +1,5 @@
 import { repeatFields } from "./eventRecord";
-import { applyFields, sectionFields, storedOf, viewOf } from "./records";
+import { applyFields, sectionFields, storedOf, TAG_PREFIX, viewOf } from "./records";
 import { coalesce, refKey, type AnyRecord, type Patch, type Ref } from "./outbox";
 import { DEVICE_DB, defaultPersistence, type Acknowledged, type ApplyResult, type Persistence } from "./persistence";
 import { inOrder, keyBetween } from "./order";
@@ -26,6 +26,8 @@ import {
   type PlannerStore,
   type RecordType,
   type RemoteChange,
+  type Tag,
+  type TagPatch,
   type Task,
   type TaskList,
   type TaskPatch,
@@ -39,7 +41,7 @@ export const CHANNEL_NAME = "orbyn-planner";
 const DAY_MS = 86_400_000;
 /** Stamps newer than this were made with the clock the purge is checking, so they prove nothing about it. */
 const CLOCK_CHECK_MS = 60_000;
-const KEY_OF = { task: "tasks", list: "lists", event: "events", calendar: "calendars", project: "projects" } as const;
+const KEY_OF = { task: "tasks", list: "lists", event: "events", calendar: "calendars", project: "projects", tag: "tags" } as const;
 
 export interface LocalStoreOptions {
   persistence?: Persistence;
@@ -63,7 +65,7 @@ function describe(error: unknown, doing: "write" | "open"): string {
 
 export class LocalStore implements PlannerStore {
   readonly ready: Promise<void>;
-  private state: PlannerState = { ready: false, tasks: [], lists: [], events: [], calendars: [], projects: [], outbox: [], persistence: { status: "ok" } };
+  private state: PlannerState = { ready: false, tasks: [], lists: [], events: [], calendars: [], projects: [], tags: [], outbox: [], persistence: { status: "ok" } };
   private listeners = new Set<() => void>();
   private persistence: Persistence;
   private writes: Promise<void> = Promise.resolve();
@@ -128,6 +130,7 @@ export class LocalStore implements PlannerStore {
     add("list", from.lists);
     add("calendar", from.calendars);
     add("project", from.projects);
+    add("tag", from.tags);
     add("task", from.tasks);
     add("event", from.events);
     if (inputs.length > 0) this.commit(inputs);
@@ -188,7 +191,7 @@ export class LocalStore implements PlannerStore {
   }
 
   private async load(): Promise<void> {
-    let snapshot = { tasks: [] as Task[], lists: [] as TaskList[], events: [] as CalendarEvent[], calendars: [] as PlannerCalendar[], projects: [] as Project[], outbox: [] as OutboxEntry[] };
+    let snapshot = { tasks: [] as Task[], lists: [] as TaskList[], events: [] as CalendarEvent[], calendars: [] as PlannerCalendar[], projects: [] as Project[], tags: [] as Tag[], outbox: [] as OutboxEntry[] };
     let persistence = this.state.persistence;
     try {
       snapshot = await this.persistence.load();
@@ -198,7 +201,7 @@ export class LocalStore implements PlannerStore {
       this.writable = false;
       persistence = { status: "failed", reason: describe(error, "open") };
     }
-    this.state = { ready: true, ...snapshot, events: snapshot.events.map((e) => viewOf("event", e as unknown as AnyRecord) as unknown as CalendarEvent), tasks: snapshot.tasks.map((t) => viewOf("task", t as unknown as AnyRecord) as unknown as Task), projects: snapshot.projects.map((x) => viewOf("project", x as unknown as AnyRecord) as unknown as Project), persistence };
+    this.state = { ready: true, ...snapshot, events: snapshot.events.map((e) => viewOf("event", e as unknown as AnyRecord) as unknown as CalendarEvent), tasks: snapshot.tasks.map((t) => viewOf("task", t as unknown as AnyRecord) as unknown as Task), projects: snapshot.projects.map((x) => viewOf("project", x as unknown as AnyRecord) as unknown as Project), tags: snapshot.tags, persistence };
     if (!this.state.lists.some((l) => l.isInbox)) {
       const inbox: TaskList = { id: INBOX_ID, name: "Inbox", colour: "c1", isInbox: true };
       this.commit([{ type: "list", id: inbox.id, op: "create", record: inbox }]);
@@ -338,6 +341,7 @@ export class LocalStore implements PlannerStore {
       completedAt: null,
       deletedAt: null,
       checklist: input.checklist ?? [],
+      tags: [...new Set(input.tags ?? [])].sort(),
       projectId: input.projectId ?? null,
       sectionId: input.sectionId ?? null,
       repeat: input.repeat ? newSeries((input.due ?? stamp).slice(0, 10), input.repeat) : null,
@@ -403,6 +407,7 @@ export class LocalStore implements PlannerStore {
     const stamps = [
       ...this.state.tasks.flatMap((t) => [t.createdAt, t.updatedAt, t.completedAt, t.deletedAt]),
       ...this.state.events.flatMap((e) => [e.createdAt, e.updatedAt, e.deletedAt]),
+      ...this.state.tags.map((t) => t.deletedAt),
       ...this.state.outbox.flatMap((e) => [e.createdAt, e.updatedAt]),
     ]
       .filter((s): s is string => s !== null)
@@ -415,10 +420,53 @@ export class LocalStore implements PlannerStore {
     const patches: PatchInput[] = [
       ...this.state.tasks.filter(gone).map((t): PatchInput => ({ type: "task", id: t.id, op: "purge" })),
       ...this.state.events.filter(gone).map((e): PatchInput => ({ type: "event", id: e.id, op: "purge" })),
+      ...this.state.tags.filter(gone).map((t): PatchInput => ({ type: "tag", id: t.id, op: "purge" })),
     ];
     if (patches.length === 0) return 0;
     this.commit(patches);
     return patches.length;
+  }
+
+  // Tags ----------------------------------------------------------------------------------------
+
+  private tag(id: string): Tag {
+    const found = this.state.tags.find((t) => t.id === id);
+    if (!found) throw new Error(`No tag ${id}`);
+    return found;
+  }
+
+  addTag(name: string, colour: ListColour): Tag {
+    this.assertReady();
+    const tag: Tag = { id: this.newId(), name: name.trim(), colour, deletedAt: null };
+    this.commit([{ type: "tag", id: tag.id, op: "create", record: tag }]);
+    return tag;
+  }
+
+  updateTag(id: string, patch: TagPatch): void {
+    this.assertReady();
+    const current = this.tag(id);
+    const fields: Record<string, unknown> = { ...patch };
+    if (patch.name !== undefined) fields.name = patch.name.trim() || current.name;
+    this.commit([{ type: "tag", id, op: "update", fields }]);
+  }
+
+  deleteTag(id: string): void {
+    this.assertReady();
+    this.tag(id);
+    this.commit([{ type: "tag", id, op: "delete", fields: { deletedAt: this.now().toISOString() } }]);
+  }
+
+  restoreTag(id: string): void {
+    this.assertReady();
+    this.tag(id);
+    this.commit([{ type: "tag", id, op: "update", fields: { deletedAt: null } }]);
+  }
+
+  setTaskTag(taskId: string, tagId: string, on: boolean): void {
+    this.assertReady();
+    this.task(taskId);
+    // One field per tag, never a list: the tags of a task merge as a set.
+    this.change(taskId, "update", { [`${TAG_PREFIX}${tagId}`]: on });
   }
 
   // Lists ---------------------------------------------------------------------------------------

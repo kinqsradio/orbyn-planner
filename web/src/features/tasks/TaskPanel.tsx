@@ -12,9 +12,10 @@ import { inOrder, keyBetween } from "../../store/order";
 import { CannotMoveSeries, type Scope } from "../../store/eventScope";
 import type { Repeat } from "../../store/repeat";
 import { allowedScopes, editTaskRepeat, undoableTasks, type RepeatEdit } from "../../store/taskRepeat";
-import { PRIORITIES, type Task } from "../../store/types";
+import { LIST_COLOURS, PRIORITIES, type Task } from "../../store/types";
 import { ScopeDialog } from "../calendar/ScopeDialog";
 import { RepeatPicker } from "./RepeatPicker";
+import { shownTags, TagChip } from "./TagChips";
 import { TASK_REMINDERS } from "./reminder";
 import { needsAction } from "./selectors";
 import { useComplete } from "./useComplete";
@@ -23,7 +24,8 @@ const SAVE_DELAY_MS = 500;
 
 function Panel({ task }: { task: Task }) {
   const store = useStore();
-  const { lists, projects } = usePlanner();
+  const { lists, projects, tags } = usePlanner();
+  const [newTag, setNewTag] = useState("");
   const ui = useUi();
   const now = useNow();
   const complete = useComplete();
@@ -188,6 +190,40 @@ function Panel({ task }: { task: Task }) {
               <option key={p} value={p}>{p === "none" ? "None" : p[0]!.toUpperCase() + p.slice(1)}</option>
             ))}
           </select>
+        </b>
+      </div>
+      <div className="kv">
+        <span id="task-tags-label">Tags</span>
+        <b className="ctl tagrow" role="group" aria-labelledby="task-tags-label">
+          {shownTags(task, tags).map((t) => (
+            <TagChip key={t.id} tag={t} onRemove={() => store.setTaskTag(task.id, t.id, false)} />
+          ))}
+          {tags.some((t) => t.deletedAt === null && !task.tags.includes(t.id)) && (
+            <select className="inp" aria-label="Add a tag" value="" onChange={(e) => e.target.value && store.setTaskTag(task.id, e.target.value, true)}>
+              <option value="">Add a tag</option>
+              {tags.filter((t) => t.deletedAt === null && !task.tags.includes(t.id)).map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          )}
+          <input
+            className="inp"
+            aria-label="New tag"
+            placeholder="New tag"
+            value={newTag}
+            onChange={(e) => setNewTag(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter") return;
+              e.preventDefault();
+              const name = newTag.trim();
+              if (!name) return;
+              // An existing tag of that name is used, not made twice.
+              const same = tags.find((t) => t.deletedAt === null && t.name.toLowerCase() === name.toLowerCase());
+              const tag = same ?? store.addTag(name, LIST_COLOURS[tags.length % LIST_COLOURS.length]!);
+              store.setTaskTag(task.id, tag.id, true);
+              setNewTag("");
+            }}
+          />
         </b>
       </div>
       <div className="kv">

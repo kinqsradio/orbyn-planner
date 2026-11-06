@@ -1,5 +1,5 @@
 import { coalesce, refKey, type AnyRecord, type PatchBatch, type Ref } from "./outbox";
-import type { CalendarEvent, OutboxEntry, PlannerCalendar, Project, RecordType, Task, TaskList } from "./types";
+import type { CalendarEvent, OutboxEntry, PlannerCalendar, Project, RecordType, Tag, Task, TaskList } from "./types";
 
 export interface Snapshot {
   tasks: Task[];
@@ -7,6 +7,7 @@ export interface Snapshot {
   events: CalendarEvent[];
   calendars: PlannerCalendar[];
   projects: Project[];
+  tags: Tag[];
   outbox: OutboxEntry[];
 }
 
@@ -52,7 +53,7 @@ export interface Persistence {
   close?(): void;
 }
 
-const STORE_OF: Record<RecordType, "tasks" | "lists" | "events" | "calendars" | "projects"> = { task: "tasks", list: "lists", event: "events", calendar: "calendars", project: "projects" };
+const STORE_OF: Record<RecordType, "tasks" | "lists" | "events" | "calendars" | "projects" | "tags"> = { task: "tasks", list: "lists", event: "events", calendar: "calendars", project: "projects", tag: "tags" };
 const storeOf = (type: RecordType) => STORE_OF[type];
 
 /** Keeps everything in memory. Used where IndexedDB does not exist, and in tests. */
@@ -78,6 +79,7 @@ export class MemoryPersistence implements Persistence {
       events: all.filter(([k]) => k.startsWith("event:")).map(([, v]) => v as CalendarEvent),
       calendars: all.filter(([k]) => k.startsWith("calendar:")).map(([, v]) => v as PlannerCalendar),
       projects: all.filter(([k]) => k.startsWith("project:")).map(([, v]) => v as Project),
+      tags: all.filter(([k]) => k.startsWith("tag:")).map(([, v]) => v as Tag),
       outbox: [...this.outbox.values()].sort((a, b) => a.seq - b.seq),
     };
   }
@@ -139,10 +141,10 @@ export class MemoryPersistence implements Persistence {
 
 /** The planner kept on this device alone; each account has a database of its own (see `planners.ts`). */
 export const DEVICE_DB = "orbyn-planner";
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 type Rec = AnyRecord & Record<string, unknown>;
-const ALL_STORES = ["tasks", "lists", "events", "calendars", "projects", "outbox"];
+const ALL_STORES = ["tasks", "lists", "events", "calendars", "projects", "tags", "outbox"];
 
 /** One IndexedDB object store per record type, and an outbox keyed by an auto-incrementing number. */
 export class IdbPersistence implements Persistence {
@@ -169,7 +171,7 @@ export class IdbPersistence implements Persistence {
       const req = indexedDB.open(this.dbName, DB_VERSION);
       req.onupgradeneeded = (event) => {
         const db = req.result;
-        for (const name of ["tasks", "lists", "events", "calendars", "projects"]) {
+        for (const name of ["tasks", "lists", "events", "calendars", "projects", "tags"]) {
           if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: "id" });
         }
         // Version 1 keyed the outbox by a number made in memory, which two tabs would reuse.
@@ -201,12 +203,13 @@ export class IdbPersistence implements Persistence {
     const db = await this.open();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(ALL_STORES, "readonly");
-      const out: Snapshot = { tasks: [], lists: [], events: [], calendars: [], projects: [], outbox: [] };
+      const out: Snapshot = { tasks: [], lists: [], events: [], calendars: [], projects: [], tags: [], outbox: [] };
       tx.objectStore("tasks").getAll().onsuccess = (e) => (out.tasks = (e.target as IDBRequest<Task[]>).result);
       tx.objectStore("lists").getAll().onsuccess = (e) => (out.lists = (e.target as IDBRequest<TaskList[]>).result);
       tx.objectStore("events").getAll().onsuccess = (e) => (out.events = (e.target as IDBRequest<CalendarEvent[]>).result);
       tx.objectStore("calendars").getAll().onsuccess = (e) => (out.calendars = (e.target as IDBRequest<PlannerCalendar[]>).result);
       tx.objectStore("projects").getAll().onsuccess = (e) => (out.projects = (e.target as IDBRequest<Project[]>).result);
+      tx.objectStore("tags").getAll().onsuccess = (e) => (out.tags = (e.target as IDBRequest<Tag[]>).result);
       tx.objectStore("outbox").getAll().onsuccess = (e) => (out.outbox = (e.target as IDBRequest<OutboxEntry[]>).result.sort((a, b) => a.seq - b.seq));
       tx.oncomplete = () => resolve(out);
       tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("The read was aborted"));

@@ -29,6 +29,11 @@ export interface Task {
   /** Set when deleted; the task can be put back for 30 days. */
   deletedAt: string | null;
   checklist: ChecklistItem[];
+  /**
+   * The tags the task carries, by tag id (sorted). Stored as one field per tag (`tag:<id>` = true, false to remove), so the
+   * tags are a set: two devices adding different tags both keep theirs. An id with no tag record is unknown and hidden.
+   */
+  tags: string[];
   /** The project and section the task belongs to, if any. */
   projectId: string | null;
   sectionId: string | null;
@@ -44,6 +49,14 @@ export interface Task {
   updatedAt: string;
 }
 
+/** A label a task can carry. Lives in the account's one tags zone; deleting it hides it (and the tag fields stay on the tasks) so a restore brings it back. */
+export interface Tag {
+  id: string;
+  name: string;
+  colour: ListColour;
+  deletedAt: string | null;
+}
+
 export interface TaskList {
   id: string;
   name: string;
@@ -51,7 +64,7 @@ export interface TaskList {
   isInbox: boolean;
 }
 
-export type RecordType = "task" | "list" | "event" | "calendar" | "project";
+export type RecordType = "task" | "list" | "event" | "calendar" | "project" | "tag";
 export type OutboxOp = "create" | "update" | "delete";
 
 /**
@@ -159,6 +172,7 @@ export interface PlannerState {
   events: readonly CalendarEvent[];
   calendars: readonly PlannerCalendar[];
   projects: readonly Project[];
+  tags: readonly Tag[];
   outbox: readonly OutboxEntry[];
   persistence: PersistenceState;
 }
@@ -179,6 +193,7 @@ export interface NewTask {
   checklist?: ChecklistItem[];
   projectId?: string | null;
   sectionId?: string | null;
+  tags?: string[];
   /** A rule; the series starts on the due date (today when there is none). */
   repeat?: Repeat | null;
   reminder?: number | null;
@@ -223,6 +238,7 @@ export interface NewProject {
 }
 
 export type ProjectPatch = Partial<Pick<Project, "name" | "colour" | "goal" | "archived">>;
+export type TagPatch = Partial<Pick<Tag, "name" | "colour">>;
 export type ListPatch = Partial<Pick<TaskList, "name" | "colour">>;
 
 export const RESTORE_DAYS = 30;
@@ -252,6 +268,14 @@ export interface PlannerStore {
   restoreTask(id: string): void;
   /** Permanently removes tasks deleted more than 30 days ago. Returns how many. */
   purgeDeleted(): number;
+
+  addTag(name: string, colour: ListColour): Tag;
+  updateTag(id: string, patch: TagPatch): void;
+  /** Hides the tag everywhere; tasks keep their `tag:<id>` field, so restoring it brings it back. */
+  deleteTag(id: string): void;
+  restoreTag(id: string): void;
+  /** Adds or removes one tag on a task: one field, so it merges as a set. */
+  setTaskTag(taskId: string, tagId: string, on: boolean): void;
 
   addList(name: string, colour: ListColour): TaskList;
   updateList(id: string, patch: ListPatch): void;

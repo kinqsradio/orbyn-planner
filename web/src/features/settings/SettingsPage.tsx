@@ -6,10 +6,11 @@ import { CalendarForms, CalendarList } from "../calendar/CalendarList";
 import { AccountSettings } from "../auth/AccountSettings";
 import { NotificationsSettings } from "./NotificationsSettings";
 import { ExportSettings } from "../export/ExportSettings";
+import { TagsSettings } from "./TagsSettings";
 import { InstallHint } from "../../components/InstallHint";
 
 const LABELS: Record<ThemeChoice, string> = { system: "System", light: "Light", dark: "Dark", dim: "Dim" };
-const CATEGORIES = ["Account", "Planning", "Notifications", "Connected apps", "Calendars", "Privacy"] as const;
+const CATEGORIES = ["Account", "Planning", "Notifications", "Connected apps", "Calendars", "Tags", "Privacy"] as const;
 
 export function SettingsPage() {
   const [category, setCategory] = useState<(typeof CATEGORIES)[number]>("Planning");
@@ -104,6 +105,8 @@ export function SettingsPage() {
             </>
           ) : category === "Privacy" ? (
             <ExportSettings />
+          ) : category === "Tags" ? (
+            <TagsSettings />
           ) : (
             <p className="quiet">Nothing to set here yet.</p>
           )}
