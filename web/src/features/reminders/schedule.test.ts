@@ -181,3 +181,26 @@ describe("a reminder in whole days", () => {
     expect([at.getMonth(), at.getDate(), at.getHours()]).toEqual([9, 31, 9]);
   });
 });
+
+describe("a hand-over between tabs", () => {
+  it("does not repeat what the last leader showed, and reports what it shows", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(at(12, 5));
+    const t = task({ reminder: 0 }); // due 12:00, five minutes ago: inside the grace period
+    const key = `${t.id}|${at(12).getTime()}`;
+    const notify = vi.fn();
+    const heirs = new ReminderScheduler({ now: () => new Date(), quiet: () => NO_QUIET, notify, shown: [key] });
+    heirs.update([t]);
+    expect(notify).not.toHaveBeenCalled();
+    const onShown = vi.fn();
+    const fresh = new ReminderScheduler({ now: () => new Date(), quiet: () => NO_QUIET, notify, onShown });
+    fresh.update([t]);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(onShown).toHaveBeenCalledWith(key);
+    const other = new ReminderScheduler({ now: () => new Date(), quiet: () => NO_QUIET, notify });
+    other.markShown(key);
+    other.update([t]);
+    expect(notify).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+});

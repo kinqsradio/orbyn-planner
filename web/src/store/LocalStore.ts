@@ -313,7 +313,15 @@ export class LocalStore implements PlannerStore {
   }
 
   deleteTask(id: string): void {
-    this.change(id, "delete", { deletedAt: this.now().toISOString() });
+    const stamp = this.now().toISOString();
+    // One-off copies of single dates outlive their series: they keep their title and stand alone.
+    const copies = this.state.tasks.filter((t) => t.overrideOf?.id === id && t.deletedAt === null);
+    this.assertReady();
+    this.task(id);
+    this.commit([
+      { type: "task", id, op: "delete", fields: { deletedAt: stamp, updatedAt: stamp } },
+      ...copies.map((c): PatchInput => ({ type: "task", id: c.id, op: "update", fields: { overrideOf: null, updatedAt: stamp } })),
+    ]);
   }
 
   restoreTask(id: string): void {

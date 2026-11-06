@@ -245,3 +245,40 @@ describe("review fixes", () => {
     expect(task(store, t.id).due).toBe("2026-11-16");
   });
 });
+
+describe("one-off copies of a repeating task", () => {
+  it("This task on the last occurrence finishes the series and leaves one open copy", async () => {
+    const store = await setup();
+    const t = store.addTask({ title: "Pills", due: "2026-11-01", repeat: { ...repeatEvery("daily"), end: { type: "count", value: 2 } } });
+    store.setDone(t.id, true); // now due 11-02, the last
+    editTaskRepeat(store, task(store, t.id), { due: "2026-11-09" }, "this", "2026-11-07");
+    expect(task(store, t.id)).toMatchObject({ done: true });
+    const copies = store.getState().tasks.filter((x) => x.overrideOf?.id === t.id);
+    expect(copies).toHaveLength(1);
+    expect(copies[0]).toMatchObject({ due: "2026-11-09", done: false, overrideOf: { date: "2026-11-02" } });
+  });
+
+  it("copies follow an All move by the same days", async () => {
+    const store = await setup();
+    const t = store.addTask({ title: "Review", due: "2026-11-09", repeat: repeatEvery("weekly") });
+    editTaskRepeat(store, task(store, t.id), { due: "2026-11-11" }, "this", "2026-11-07");
+    editTaskRepeat(store, task(store, t.id), { due: "2026-11-23" }, "all", "2026-11-07");
+    const copy = store.getState().tasks.find((x) => x.overrideOf)!;
+    expect(copy).toMatchObject({ due: "2026-11-18", overrideOf: { id: t.id, date: "2026-11-16" } });
+  });
+
+  it("deleting the series unlinks its copies, which keep their title", async () => {
+    const store = await setup();
+    const t = store.addTask({ title: "Review", due: "2026-11-09", repeat: repeatEvery("weekly") });
+    editTaskRepeat(store, task(store, t.id), { due: "2026-11-11" }, "this", "2026-11-07");
+    store.deleteTask(t.id);
+    const copy = store.getState().tasks.find((x) => x.title === "Review" && x.id !== t.id)!;
+    expect(copy).toMatchObject({ overrideOf: null, deletedAt: null });
+  });
+
+  it("a project saved with a sections array still shows them", async () => {
+    const { viewOf } = await import("./records");
+    const p = viewOf("project", { id: "p", name: "Old", colour: "c1", goal: null, archived: false, sections: [{ id: "s1", name: "Kitchen", order: "a" }] } as never);
+    expect((p as { sections: unknown[] }).sections).toEqual([{ id: "s1", name: "Kitchen", order: "a" }]);
+  });
+});

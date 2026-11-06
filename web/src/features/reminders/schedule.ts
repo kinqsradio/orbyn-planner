@@ -60,6 +60,10 @@ export interface SchedulerOptions {
   quiet: () => QuietHours;
   /** Show one reminder. */
   notify: (reminder: Reminder) => void;
+  /** Keys already shown by an earlier leader, so a hand-over does not repeat them. */
+  shown?: Iterable<string>;
+  /** Called with the key of each reminder this scheduler shows or skips for quiet hours. */
+  onShown?: (key: string) => void;
 }
 
 /**
@@ -69,10 +73,20 @@ export interface SchedulerOptions {
  */
 export class ReminderScheduler {
   private timers = new Map<string, ReturnType<typeof setTimeout>>();
-  private shown = new Set<string>();
+  private shown: Set<string>;
   private tasks: readonly Task[] = [];
 
-  constructor(private readonly options: SchedulerOptions) {}
+  constructor(private readonly options: SchedulerOptions) {
+    this.shown = new Set(options.shown ?? []);
+  }
+
+  /** A reminder shown elsewhere (by the tab that led before): never show it here. */
+  markShown(key: string): void {
+    this.shown.add(key);
+    const timer = this.timers.get(key);
+    if (timer !== undefined) clearTimeout(timer);
+    this.timers.delete(key);
+  }
 
   /** Rebuilds the timers for a new set of tasks. A moved or removed reminder loses its timer. */
   update(tasks: readonly Task[]): void {
@@ -105,6 +119,7 @@ export class ReminderScheduler {
   private show(r: Reminder): void {
     if (this.shown.has(r.key)) return;
     this.shown.add(r.key);
+    this.options.onShown?.(r.key);
     if (inQuietHours(this.options.now(), this.options.quiet())) return;
     this.options.notify(r);
   }
