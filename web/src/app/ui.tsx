@@ -14,6 +14,9 @@ interface Ui {
   closeTask: () => void;
   listId: string | null;
   selectList: (id: string) => void;
+  newTaskOpen: boolean;
+  openNewTask: () => void;
+  closeNewTask: () => void;
   searchOpen: boolean;
   openSearch: () => void;
   closeSearch: () => void;
@@ -29,6 +32,7 @@ export function UiProvider({ children }: { children: ReactNode }) {
   const [taskId, setTaskId] = useState<string | null>(null);
   const [listId, setListId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
 
   const showToast = useCallback((message: string, undo?: () => void) => {
@@ -49,6 +53,9 @@ export function UiProvider({ children }: { children: ReactNode }) {
       closeTask: () => setTaskId(null),
       listId,
       selectList: setListId,
+      newTaskOpen,
+      openNewTask: () => setNewTaskOpen(true),
+      closeNewTask: () => setNewTaskOpen(false),
       searchOpen,
       openSearch: () => setSearchOpen(true),
       closeSearch: () => setSearchOpen(false),
@@ -56,7 +63,7 @@ export function UiProvider({ children }: { children: ReactNode }) {
       showToast,
       dismissToast,
     }),
-    [taskId, listId, searchOpen, toast, showToast, dismissToast],
+    [taskId, listId, newTaskOpen, searchOpen, toast, showToast, dismissToast],
   );
   return <UiContext.Provider value={value}>{children}</UiContext.Provider>;
 }

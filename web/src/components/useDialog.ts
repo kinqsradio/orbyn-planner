@@ -5,9 +5,9 @@ const FOCUSABLE =
 
 /**
  * Makes `ref` behave as a dialog: focus moves in (to `[data-autofocus]` if present), Tab
- * stays inside, Escape closes, and focus returns to where it was when the dialog goes away.
+ * stays inside (unless `trap` is false), Escape closes, and focus returns to where it was when the dialog goes away.
  */
-export function useDialog(ref: RefObject<HTMLElement | null>, onClose: () => void): void {
+export function useDialog(ref: RefObject<HTMLElement | null>, onClose: () => void, trap = true): void {
   const close = useRef(onClose);
   useEffect(() => {
     close.current = onClose;
@@ -24,7 +24,7 @@ export function useDialog(ref: RefObject<HTMLElement | null>, onClose: () => voi
       if (event.key === "Escape") {
         event.stopPropagation();
         close.current();
-      } else if (event.key === "Tab") {
+      } else if (event.key === "Tab" && trap) {
         const items = focusables();
         const first = items[0];
         const last = items[items.length - 1];
@@ -44,5 +44,5 @@ export function useDialog(ref: RefObject<HTMLElement | null>, onClose: () => voi
       el.removeEventListener("keydown", onKey);
       if (opener?.isConnected) opener.focus();
     };
-  }, [ref]);
+  }, [ref, trap]);
 }

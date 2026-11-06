@@ -37,7 +37,7 @@ describe("Tasks page", () => {
     await add(field, "dentist friday 3pm !high");
     const row = (await screen.findByRole("button", { name: "dentist" })).closest("li")!;
     expect(within(row).getByText("Fri 15:00")).toBeInTheDocument();
-    expect(within(row).getByText("high")).toBeInTheDocument();
+    expect(within(row).getByText("High")).toBeInTheDocument();
     expect(field).toHaveValue("");
   });
 
@@ -58,7 +58,7 @@ describe("Tasks page", () => {
     const { field, store } = await openTasks();
     await add(field, "water plants");
     await userEvent.click(await screen.findByRole("button", { name: "water plants" }));
-    const panel = screen.getByRole("dialog", { name: "Task" });
+    const panel = screen.getByRole("complementary", { name: "Task" });
     await userEvent.click(within(panel).getByRole("button", { name: "Delete" }));
     expect(screen.queryByRole("button", { name: "water plants" })).not.toBeInTheDocument();
     expect(store.getState().tasks[0]!.deletedAt).not.toBeNull();
@@ -98,7 +98,9 @@ describe("Tasks page", () => {
     await add(field, "card");
     await userEvent.click(screen.getByRole("radio", { name: "Board" }));
     expect(within(screen.getByRole("region", { name: "To do" })).getByRole("button", { name: "card" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("radio", { name: "List" }));
     await userEvent.click(screen.getByRole("checkbox", { name: "Complete card" }));
+    await userEvent.click(screen.getByRole("radio", { name: "Board" }));
     expect(within(screen.getByRole("region", { name: "Done" })).getByRole("button", { name: "card" })).toBeInTheDocument();
   });
 });

@@ -1,8 +1,8 @@
 export type Priority = "none" | "low" | "medium" | "high";
 export const PRIORITIES: readonly Priority[] = ["none", "low", "medium", "high"];
 
-/** Eight fixed content colours; a person's list colour is content, not interface. */
-export const LIST_COLOURS = ["c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8"] as const;
+/** The four content colours of the designs; a person's list colour is content, not interface. */
+export const LIST_COLOURS = ["c1", "c2", "c3", "c4"] as const;
 export type ListColour = (typeof LIST_COLOURS)[number];
 
 export interface ChecklistItem {

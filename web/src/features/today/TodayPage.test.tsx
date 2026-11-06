@@ -29,7 +29,7 @@ describe("Today page", () => {
   it("keeps the empty state when nothing is due", async () => {
     await openToday((s) => s.addTask({ title: "someday" }));
     expect(screen.getByRole("heading", { name: "Nothing planned yet" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Done this week" })).toBeInTheDocument();
+    expect(screen.getByText("Done this week")).toBeInTheDocument();
   });
 
   it("groups overdue and today in time order, with the week and the weekly stat", async () => {
@@ -46,17 +46,18 @@ describe("Today page", () => {
       s.setDone(finished.id, true);
     });
 
-    const overdue = screen.getByRole("region", { name: "Overdue" });
-    expect(within(overdue).getAllByRole("button").map((b) => b.textContent)).toEqual(["late yesterday", "earlier today"]);
-    expect(screen.getByRole("heading", { name: "Overdue" })).toHaveClass("due-act");
+    const rows = Array.from(document.querySelectorAll(".row .what")).map((el) => el.textContent);
+    expect(rows).toEqual(["all day", "noon", "evening", "late yesterday", "earlier today"]);
+    expect(screen.getByText("Overdue", { selector: "b" })).toHaveClass("amber");
+    const times = Array.from(document.querySelectorAll(".row .time")).map((el) => el.textContent);
+    expect(times).toEqual(["Any", "12:00", "18:30", "Fri", "08:00"]);
 
-    const today = screen.getByRole("region", { name: "Today" });
-    expect(within(today).getAllByRole("button").map((b) => b.textContent)).toEqual(["all day", "noon", "evening"]);
-
-    const glance = screen.getByRole("region", { name: "The week at a glance" });
+    const glance = screen.getByRole("list", { name: "The week at a glance" });
     const days = within(glance).getAllByRole("listitem").map((li) => li.textContent);
-    expect(days).toEqual(["Sun 80", "Mon 92", "Tue 100", "Wed 110", "Thu 120"]);
-    expect(screen.getByRole("region", { name: "Done this week" })).toHaveTextContent("1");
+    expect(days).toEqual(["Sun 8Nothing planned", "Mon 92 tasks", "Tue 10Nothing planned", "Wed 11Nothing planned", "Thu 12Nothing planned"]);
+    const stats = Array.from(document.querySelectorAll(".stat")).map((el) => el.textContent);
+    expect(stats).toEqual(["Today3", "Overdue2", "This week6", "Done this week1"]);
+    expect(screen.getByText("1 of 6")).toBeInTheDocument();
   });
 });
 
@@ -72,7 +73,7 @@ describe("groupToday", () => {
     const x = store.addTask({ title: "x" });
     store.setDone(x.id, true);
     const groups = groupToday(store.getState().tasks, NOW);
-    expect(groups.week.map((w) => w.count)).toEqual([1, 2, 0, 0, 1]);
+    expect(groups.week.map((w) => w.tasks.length)).toEqual([1, 2, 0, 0, 1]);
     expect(groups.week[0]!.date.getDate()).toBe(8);
     expect(groups.doneThisWeek).toBe(1);
     // Monday of the week is 2 November: a task done on 1 November does not count.

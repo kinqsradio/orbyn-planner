@@ -35,15 +35,15 @@ describe("Lists page", () => {
     });
 
     const nav = screen.getByRole("navigation", { name: "Your lists" });
-    const items = within(nav).getAllByRole("button", { name: /Inbox|Home/ });
-    expect(items[0]).toHaveTextContent("Inbox");
-    expect(within(items[0]!).getByLabelText("2 open")).toBeInTheDocument();
+    const rows = () => within(nav).getAllByRole("button").map((b) => b.textContent);
+    expect(rows()).toEqual(["Inbox2", "New list"]);
+    expect(within(nav).getByLabelText("2 open")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "New list" }));
     await userEvent.type(screen.getByRole("textbox", { name: "New list name" }), "Home{Enter}");
     const home = store.getState().lists.find((l) => l.name === "Home")!;
     expect(home.isInbox).toBe(false);
-    expect(within(nav).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["Inbox2", "Home0"]);
+    expect(rows()).toEqual(["Inbox2", "Home0", "New list"]);
 
     await userEvent.click(screen.getByRole("button", { name: "Rename" }));
     const name = screen.getByRole("textbox", { name: "List name" });
@@ -51,10 +51,10 @@ describe("Lists page", () => {
     await userEvent.type(name, "House{Enter}");
     expect(store.getState().lists.find((l) => l.id === home.id)!.name).toBe("House");
 
-    await userEvent.click(screen.getByRole("radio", { name: "Violet" }));
-    expect(store.getState().lists.find((l) => l.id === home.id)!.colour).toBe("c6");
+    await userEvent.click(screen.getByRole("radio", { name: "Purple" }));
+    expect(store.getState().lists.find((l) => l.id === home.id)!.colour).toBe("c3");
 
-    await userEvent.click(within(nav).getByRole("button", { name: /Inbox/ }));
+    await userEvent.click(within(nav).getByRole("button", { name: /^Inbox/ }));
     expect(screen.getByRole("button", { name: "one" })).toBeInTheDocument();
     expect(inbox.isInbox).toBe(true);
     expect(screen.queryByRole("button", { name: "Rename" })).not.toBeInTheDocument();

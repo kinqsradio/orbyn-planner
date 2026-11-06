@@ -1,13 +1,15 @@
 import { useMemo, useState } from "react";
 import { useNow } from "../../app/clock";
+import { Link } from "../../app/router";
 import { useUi } from "../../app/ui";
 import { EmptyState, PageHeader } from "../../components/EmptyState";
+import { Icon } from "../../components/Icon";
 import { formatDue } from "../../lib/dates";
 import { usePlanner, useStore } from "../../store/context";
 import { parseQuickAdd } from "./quickAdd";
-import { DUE_FILTERS, activeTasks, matchesDue, sortByDue, type DueFilter } from "./selectors";
-import { TaskRow } from "./TaskRow";
-import { Link } from "../../app/router";
+import { DUE_FILTERS, activeTasks, groupTasks, isOpen, matchesDue, sortByDue, type DueFilter } from "./selectors";
+import { Swatch, TaskRow, useTaskActions } from "./TaskRow";
+import type { Task } from "../../store/types";
 
 type View = "list" | "board";
 
@@ -27,68 +29,79 @@ export function QuickAddField() {
 
   return (
     <form
-      className="quick-add"
+      className="addbar"
       onSubmit={(event) => {
         event.preventDefault();
         if (!text.trim()) return;
-        const task = store.addTask({
-          title: parsed.title,
-          due: parsed.due,
-          listId: parsed.listId ?? undefined,
-          priority: parsed.priority,
-        });
+        const task = store.addTask({ title: parsed.title, due: parsed.due, listId: parsed.listId ?? undefined, priority: parsed.priority });
         ui.showToast(`Added “${task.title}”`);
         setText("");
       }}
     >
       <input
-        className="text-input"
+        className="field"
         aria-label="Add a task"
-        placeholder="Add a task, e.g. dentist friday 3pm #errands !high"
+        placeholder="Add a task: Call Sam tomorrow 3pm #work !high"
         value={text}
         disabled={!ready}
         onChange={(e) => setText(e.target.value)}
       />
-      <p className="quick-add-hint" aria-live="polite">
-        {text.trim() && bits.length > 0 ? bits.join(" · ") : ""}
-      </p>
+      <p className="hint" aria-live="polite">{text.trim() && bits.length > 0 ? bits.join(" · ") : ""}</p>
     </form>
+  );
+}
+
+function BoardCard({ task }: { task: Task }) {
+  const { lists } = usePlanner();
+  const { open } = useTaskActions(task);
+  const now = useNow();
+  const list = lists.find((l) => l.id === task.listId);
+  return (
+    <li className="tcard" data-done={task.done}>
+      <button type="button" className="tt link-btn" onClick={open}>{task.title}</button>
+      <span className="m">
+        {list && <Swatch colour={list.colour} />}
+        {[list?.name, task.due && formatDue(task.due, now)].filter(Boolean).join(" · ")}
+      </span>
+    </li>
   );
 }
 
 export function TasksPage() {
   const { tasks, lists } = usePlanner();
+  const ui = useUi();
   const now = useNow();
   const [view, setView] = useState<View>("list");
   const [due, setDue] = useState<DueFilter>("any");
   const [listId, setListId] = useState("");
 
   const shown = useMemo(
-    () =>
-      sortByDue(
-        activeTasks(tasks, now).filter(
-          (t) => matchesDue(t, due, now) && (listId === "" || t.listId === listId),
-        ),
-      ),
+    () => activeTasks(tasks, now).filter((t) => matchesDue(t, due, now) && (listId === "" || t.listId === listId)),
     [tasks, now, due, listId],
   );
+  const groups = useMemo(() => groupTasks(shown, now), [shown, now]);
+  const openCount = tasks.filter(isOpen).length;
+  const anyTask = tasks.some((t) => t.deletedAt === null);
 
   return (
     <>
-      <PageHeader title="Tasks">
-        <div className="header-actions">
-          <Link to="/completed" className="link-quiet">Completed and deleted</Link>
-          <div role="radiogroup" aria-label="View" className="segmented">
-            {(["list", "board"] as const).map((v) => (
-              <button key={v} type="button" role="radio" aria-checked={view === v} className="segment" onClick={() => setView(v)}>
-                {v === "list" ? "List" : "Board"}
-              </button>
-            ))}
-          </div>
-        </div>
+      <PageHeader title="Tasks" sub={view === "board" ? "Board" : `${openCount} open`}>
+        <Link to="/completed" className="ghost">Completed and deleted</Link>
+        <button type="button" className="btn" onClick={ui.openNewTask}>
+          <Icon name="plus" small />
+          Add a task
+        </button>
       </PageHeader>
 
       <div className="filters">
+        <div role="radiogroup" aria-label="View" className="pills">
+          {(["list", "board"] as const).map((v) => (
+            <button key={v} type="button" role="radio" aria-checked={view === v} className="pill" onClick={() => setView(v)}>
+              {v === "list" ? "List" : "Board"}
+            </button>
+          ))}
+        </div>
+        <span style={{ width: 12 }} />
         <div role="radiogroup" aria-label="Due date" className="pills">
           {DUE_FILTERS.map((f) => (
             <button key={f.id} type="button" role="radio" aria-checked={due === f.id} className="pill" onClick={() => setDue(f.id)}>
@@ -96,42 +109,57 @@ export function TasksPage() {
             </button>
           ))}
         </div>
-        <label className="select-pill">
+        <label className="pill select-pill">
           <span className="visually-hidden">List</span>
           <select value={listId} onChange={(e) => setListId(e.target.value)}>
-            <option value="">All lists</option>
+            <option value="">Any list</option>
             {lists.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
+              <option key={l.id} value={l.id}>{l.name}</option>
             ))}
           </select>
         </label>
+        <button type="button" className="pill" style={{ marginLeft: "auto" }} onClick={ui.openSearch}>
+          <Icon name="search" small />
+          Search tasks
+        </button>
       </div>
 
       {shown.length === 0 ? (
         <EmptyState
-          title={tasks.some((t) => t.deletedAt === null) ? "No tasks match" : "No tasks yet"}
-          body={tasks.some((t) => t.deletedAt === null) ? "Try another filter." : "Add one below."}
+          title={anyTask ? "No tasks match" : "No tasks yet"}
+          body={anyTask ? "Try another filter." : "Add one below, or use Add a task."}
         />
       ) : view === "list" ? (
-        <ul className="task-list">
-          {shown.map((t) => (
-            <TaskRow key={t.id} task={t} />
+        <div className="tbl-wrap">
+          <ul className="tbl">
+            <li className="tr h" aria-hidden="true" style={{ gridTemplateColumns: "22px minmax(0,1fr) 120px 110px 70px" }}>
+              <span /><span>Task</span><span>List</span><span>Due</span><span>Priority</span>
+            </li>
+          </ul>
+          {groups.map((g) => (
+            <section key={g.key} aria-label={g.label}>
+              <div className="bh" style={{ padding: "8px 4px 4px" }}>
+                <b className={g.amber ? "amber" : undefined}>{g.label}</b>
+                <span>{g.tasks.length}</span>
+              </div>
+              <ul className="tbl">
+                {g.tasks.map((t) => (
+                  <TaskRow key={t.id} task={t} />
+                ))}
+              </ul>
+            </section>
           ))}
-        </ul>
+        </div>
       ) : (
         <div className="board">
           {([["To do", false], ["Done", true]] as const).map(([label, done]) => {
-            const lane = shown.filter((t) => t.done === done);
+            const lane = sortByDue(shown.filter((t) => t.done === done));
             return (
               <section key={label} className="lane" aria-label={label}>
-                <h2 className="section-title">
-                  {label} <span className="meta-text">{lane.length}</span>
-                </h2>
-                <ul className="task-list">
+                <h2 className="lane-h">{label}<span>{lane.length}</span></h2>
+                <ul className="cards">
                   {lane.map((t) => (
-                    <TaskRow key={t.id} task={t} />
+                    <BoardCard key={t.id} task={t} />
                   ))}
                 </ul>
               </section>
