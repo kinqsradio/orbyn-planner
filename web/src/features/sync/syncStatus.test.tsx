@@ -12,7 +12,7 @@ import { OnlyDeviceNote } from "../auth/AccountSettings";
 import { SyncSettings } from "../settings/SyncSettings";
 import { useSyncStatus } from "./SyncLine";
 
-const base: SyncState = { phase: "idle", devices: 2, lastSyncedAt: "2026-11-07T10:00:00Z", quarantined: 0, waitingForKeys: [], stranded: [], needsApproval: false, keysPending: [], dropped: [], failed: [], skipped: [], error: null, leader: true, live: true };
+const base: SyncState = { phase: "idle", devices: 2, lastSyncedAt: "2026-11-07T10:00:00Z", quarantined: 0, waitingForKeys: [], stranded: [], needsApproval: false, keysPending: [], dropped: [], trashedEdits: [], failed: [], skipped: [], error: null, leader: true, live: true };
 
 describe("the sync line follows real sync when it runs", () => {
   const status = (sync: SyncState | null, pending = 0) => renderHook(() => useSyncStatus(pending, sync)).result.current.status;
@@ -59,6 +59,19 @@ describe("Settings shows sync", () => {
 
 const plannerStore = new LocalStore({ persistence: new MemoryPersistence(), broadcast: false });
 const WithStore = ({ children }: { children: ReactNode }) => <StoreProvider store={plannerStore}>{children}</StoreProvider>;
+
+describe("a record deleted elsewhere while it had unsent changes", () => {
+  it("says so in Settings, with the title, and where the changes are kept", () => {
+    render(
+      <WithStore>
+        <SyncProviderForTests state={{ ...base, trashedEdits: ["Buy milk"] }}>
+          <SyncSettings />
+        </SyncProviderForTests>
+      </WithStore>,
+    );
+    expect(screen.getByText("“Buy milk” was deleted on another device. Your unsent changes are in Recently deleted for 30 days.")).toBeInTheDocument();
+  });
+});
 
 describe("a zone no device can open", () => {
   const stranded = { ...base, devices: 1, waitingForKeys: ["list:trip"], stranded: ["list:trip"] };

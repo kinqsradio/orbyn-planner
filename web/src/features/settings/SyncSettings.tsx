@@ -45,6 +45,11 @@ export function SyncSettings() {
             {plural(sync.dropped.length, "list or calendar was", "lists or calendars were")} deleted on another device, so the changes you hadn’t sent for {sync.dropped.length === 1 ? "it" : "them"} were dropped.
           </p>
         )}
+        {sync.trashedEdits.map((title, i) => (
+          <p key={`${title}-${i}`} className="t3 small" role="note">
+            “{title}” was deleted on another device. Your unsent changes are in Recently deleted for 30 days.
+          </p>
+        ))}
         {sync.failed.length > 0 && (
           <p className="t3 small" role="note">
             {plural(sync.failed.length, "change", "changes")} can’t be sent because {sync.failed.length === 1 ? "it is" : "they are"} too large. Editing {sync.failed.length === 1 ? "it" : "them"} again tries again.

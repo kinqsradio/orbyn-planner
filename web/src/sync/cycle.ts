@@ -53,6 +53,8 @@ export interface CycleReport {
   quarantined: number;
   /** Lists or calendars deleted on another device while this one had changes for them: those changes were dropped. */
   dropped: { zone: string; records: number }[];
+  /** Titles of records another device deleted while this one had unsent changes for them: the changes stay in the 30-day trash. */
+  trashedEdits: string[];
   /** Changes that can't be sent (too large), left out of uploads. */
   failed: { type: RecordType; id: string; reason: string }[];
   /** Zones skipped for a while after the server refused an upload. */
@@ -89,7 +91,7 @@ export async function runCycle(
   const { api, keys: keyStore } = services;
   const now = () => services.now();
   const state: SyncState = (await keyStore.loadSyncState()) ?? emptySyncState();
-  const report: CycleReport = { uploaded: 0, received: 0, devices: 0, waitingForKeys: [], stranded: [], needsApproval: false, keysPending: [], quarantined: 0, dropped: [], failed: [], skipped: [] };
+  const report: CycleReport = { uploaded: 0, received: 0, devices: 0, waitingForKeys: [], stranded: [], needsApproval: false, keysPending: [], quarantined: 0, dropped: [], trashedEdits: [], failed: [], skipped: [] };
 
   const alive = () => {
     if (signal.aborted) throw new Aborted();
@@ -132,8 +134,14 @@ export async function runCycle(
     return undefined;
   }
 
-  /** Records a refetch dropped that have unacknowledged local changes: staged again, whole, after the fetch. */
-  const restage = new Set<string>();
+  /** Records removed by someone else's delete whose unsent outbox entries must go with them. */
+  const dropped: { type: RecordType; id: string }[] = [];
+
+  /** What the person calls a local record, for a notice. */
+  function titleOf(type: RecordType, id: string): string {
+    const found = (store.getState()[STORE_KEY[type]] as readonly { id: string; title?: string; name?: string }[]).find((r) => r.id === id);
+    return found?.title ?? found?.name ?? "An item";
+  }
 
   function collect(e: Engine, zone: string, applied: Applied, options: { retried?: boolean; types?: Map<string, string> } = {}): RemoteChange[] {
     const out: RemoteChange[] = [];
@@ -168,17 +176,17 @@ export async function runCycle(
       }
       // A create that was never acknowledged exists nowhere else: it is not a remote delete's to take, it is staged and sent.
       if (outbox.get(refKey({ type, id }))?.op === "create") continue;
-      // A refetch that took a record for deleted and purged (the full listing no longer has it) puts it in the trash, edits
-      // included. This device's own unacknowledged edits are not for the trash: it is taken back out, and the record is made
-      // whole again from the store and sent (a hard delete of it is what the person asked for, and stands).
+      // Delete wins over edits, everywhere: a record that was on the server and is now gone (another device deleted it, or a
+      // refetch found it purged) stays in the engine's 30-day trash with this device's unsent edits, and its outbox entry is
+      // dropped with the record, not uploaded. The person is told. (An unsent create is different: the server never had it,
+      // so it is skipped above and goes up.)
       const waiting = outbox.get(refKey({ type, id }));
       if (waiting && applied.trashed.includes(id) && !(waiting.op === "delete" && Object.keys(waiting.changedFields).length === 0)) {
-        const trashed = parse<Record<string, { deleted_by?: string }>>(e.sync.trash(zone))[id];
-        if (trashed?.deleted_by === "purge") {
-          e.sync.takeFromTrash(zone, id);
-          restage.add(refKey({ type, id }));
-          continue;
-        }
+        report.trashedEdits.push(titleOf(type, id));
+        // Its outbox entry goes in the same step as the record: left, the next pass would stage its partial fields and
+        // recreate a fragment of the deleted record. (An entry whose upload landed and was answered is a create here too: the
+        // record was on the server, so it is deleted like any other. A hard delete is the person's own and is left alone.)
+        dropped.push({ type, id });
       }
       // A record that moved to another list is deleted from the old zone and made in the new one: the delete mustn't win.
       if ((state.zoneOf[refKey({ type, id })] ?? zone) === zone) out.push({ type, id, fields: null });
@@ -200,6 +208,18 @@ export async function runCycle(
     alive();
     report.received += changes.length;
     await store.applyRemote(changes);
+    if (dropped.length > 0) {
+      const gone = dropped.splice(0);
+      const entries = store
+        .getState()
+        .outbox.filter((o) => gone.some((g) => g.type === o.type && g.id === o.id) && !(o.op === "delete" && Object.keys(o.changedFields).length === 0))
+        .map((o) => ({ type: o.type, id: o.id, idempotencyKey: o.idempotencyKey }));
+      await store.acknowledge(entries);
+      for (const g of gone) {
+        delete state.staged[refKey(g)];
+        delete state.stagedZone[refKey(g)];
+      }
+    }
   }
 
   // 0. Stage the outbox ------------------------------------------------------------------------------------
@@ -219,7 +239,7 @@ export async function runCycle(
     return Object.fromEntries(Object.keys(entry.changedFields).map((name) => [name, entry.fieldTimes?.[name] ?? entry.updatedAt]));
   }
 
-  function stage(e: Engine, entry: OutboxEntry, whole = false): void {
+  function stage(e: Engine, entry: OutboxEntry): void {
     const key = refKey(entry);
     const here = store.getState()[STORE_KEY[entry.type]].find((r) => r.id === entry.id) as { id: string; listId?: string; calendarId?: string } | undefined;
     const previous = state.zoneOf[key];
@@ -237,13 +257,12 @@ export async function runCycle(
     } else {
       let fields = entry.changedFields;
       const times = fieldTimesOf(entry);
-      if ((previous && previous !== zone) || (whole && here)) {
-        // A task moved to another list: it is deleted from the old zone and made whole in the new one. A record the engine
-        // dropped (a refetch took it for deleted and purged) is made whole again too: the edits and the rest of the record go up.
-        if (previous && previous !== zone) e.sync.delete(previous, entry.id);
-        const all = storedOf(entry.type, here as never) as unknown as Record<string, unknown>;
-        for (const name of Object.keys(all)) if (!(name in times)) times[name] = entry.createdAt;
-        fields = { ...all, ...fields };
+      if (previous && previous !== zone) {
+        // A task moved to another list: it is deleted from the old zone and made whole in the new one.
+        e.sync.delete(previous, entry.id);
+        const whole = storedOf(entry.type, here as never) as unknown as Record<string, unknown>;
+        for (const name of Object.keys(whole)) if (!(name in times)) times[name] = entry.createdAt;
+        fields = { ...whole, ...fields };
       }
       // Each field is staged with the time it was edited: fields edited together share a stamp, and an older
       // edit never takes the time of a later edit of another field.
@@ -344,18 +363,6 @@ export async function runCycle(
       await save();
       if (!body.more) break;
     }
-  }
-
-  if (restage.size > 0) {
-    const again = store.getState().outbox.filter((o) => restage.has(refKey(o)));
-    for (const o of again) {
-      delete state.staged[refKey(o)];
-      delete state.stagedZone[refKey(o)];
-    }
-    await withEngine((e) => {
-      for (const o of again) stage(e, o, true);
-    });
-    await save();
   }
 
   // 4. The keys this device owes the others ----------------------------------------------------------------

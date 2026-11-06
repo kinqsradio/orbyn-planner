@@ -198,6 +198,7 @@ describe("an upload refused for an expired token", () => {
     r.a.store.addTask({ title: "Seed" });
     await sync(r, r.a);
     await sync(r, r.b);
+    await sync(r, r.a); // A now holds a change token for the zone
     r.a.store.addTask({ title: "Edited once the token expired" });
     const real = r.engine.fetch;
     let refused = 0;
@@ -207,8 +208,15 @@ describe("an upload refused for an expired token", () => {
       }
       return real(url, init);
     }) as typeof fetch;
-    await sync(r, r.a);
-    await sync(r, r.a);
+    const asked: string[] = [];
+    const wrapped = r.engine.fetch;
+    r.engine.fetch = (async (url: string, init?: RequestInit) => {
+      if ((init?.method ?? "GET") === "GET" && /\/v1\/zones\/list%3Ainbox\/changes/.test(String(url))) asked.push(String(url));
+      return wrapped(url, init);
+    }) as typeof fetch;
+    await sync(r, r.a); // the upload is refused: the zone is started over
+    await sync(r, r.a); // fetched again from the start (no since), then the edit goes up
+    expect(asked.some((u) => !u.includes("since="))).toBe(true);
     await sync(r, r.b);
     expect(titles(r.b)).toEqual(["Edited once the token expired", "Seed"]);
     expect(r.a.store.getState().outbox).toEqual([]);
@@ -241,7 +249,7 @@ describe("a refetch after an expired token doesn't trash this device's own unsen
     expect(r.a.store.getState().outbox).toEqual([]);
   });
 
-  it("an unsent edit of a record the full listing no longer has is taken back out of the trash, made whole again and sent", async () => {
+  it("a record that was on the server and is now gone keeps its unsent edit in the 30-day trash: delete wins, nothing is re-uploaded, the person is told", async () => {
     const r = await createSyncRig({ third: true });
     const task = r.a.store.addTask({ title: "Held", notes: "original notes" });
     await sync(r, r.a);
@@ -265,14 +273,24 @@ describe("a refetch after an expired token doesn't trash this device's own unsen
       }
       return real(url, init);
     }) as typeof fetch;
+    // The zone's upload is refused this pass, so the outbox can't be cleared as "sent": the entry has to go with the record.
+    r.network.refuseUploads.set("list:inbox", { status: 403, code: "forbidden" });
+    const report = await sync(r, r.a);
+    expect(report.trashedEdits).toEqual(["Held, edited offline"]); // "‘<title>’ was deleted on another device…"
+    expect(titles(r.a)).not.toContain("Held, edited offline"); // gone from the screen
+    expect(await trashOf(r.a, "list:inbox")).toContain(task.id); // kept for 30 days, edits included
+    expect(r.a.store.getState().outbox.some((o) => o.id === task.id)).toBe(false); // dropped in the same step, not uploaded
+    expect((await r.a.keys.loadSyncState())?.staged[`task:${task.id}`]).toBeUndefined();
+    r.network.refuseUploads.clear();
+    r.clock.now += 3_600_000; // past the backoff
     await sync(r, r.a);
-    await sync(r, r.a);
-    expect(titles(r.a)).toContain("Held, edited offline"); // still on screen
-    expect(await trashOf(r.a, "list:inbox")).not.toContain(task.id);
-    expect(r.a.store.getState().outbox).toEqual([]);
-    await sync(r, r.c); // a device that never held the record sees exactly what was sent: the whole record
-    const onC = r.c.store.getState().tasks.find((t) => t.id === task.id);
-    expect({ title: onC?.title, notes: onC?.notes }).toEqual({ title: "Held, edited offline", notes: "original notes" });
+    await sync(r, r.b);
+    await sync(r, r.c); // a device that never held the record
+    // The record is not re-uploaded, so a device that never held it never sees it (B held it from before; the server's purge
+    // would expire B's token in practice, and B would drop it the same way).
+    for (const d of [r.a, r.c]) expect(d.store.getState().tasks.some((t) => t.id === task.id)).toBe(false);
+    expect(zone.records.has(task.id)).toBe(false); // and nothing, not even a fragment of it, was put back on the server
+    expect(await trashOf(r.a, "list:inbox")).toContain(task.id);
   });
 });
 
