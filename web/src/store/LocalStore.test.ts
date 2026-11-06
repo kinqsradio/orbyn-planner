@@ -49,16 +49,16 @@ describe("LocalStore", () => {
   it("records every write in the outbox", async () => {
     const store = setup().make();
     await store.ready;
-    expect(store.pendingChanges()).toBe(1); // the Inbox
+    expect(store.pendingChanges()).toBe(2); // the Inbox and the first calendar
     const task = store.addTask({ title: "a" });
     store.updateTask(task.id, { title: "b" });
     store.deleteTask(task.id);
     const list = store.addList("Errands", "c3");
     store.updateList(list.id, { name: "Chores" });
     const entries = store.getState().outbox.map((e) => `${e.type}:${e.op}`);
-    expect(entries).toEqual(["list:create", "task:create", "task:update", "task:delete", "list:create", "list:update"]);
-    expect(store.pendingChanges()).toBe(6);
-    expect(store.getState().outbox.map((e) => e.seq)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(entries).toEqual(["list:create", "calendar:create", "task:create", "task:update", "task:delete", "list:create", "list:update"]);
+    expect(store.pendingChanges()).toBe(7);
+    expect(store.getState().outbox.map((e) => e.seq)).toEqual([1, 2, 3, 4, 5, 6, 7]);
   });
 
   it("deletes softly and restores", async () => {
@@ -98,7 +98,7 @@ describe("LocalStore", () => {
     await second.ready;
     expect(second.getState().tasks.map((t) => t.title)).toEqual(["kept"]);
     expect(second.getState().lists).toHaveLength(1);
-    expect(second.pendingChanges()).toBe(2);
+    expect(second.pendingChanges()).toBe(3);
   });
 
   it("refuses writes before it has loaded", () => {

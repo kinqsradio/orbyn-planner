@@ -1,8 +1,10 @@
-import type { OutboxEntry, Task, TaskList } from "./types";
+import type { CalendarEvent, OutboxEntry, PlannerCalendar, Task, TaskList } from "./types";
 
 export interface Snapshot {
   tasks: Task[];
   lists: TaskList[];
+  events: CalendarEvent[];
+  calendars: PlannerCalendar[];
   outbox: OutboxEntry[];
 }
 
@@ -10,6 +12,9 @@ export type PersistOp =
   | { store: "tasks"; put: Task }
   | { store: "tasks"; delete: string }
   | { store: "lists"; put: TaskList }
+  | { store: "events"; put: CalendarEvent }
+  | { store: "events"; delete: string }
+  | { store: "calendars"; put: PlannerCalendar }
   | { store: "outbox"; put: OutboxEntry };
 
 export interface Persistence {
@@ -21,12 +26,16 @@ export interface Persistence {
 export class MemoryPersistence implements Persistence {
   private tasks = new Map<string, Task>();
   private lists = new Map<string, TaskList>();
+  private events = new Map<string, CalendarEvent>();
+  private calendars = new Map<string, PlannerCalendar>();
   private outbox = new Map<number, OutboxEntry>();
 
   async load(): Promise<Snapshot> {
     return {
       tasks: [...this.tasks.values()],
       lists: [...this.lists.values()],
+      events: [...this.events.values()],
+      calendars: [...this.calendars.values()],
       outbox: [...this.outbox.values()].sort((a, b) => a.seq - b.seq),
     };
   }
@@ -37,17 +46,25 @@ export class MemoryPersistence implements Persistence {
         if ("delete" in op) this.tasks.delete(op.delete);
         else this.tasks.set(op.put.id, op.put);
       } else if (op.store === "lists") this.lists.set(op.put.id, op.put);
+      else if (op.store === "events") {
+        if ("delete" in op) this.events.delete(op.delete);
+        else this.events.set(op.put.id, op.put);
+      } else if (op.store === "calendars") this.calendars.set(op.put.id, op.put);
       else this.outbox.set(op.put.seq, op.put);
     }
   }
 }
 
 const DB_NAME = "orbyn-planner";
+const DB_VERSION = 2;
 const STORES = [
   ["tasks", "id"],
   ["lists", "id"],
+  ["events", "id"],
+  ["calendars", "id"],
   ["outbox", "seq"],
 ] as const;
+const ALL = STORES.map(([name]) => name);
 
 function request<T>(req: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -62,9 +79,12 @@ export class IdbPersistence implements Persistence {
 
   private open(): Promise<IDBDatabase> {
     this.db ??= new Promise((resolve, reject) => {
-      const req = indexedDB.open(DB_NAME, 1);
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
       req.onupgradeneeded = () => {
-        for (const [name, keyPath] of STORES) req.result.createObjectStore(name, { keyPath });
+        // Version 1 had tasks, lists and the outbox; add whatever is missing.
+        for (const [name, keyPath] of STORES) {
+          if (!req.result.objectStoreNames.contains(name)) req.result.createObjectStore(name, { keyPath });
+        }
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
@@ -74,19 +94,21 @@ export class IdbPersistence implements Persistence {
 
   async load(): Promise<Snapshot> {
     const db = await this.open();
-    const tx = db.transaction(["tasks", "lists", "outbox"], "readonly");
-    const [tasks, lists, outbox] = await Promise.all([
+    const tx = db.transaction(ALL, "readonly");
+    const [tasks, lists, events, calendars, outbox] = await Promise.all([
       request(tx.objectStore("tasks").getAll() as IDBRequest<Task[]>),
       request(tx.objectStore("lists").getAll() as IDBRequest<TaskList[]>),
+      request(tx.objectStore("events").getAll() as IDBRequest<CalendarEvent[]>),
+      request(tx.objectStore("calendars").getAll() as IDBRequest<PlannerCalendar[]>),
       request(tx.objectStore("outbox").getAll() as IDBRequest<OutboxEntry[]>),
     ]);
-    return { tasks, lists, outbox: outbox.sort((a, b) => a.seq - b.seq) };
+    return { tasks, lists, events, calendars, outbox: outbox.sort((a, b) => a.seq - b.seq) };
   }
 
   async write(ops: PersistOp[]): Promise<void> {
     if (ops.length === 0) return;
     const db = await this.open();
-    const tx = db.transaction(["tasks", "lists", "outbox"], "readwrite");
+    const tx = db.transaction(ALL, "readwrite");
     for (const op of ops) {
       const store = tx.objectStore(op.store);
       if ("delete" in op) store.delete(op.delete);
