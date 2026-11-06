@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { getHealth } from "../../api/engine";
+import { Icon } from "../../components/Icon";
 
 export type SyncStatus =
   | { kind: "synced"; devices: number }
+  /** The engine answers. Real sync, and so "Synced", arrives with the sync phase. */
+  | { kind: "connected" }
   | { kind: "syncing" }
   | { kind: "offline"; waiting: number }
   | { kind: "error" };
@@ -12,32 +15,28 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 export function SyncLine({ status, onRetry }: { status: SyncStatus; onRetry?: () => void }) {
   switch (status.kind) {
     case "synced":
-      return (
-        <p className="sync-line" role="status">
-          <span className="sync-dot" aria-hidden="true" />
-          Synced · {plural(status.devices, "device", "devices")}
-        </p>
-      );
+      return <p className="pillx" role="status">Synced · {plural(status.devices, "device", "devices")}</p>;
+    case "connected":
+      return <p className="pillx" role="status">Connected</p>;
     case "syncing":
       return (
-        <p className="sync-line" role="status">
-          <span className="sync-dot sync-dot-live" aria-hidden="true" />
+        <p className="pillx" role="status">
+          <span className="spin" aria-hidden="true" />
           Syncing
         </p>
       );
     case "offline":
       return (
-        <p className="sync-line" role="status">
-          <span className="sync-dot sync-dot-hollow" aria-hidden="true" />
-          Offline · {plural(status.waiting, "change", "changes")} waiting
+        <p className="pillx offline" role="status">
+          <Icon name="x" small />
+          {status.waiting === 0 ? "Offline" : `Offline · ${plural(status.waiting, "change", "changes")} waiting`}
         </p>
       );
     case "error":
       return (
-        <p className="sync-line sync-line-error" role="status">
-          <span className="sync-dot" aria-hidden="true" />
+        <p className="pillx red" role="status">
           Couldn’t sync ·{" "}
-          <button type="button" className="link-button" onClick={onRetry}>
+          <button type="button" onClick={onRetry}>
             Retry
           </button>
         </p>
@@ -45,11 +44,17 @@ export function SyncLine({ status, onRetry }: { status: SyncStatus; onRetry?: ()
   }
 }
 
-/** Derives the sync status from the browser's connection and the engine health check. */
-export function useSyncStatus(): { status: SyncStatus; retry: () => void } {
+/** Seconds until the next health check: slowing down while healthy, quick to retry a failure. */
+export function healthDelay(healthy: boolean, streak: number): number {
+  if (healthy) return [15, 30, 60, 120, 300][Math.min(streak, 4)]!;
+  return Math.min(5 * 2 ** streak, 60);
+}
+
+/** Derives the sync status from the connection, the engine health check and the changes waiting. */
+export function useSyncStatus(pending = 0): { status: SyncStatus; retry: () => void } {
   const [online, setOnline] = useState(() => navigator.onLine);
   const [attempt, setAttempt] = useState(0);
-  const [result, setResult] = useState<{ attempt: number; ok: boolean } | null>(null);
+  const [healthy, setHealthy] = useState<boolean | null>(null);
 
   useEffect(() => {
     const on = () => setOnline(true);
@@ -65,20 +70,47 @@ export function useSyncStatus(): { status: SyncStatus; retry: () => void } {
   useEffect(() => {
     if (!online) return;
     const controller = new AbortController();
-    getHealth(controller.signal)
-      .then((h) => setResult({ attempt, ok: h.status === "ok" }))
-      .catch(() => {
-        if (!controller.signal.aborted) setResult({ attempt, ok: false });
-      });
-    return () => controller.abort();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let streak = 0;
+    let last: boolean | null = null;
+
+    const check = async () => {
+      clearTimeout(timer);
+      let ok: boolean;
+      try {
+        ok = (await getHealth(controller.signal)).status === "ok";
+      } catch {
+        if (controller.signal.aborted) return;
+        ok = false;
+      }
+      if (controller.signal.aborted) return;
+      streak = ok === last ? streak + 1 : 0;
+      last = ok;
+      setHealthy(ok);
+      timer = setTimeout(check, healthDelay(ok, streak) * 1000);
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void check();
+    };
+
+    void check();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [online, attempt]);
 
-  const retry = useCallback(() => setAttempt((n) => n + 1), []);
+  const retry = useCallback(() => {
+    setHealthy(null);
+    setAttempt((n) => n + 1);
+  }, []);
 
   let status: SyncStatus;
-  if (!online) status = { kind: "offline", waiting: 0 };
-  else if (result?.attempt !== attempt) status = { kind: "syncing" };
-  else if (result.ok) status = { kind: "synced", devices: 1 };
+  if (!online) status = { kind: "offline", waiting: pending };
+  else if (healthy === null) status = { kind: "syncing" };
+  else if (healthy) status = { kind: "connected" };
   else status = { kind: "error" };
   return { status, retry };
 }

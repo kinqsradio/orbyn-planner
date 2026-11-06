@@ -31,19 +31,21 @@ export function useRouter(): Router {
   return router;
 }
 
-export function Link({ to, className, children, ...rest }: { to: string } & Omit<React.ComponentProps<"a">, "href">) {
+export function Link({ to, className, children, onClick, ...rest }: { to: string } & Omit<React.ComponentProps<"a">, "href">) {
   const { path, navigate } = useRouter();
   const current = path === to || (to === "/today" && path === "/");
+  const classes = [className, current ? "on" : ""].filter(Boolean).join(" ");
   return (
     <a
       {...rest}
       href={to}
-      className={className}
+      className={classes}
       aria-current={current ? "page" : undefined}
       onClick={(event) => {
         if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
         navigate(to);
+        onClick?.(event);
       }}
     >
       {children}
