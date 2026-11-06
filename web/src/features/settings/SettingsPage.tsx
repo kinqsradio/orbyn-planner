@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { CHOICES, chooseTheme, readStoredChoice, type ThemeChoice } from "../../app/theme";
 import { Icon } from "../../components/Icon";
+import { InstallHint } from "../../components/InstallHint";
 
 const LABELS: Record<ThemeChoice, string> = { system: "System", light: "Light", dark: "Dark", dim: "Dim" };
 const CATEGORIES = ["Account", "Planning", "Notifications", "Connected apps", "Calendars", "Privacy"] as const;
@@ -55,6 +56,7 @@ export function SettingsPage() {
                   </div>
                 </div>
               </div>
+              <InstallHint />
             </>
           ) : (
             <p className="quiet">Nothing to set here yet.</p>

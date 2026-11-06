@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "The window can do nothing through the shell: no commands, no plugins. The page is the planner and talks only to the engine.",
+  "windows": ["main"],
+  "local": true,
+  "permissions": []
+}
