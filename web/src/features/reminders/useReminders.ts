@@ -3,6 +3,7 @@ import { usePrefs } from "../../app/prefs";
 import { formatDue } from "../../lib/dates";
 import { usePlanner } from "../../store/context";
 import { ReminderScheduler, type Reminder } from "./schedule";
+import { listenShown, loadShown, rememberShown } from "./shown";
 
 export type PermissionState = "unsupported" | "default" | "granted" | "denied";
 
@@ -64,30 +65,44 @@ export function useReminders(): void {
 
   useEffect(() => {
     if (!enabled) return;
-    const s = new ReminderScheduler({
-      now: () => new Date(),
-      quiet: () => quiet.current,
-      notify: (r: Reminder) => {
-        try {
-          new Notification(r.task.title, { body: r.task.due ? `Due ${formatDue(r.task.due, new Date())}` : "", tag: r.key });
-        } catch {
-          // A browser can refuse to show one; nothing else to do.
-        }
-      },
+    let stopped = false;
+    let cleanup = () => undefined as void;
+    // What the leader before us already showed is read first, so a hand-over repeats nothing.
+    void loadShown().then((shown) => {
+      if (stopped) return;
+      const s = new ReminderScheduler({
+        now: () => new Date(),
+        quiet: () => quiet.current,
+        shown,
+        onShown: (key) => rememberShown(key),
+        notify: (r: Reminder) => {
+          try {
+            new Notification(r.task.title, { body: r.task.due ? `Due ${formatDue(r.task.due, new Date())}` : "", tag: r.key });
+          } catch {
+            // A browser can refuse to show one; nothing else to do.
+          }
+        },
+      });
+      scheduler.current = s;
+      const unlisten = listenShown((key) => s.markShown(key));
+      s.update(latest.current);
+      const rebuild = setInterval(() => s.update(latest.current), REBUILD_MS);
+      // Timers are unreliable in a hidden tab: look again, and show what came due, when it is back.
+      const onVisible = () => {
+        if (document.visibilityState === "visible") s.update(latest.current);
+      };
+      document.addEventListener("visibilitychange", onVisible);
+      cleanup = () => {
+        clearInterval(rebuild);
+        document.removeEventListener("visibilitychange", onVisible);
+        unlisten();
+        s.stop();
+        scheduler.current = null;
+      };
     });
-    scheduler.current = s;
-    s.update(latest.current);
-    const rebuild = setInterval(() => s.update(latest.current), REBUILD_MS);
-    // Timers are unreliable in a hidden tab: look again, and show what came due, when it is back.
-    const onVisible = () => {
-      if (document.visibilityState === "visible") s.update(latest.current);
-    };
-    document.addEventListener("visibilitychange", onVisible);
     return () => {
-      clearInterval(rebuild);
-      document.removeEventListener("visibilitychange", onVisible);
-      s.stop();
-      scheduler.current = null;
+      stopped = true;
+      cleanup();
     };
   }, [enabled]);
 

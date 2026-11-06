@@ -203,7 +203,7 @@ export type FeedEvent = Pick<NewEvent, "title" | "allDay" | "start" | "end" | "p
 export type CalendarPatch = Partial<Pick<PlannerCalendar, "name" | "colour" | "visible">>;
 
 export type TaskPatch = Partial<
-  Pick<Task, "title" | "notes" | "listId" | "due" | "priority" | "checklist" | "projectId" | "sectionId" | "repeat" | "reminder" | "completions">
+  Pick<Task, "title" | "notes" | "listId" | "due" | "priority" | "checklist" | "projectId" | "sectionId" | "repeat" | "reminder" | "completions" | "done" | "completedAt" | "overrideOf">
 >;
 
 export interface NewProject {

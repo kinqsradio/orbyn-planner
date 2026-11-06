@@ -73,6 +73,17 @@ function projectToView(stored: Fields): Project {
     (entry as Fields)[m[2]!] = v;
     parts.set(m[1]!, entry);
   }
+  // A project saved before sections were fields has a `sections` array; its sections count unless a field says otherwise.
+  const legacy = stored.sections;
+  if (Array.isArray(legacy)) {
+    for (const x of legacy as Partial<ProjectSection>[]) {
+      if (typeof x?.id !== "string") continue;
+      const e = parts.get(x.id) ?? {};
+      if (e.name === undefined) e.name = x.name;
+      if (e.order === undefined) e.order = x.order;
+      parts.set(x.id, e);
+    }
+  }
   const sections: ProjectSection[] = [];
   for (const [id, e] of parts) {
     if (e.removed === true || typeof e.name !== "string" || typeof e.order !== "string") continue;

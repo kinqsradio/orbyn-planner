@@ -85,7 +85,8 @@ export function editTaskRepeat(store: PlannerStore, task: Task, edit: RepeatEdit
     if (edit.due === undefined || due === task.due) return;
     const skipped = skip(series, currentDue);
     const upcoming = nextOnOrAfter(skipped, currentDue);
-    store.updateTask(task.id, { repeat: skipped, ...(upcoming !== null ? { due: upcoming + timeOf(task.due) } : {}) });
+    // With no date left in the series, replacing this one finishes it.
+    store.updateTask(task.id, upcoming !== null ? { repeat: skipped, due: upcoming + timeOf(task.due) } : { repeat: skipped, done: true, completedAt: new Date().toISOString() });
     store.addTask({
       title: task.title,
       notes: task.notes,
@@ -119,6 +120,13 @@ export function editTaskRepeat(store: PlannerStore, task: Task, edit: RepeatEdit
     }
   }
   store.updateTask(task.id, { ...(edit.due !== undefined ? { due } : {}), repeat: next });
+  // One-off copies of single dates travel with the series by the same number of days.
+  if (scope === "all" && by !== 0) {
+    for (const copy of store.getState().tasks) {
+      if (copy.overrideOf?.id !== task.id || copy.deletedAt !== null) continue;
+      store.updateTask(copy.id, { due: copy.due ? shiftDay(copy.due.slice(0, 10), by) + timeOf(copy.due) : copy.due, overrideOf: { id: task.id, date: shiftDay(copy.overrideOf.date, by) } });
+    }
+  }
 }
 
 /** The series for "this and following": from the new date, with a count shortened by what has been used. */

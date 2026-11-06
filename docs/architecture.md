@@ -35,3 +35,9 @@ Accounts are optional in v1. Signed out, the person sees the landing page, and "
 - **Device keys and the session** live in IndexedDB in their own database, `orbyn-planner-keys`, never in localStorage or in the planner's database. The token is also held in memory, sent as `Authorization: Bearer`, and cleared on a 401. Keys stay when a device signs out, so the next sign-in can prove it is a trusted device.
 - **Adding a device.** A new browser signs in as pending and shows a code box. On a trusted device, Settings · Account lists it with Approve: the trusted device signs the pending device's id and keys, the server answers with a six-digit code, and the person types it on the new device (five tries, ten minutes).
 - **Not built yet:** passkeys, email verification, recovery, and a name or email taken from the server (the engine has no such route yet, so they are kept from sign-up).
+
+## Calendar feeds
+
+- **Time.** A feed event keeps its wall time and IANA zone; each occurrence is converted to the viewer's zone, so daylight-saving changes in either place land right. UTC (`Z`) UNTIL, EXDATE and RECURRENCE-ID values are converted into the series' zone before their date is taken. A start inside a skipped hour moves forward by the gap and keeps its written length. Expansions are cached per event and range.
+- **Repeats.** Only FREQ, INTERVAL, BYDAY (weekly), COUNT and UNTIL are read. Any other rule shows the first date only, with a note, and is listed under "Can't show these repeats" in Calendars; no dates are guessed.
+- **Fetching.** With `VITE_ENGINE_URL` set, the engine fetches feeds (`POST /v1/feeds/fetch`, `{url}` answered by `{status, body}`; refusals are `ApiError` codes `invalid_url`, `blocked_address`, `too_large`, `timeout`, `upstream_error`). Without it the web build fetches directly, which many servers refuse; the desktop app, whose page may not fetch other sites, says "Subscriptions need the Orbyn engine".
