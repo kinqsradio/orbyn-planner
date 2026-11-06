@@ -5,6 +5,7 @@ import { useDialog } from "../components/useDialog";
 import { CalendarPage } from "../features/calendar/CalendarPage";
 import { ListsPage } from "../features/lists/ListsPage";
 import { NotificationsPage } from "../features/notifications/NotificationsPage";
+import { ProjectPage } from "../features/projects/ProjectPage";
 import { ProjectsPage } from "../features/projects/ProjectsPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { CompletedPage } from "../features/completed/CompletedPage";
@@ -98,7 +99,8 @@ function Shell() {
   const now = useNow();
   const due = dueCount(tasks, now);
   useSubscriptionRefresh();
-  const page = PAGES[path === "/" ? "/today" : path] ?? PAGES["/today"]!;
+  const project = /^\/projects\/([^/]+)$/.exec(path);
+  const page = project ? () => <ProjectPage id={decodeURIComponent(project[1]!)} /> : (PAGES[path === "/" ? "/today" : path] ?? PAGES["/today"]!);
   const inMore = MORE.some((item) => item.path === path);
 
   return (

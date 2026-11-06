@@ -416,3 +416,16 @@ button.pillx { border: 0; }
 .repeat-custom .ctl { align-items: center; color: var(--t3); }
 .inp.narrow { width: 64px; }
 .pill[aria-pressed="true"] { background: var(--btn); color: var(--btnt); }
+.find-pill input { border: 0; background: transparent; outline: none; color: var(--t1); width: 140px; }
+.find-pill:focus-within { outline: 2px solid var(--t1); outline-offset: 2px; }
+.clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.form-label { font-size: 12px; color: var(--t2); }
+.group-tools { display: inline-flex; gap: 0; align-items: center; }
+.group-tools .icon-btn { width: 24px; height: 24px; }
+.menu-wrap { position: relative; }
+.menu { position: absolute; left: 0; top: 100%; z-index: 6; min-width: 160px; margin-top: 4px; padding: 4px; display: flex; flex-direction: column; background: var(--main); border-radius: 10px; box-shadow: 0 0 0 1px var(--line2), 0 10px 28px rgba(0, 0, 0, .14); }
+.menu button { display: block; text-align: left; padding: 6px 8px; border: 0; border-radius: 6px; background: none; font-size: 12.5px; }
+.menu button:hover, .menu button:focus-visible { background: var(--sel); }
+.move-btn { align-self: flex-start; padding: 0; border: 0; background: none; color: var(--t3); font-size: 11.5px; text-decoration: underline; text-underline-offset: 2px; }
+.board.scroll { overflow-x: auto; }
+.project-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
