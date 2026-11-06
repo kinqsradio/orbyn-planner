@@ -1,8 +1,8 @@
 //! The desktop shell of Orbyn Planner: a window around the web build, and nothing more.
 //!
 //! The page is the same app that runs in a browser. The shell may open the window, remember where
-//! it was, give it a native menu and refuse to navigate anywhere but the app. It has one command
-//! for the page to call (`open_link`, http(s) only), no plugins the page can reach, and no network code: the page talks to the
+//! it was, give it a native menu and refuse to navigate anywhere but the app. It has two commands
+//! for the page to call (`open_link`, http(s) only, and `save_export`, which always asks the person where to save), no plugins the page can reach, and no network code: the page talks to the
 //! engine itself, as far as the content security policy in `tauri.conf.json` allows.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -10,6 +10,7 @@
 use tauri::menu::{Menu, PredefinedMenuItem, Submenu};
 use tauri::webview::{NewWindowResponse, WebviewWindowBuilder};
 use tauri::{AppHandle, Manager, Runtime, WebviewUrl};
+use tauri_plugin_dialog::DialogExt;
 use url::Url;
 
 const TITLE: &str = "Orbyn Planner";
@@ -49,6 +50,36 @@ fn open_link(url: String) -> Result<(), String> {
         return Err("only http and https links open".to_string());
     }
     tauri_plugin_opener::open_url(parsed.as_str(), None::<&str>).map_err(|e| e.to_string())
+}
+
+/// The largest export the page may hand over: far more than any planner holds, so a bug can't fill a disk.
+const MAX_EXPORT_BYTES: usize = 64 * 1024 * 1024;
+
+/// Whether `name` is a file name the page may suggest for an export: a plain `.json` or `.ics` name, no path.
+fn export_name_ok(name: &str) -> bool {
+    (name.ends_with(".json") || name.ends_with(".ics"))
+        && name.len() <= 100
+        && !name.starts_with('.')
+        && name.chars().all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | ' '))
+}
+
+/// The page's second command: save an export. The person always picks the place in the system's own save dialog (the page
+/// can't choose a path); the answer is true when a file was written and false when they cancelled.
+#[tauri::command]
+async fn save_export(app: AppHandle, name: String, contents: String) -> Result<bool, String> {
+    if !export_name_ok(&name) {
+        return Err("not a name for an export".to_string());
+    }
+    if contents.len() > MAX_EXPORT_BYTES {
+        return Err("too large to export".to_string());
+    }
+    let extension = if name.ends_with(".json") { "json" } else { "ics" };
+    let Some(chosen) = app.dialog().file().set_file_name(&name).add_filter("Export", &[extension]).blocking_save_file() else {
+        return Ok(false);
+    };
+    let path = chosen.into_path().map_err(|e| e.to_string())?;
+    std::fs::write(path, contents).map_err(|e| e.to_string())?;
+    Ok(true)
 }
 
 /// The standard menus: the app, Edit, View and Window. Editing and window items are the system's own,
@@ -125,7 +156,9 @@ fn main() {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         // Used by `open_link` only: the plugin's own commands are not in any capability, so the page cannot reach them.
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![open_link])
+        // Used by `save_export` only, the same way.
+        .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![open_link, save_export])
         .menu(menu)
         .setup(move |app| {
             // In development the window shows the dev server; otherwise the built app, which Tauri serves.
@@ -197,6 +230,16 @@ mod tests {
         }
         assert!(open_link("javascript:alert(1)".into()).is_err());
         assert!(open_link("not a url".into()).is_err());
+    }
+
+    #[test]
+    fn only_plain_json_and_ics_names_are_saved() {
+        for ok in ["orbyn-planner-2026-11-07.json", "orbyn-planner-2026-11-07.ics", "My planner.json"] {
+            assert!(export_name_ok(ok), "{ok}");
+        }
+        for bad in ["", ".json", "a.txt", "../a.json", "a/b.json", "a\\b.ics", "a.json.exe", "a\n.json", &format!("{}.json", "x".repeat(100))] {
+            assert!(!export_name_ok(bad), "{bad:?}");
+        }
     }
 
     #[test]
