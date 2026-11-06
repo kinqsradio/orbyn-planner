@@ -1,4 +1,4 @@
-import { addDays, compareDue, dateKey, dueDayKey, isDueToday, isOverdue, startOfDay } from "../../lib/dates";
+import { addDays, compareDue, dateKey, dueDayKey, isDueToday, isOverdue, startOfDay, startOfWeek } from "../../lib/dates";
 import type { Task } from "../../store/types";
 
 export type DueFilter = "any" | "today" | "week" | "overdue";
@@ -36,4 +36,29 @@ export function matchesDue(task: Task, filter: DueFilter, now: Date): boolean {
 
 export function openCount(tasks: readonly Task[], listId: string): number {
   return tasks.filter((t) => isOpen(t) && t.listId === listId).length;
+}
+
+export interface TodayGroups {
+  overdue: Task[];
+  today: Task[];
+  /** The next five days after today, with how many open tasks fall on each. */
+  week: { date: Date; count: number }[];
+  doneThisWeek: number;
+}
+
+export function groupToday(tasks: readonly Task[], now: Date): TodayGroups {
+  const live = tasks.filter(isLive);
+  const overdue = sortByDue(live.filter((t) => !t.done && t.due !== null && isOverdue(t.due, now)));
+  const overdueIds = new Set(overdue.map((t) => t.id));
+  const today = sortByDue(
+    activeTasks(live, now).filter((t) => t.due !== null && isDueToday(t.due, now) && !overdueIds.has(t.id)),
+  );
+  const week = [1, 2, 3, 4, 5].map((n) => {
+    const date = addDays(startOfDay(now), n);
+    const key = dateKey(date);
+    return { date, count: live.filter((t) => !t.done && t.due !== null && dueDayKey(t.due) === key).length };
+  });
+  const weekStart = startOfWeek(now).getTime();
+  const doneThisWeek = live.filter((t) => t.done && t.completedAt !== null && new Date(t.completedAt).getTime() >= weekStart).length;
+  return { overdue, today, week, doneThisWeek };
 }

@@ -45,8 +45,8 @@ export function SyncLine({ status, onRetry }: { status: SyncStatus; onRetry?: ()
   }
 }
 
-/** Derives the sync status from the browser's connection and the engine health check. */
-export function useSyncStatus(): { status: SyncStatus; retry: () => void } {
+/** Derives the sync status from the connection, the engine health check and the changes waiting in the outbox. */
+export function useSyncStatus(pending = 0): { status: SyncStatus; retry: () => void } {
   const [online, setOnline] = useState(() => navigator.onLine);
   const [attempt, setAttempt] = useState(0);
   const [result, setResult] = useState<{ attempt: number; ok: boolean } | null>(null);
@@ -76,7 +76,7 @@ export function useSyncStatus(): { status: SyncStatus; retry: () => void } {
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
   let status: SyncStatus;
-  if (!online) status = { kind: "offline", waiting: 0 };
+  if (!online) status = { kind: "offline", waiting: pending };
   else if (result?.attempt !== attempt) status = { kind: "syncing" };
   else if (result.ok) status = { kind: "synced", devices: 1 };
   else status = { kind: "error" };

@@ -255,3 +255,11 @@ kbd { font-family: var(--font-mono); font-size: 12px; }
   .lists-layout { grid-template-columns: 1fr; }
   .colours { margin-left: 0; }
 }
+
+.today-group { margin-bottom: var(--space-6); }
+.today-side { display: flex; flex-wrap: wrap; gap: var(--space-6); margin-top: var(--space-8); }
+.week { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(64px, 1fr)); gap: var(--space-2); }
+.week-day { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-3); border-radius: var(--radius); background: var(--th-sf-03); }
+.week-count, .stat-value { font-size: 20px; line-height: 28px; font-weight: 500; color: var(--th-text-heading); }
+.stat-value { margin: 0; }
+.stat { padding: 0 var(--space-3); }
