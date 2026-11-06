@@ -203,10 +203,17 @@ export class ApproverController extends Controller<ApproverState> {
       await this.services.api.confirmApproval(id, body);
       if (this.ended || this.disposed) return;
       this.set({ phase: "finishing" });
+      const trusted = async () => (await this.services.api.devices()).devices.find((d) => d.id === this.pending.id)?.state === "trusted";
       const done = await this.poll(async () => {
-        const list = await this.services.api.devices();
-        if (list.devices.find((d) => d.id === this.pending.id)?.state === "trusted") return true;
-        await this.services.api.approval(id); // a closed approval answers 410
+        if (await trusted()) return true;
+        try {
+          await this.services.api.approval(id); // a closed approval answers 410
+        } catch (e) {
+          // The new device finishing closes the approval too, so a 410 can mean success: the device list read just
+          // before it may have been taken a moment earlier. Look again before treating the approval as closed.
+          if (isGone(e) && (await trusted())) return true;
+          throw e;
+        }
         return undefined;
       });
       if (done) {
