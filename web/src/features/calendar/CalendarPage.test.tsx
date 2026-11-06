@@ -321,6 +321,18 @@ describe("Calendars", () => {
     expect(within(panel).queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
   });
 
+  it("the subscribe form refuses an http:// link", async () => {
+    const store = await open();
+    await userEvent.click(screen.getByRole("button", { name: "Calendars" }));
+    const dialog = screen.getByRole("dialog", { name: "Calendars" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Subscribe to a calendar" }));
+    await userEvent.type(within(dialog).getByLabelText("Name"), "Holidays");
+    await userEvent.type(within(dialog).getByLabelText("Subscribe by link"), "http://example.com/h.ics");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Subscribe" }));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Use an https:// link");
+    expect(store.getState().calendars).toHaveLength(1);
+  });
+
   it("a feed that blocks the browser shows a red Retry and says why", async () => {
     let allow = false;
     const store = await open({
@@ -430,5 +442,48 @@ describe("Monday to Friday and the weekend", () => {
     // The next week is an ordinary Monday to Friday week.
     await userEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(document.querySelectorAll(".dh")).toHaveLength(5);
+  });
+});
+
+describe("keyboard", () => {
+  it("Month: days are in rows, arrows move between them, Enter adds an event on that day", async () => {
+    await open({ seed: seedWeek });
+    await userEvent.click(screen.getByRole("radio", { name: "Month" }));
+    const grid = screen.getByRole("grid", { name: "Month" });
+    expect(within(grid).getAllByRole("row").length).toBeGreaterThanOrEqual(6);
+    expect(within(within(grid).getAllByRole("row")[1]!).getAllByRole("gridcell")).toHaveLength(7);
+    const today = document.querySelector('[data-day="2026-11-06"]') as HTMLElement;
+    expect(today).toHaveAttribute("tabindex", "0");
+    expect(document.querySelectorAll('[role="gridcell"][tabindex="0"]')).toHaveLength(1);
+    today.focus();
+    await userEvent.keyboard("{ArrowRight}");
+    expect(document.querySelector('[data-day="2026-11-07"]')).toHaveFocus();
+    await userEvent.keyboard("{ArrowDown}");
+    expect(document.querySelector('[data-day="2026-11-14"]')).toHaveFocus();
+    await userEvent.keyboard("{ArrowLeft}{ArrowUp}");
+    expect(document.querySelector('[data-day="2026-11-06"]')).toHaveFocus();
+    await userEvent.keyboard("{ArrowRight}{Enter}");
+    const dialog = screen.getByRole("dialog", { name: "New event" });
+    expect(within(dialog).getByLabelText("When")).toHaveValue("2026-11-07");
+  });
+
+  it("Week: a focused hour slot takes Enter to add an event at that time", async () => {
+    await open();
+    const slot = document.querySelector('[data-slot="2026-11-06T14"]') as HTMLElement;
+    slot.focus();
+    expect(slot).toHaveAccessibleName(/Friday 6, 14:00/);
+    await userEvent.keyboard("{ArrowDown}");
+    expect(document.querySelector('[data-slot="2026-11-06T15"]')).toHaveFocus();
+    await userEvent.keyboard("{ArrowLeft}{Enter}");
+    const dialog = screen.getByRole("dialog", { name: "New event" });
+    expect(within(dialog).getByLabelText("When")).toHaveValue("2026-11-05");
+    expect(within(dialog).getByLabelText("Start time")).toHaveValue("15:00");
+    expect(within(dialog).getByLabelText("End time")).toHaveValue("16:00");
+  });
+
+  it("Week: clicking a slot also adds an event there", async () => {
+    await open();
+    await userEvent.click(document.querySelector('[data-slot="2026-11-04T10"]') as HTMLElement);
+    expect(within(screen.getByRole("dialog", { name: "New event" })).getByLabelText("Start time")).toHaveValue("10:00");
   });
 });

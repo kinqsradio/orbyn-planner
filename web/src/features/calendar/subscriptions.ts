@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { IcsError, parseIcs } from "../../lib/ics";
+import { IcsError, MAX_FEED_BYTES, parseIcs } from "../../lib/ics";
 import { usePlanner, useStore } from "../../store/context";
 import type { FeedEvent, PlannerCalendar, PlannerStore } from "../../store/types";
 
@@ -13,9 +13,51 @@ export class FeedError extends Error {
   }
 }
 
+export const HTTPS_ONLY = "Use an https:// link";
+
+/** The address to fetch: webcal:// is https://, and plain http:// is refused. Throws a FeedError otherwise. */
+export function feedAddress(url: string): string {
+  const address = url.trim().replace(/^webcal:\/\//i, "https://");
+  let parsed: URL;
+  try {
+    parsed = new URL(address);
+  } catch {
+    throw new FeedError("That isn’t a web address. Paste the calendar’s link.");
+  }
+  if (parsed.protocol !== "https:") throw new FeedError(HTTPS_ONLY);
+  return parsed.href;
+}
+
+/** The body as text, stopping with a refusal as soon as it is over the limit. */
+async function readCapped(response: Response): Promise<string> {
+  const tooBig = new FeedError("That calendar is larger than 5 MiB, which is more than this app reads.");
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > MAX_FEED_BYTES) throw tooBig;
+  if (!response.body) {
+    const text = await response.text();
+    if (new TextEncoder().encode(text).length > MAX_FEED_BYTES) throw tooBig;
+    return text;
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let total = 0;
+  let text = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > MAX_FEED_BYTES) {
+      void reader.cancel();
+      throw tooBig;
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  return text + decoder.decode();
+}
+
 /** Fetches an ICS feed straight from the browser. Many servers do not allow that (no CORS headers); the error says so. */
 export async function fetchFeed(url: string, fetchFn: typeof fetch = fetch): Promise<FeedEvent[]> {
-  const address = url.trim().replace(/^webcal:\/\//i, "https://");
+  const address = feedAddress(url);
   let response: Response;
   try {
     response = await fetchFn(address, { cache: "no-store" });
@@ -29,9 +71,9 @@ export async function fetchFeed(url: string, fetchFn: typeof fetch = fetch): Pro
   }
   if (!response.ok) throw new FeedError(`The server answered ${response.status}.`);
   try {
-    return parseIcs(await response.text());
+    return parseIcs(await readCapped(response));
   } catch (error) {
-    if (error instanceof IcsError) throw new FeedError("That address isn’t a calendar feed.");
+    if (error instanceof IcsError) throw new FeedError(error.message.includes("more than") ? `${error.message}.` : "That address isn’t a calendar feed.");
     throw error;
   }
 }

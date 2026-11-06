@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useUi } from "../../app/ui";
 import { WEEKDAYS, dateOf, formatTime, parseDue } from "../../lib/dates";
+import { touchesDay } from "../../lib/wall";
 import { usePlanner } from "../../store/context";
 import type { Occurrence } from "../../store/occurrences";
 import type { CalendarEvent, Task } from "../../store/types";
@@ -41,7 +42,7 @@ export function TimeGrid({ days, occurrences, today, now, mode }: { days: string
 
   const byDay = useMemo(() => {
     const map = new Map<string, Occurrence[]>();
-    for (const d of days) map.set(d, occurrences.filter((o) => o.start.slice(0, 10) <= d && o.end.slice(0, 10) >= d));
+    for (const d of days) map.set(d, occurrences.filter((o) => touchesDay(o, d)));
     return map;
   }, [days, occurrences]);
   const allDay = occurrences.filter(isAllDayLike);
@@ -53,6 +54,29 @@ export function TimeGrid({ days, occurrences, today, now, mode }: { days: string
     // Scroll once per set of days, not on every tick of the clock.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [days.join(",")]);
+
+  // One slot takes the Tab stop; arrows move between hours and days, Enter adds an event there.
+  const [stop, setStop] = useState({ day: days[0]!, hour: 9 });
+  if (!days.includes(stop.day)) setStop({ day: days.includes(today) ? today : days[0]!, hour: stop.hour });
+  const slotLabel = (d: string) => {
+    const date = dateOf(d);
+    return `${WEEKDAYS[date.getDay()]} ${date.getDate()}`;
+  };
+  const onSlotKey = (event: KeyboardEvent<HTMLElement>, day: string, hour: number) => {
+    const delta = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }[event.key];
+    if (delta) {
+      event.preventDefault();
+      const nextDay = days[days.indexOf(day) + delta[0]!];
+      const nextHour = hour + delta[1]!;
+      if (nextDay !== undefined && nextHour >= 0 && nextHour < 24) {
+        setStop({ day: nextDay, hour: nextHour });
+        scroller.current?.querySelector<HTMLElement>(`[data-slot="${nextDay}T${nextHour}"]`)?.focus();
+      }
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      ui.openNewEvent(day, `${String(hour).padStart(2, "0")}:00`);
+    }
+  };
 
   const columns = `44px repeat(${days.length}, minmax(0, 1fr))`;
   const first = days[0]!;
@@ -98,7 +122,17 @@ export function TimeGrid({ days, occurrences, today, now, mode }: { days: string
             {days.map((d) => (
               <div className="dcol" key={d} data-day={d}>
                 {Array.from({ length: 24 }, (_, h) => (
-                  <div className="slot" key={h} />
+                  <div
+                    className="slot"
+                    key={h}
+                    role="button"
+                    data-slot={`${d}T${h}`}
+                    tabIndex={stop.day === d && stop.hour === h ? 0 : -1}
+                    aria-label={`${slotLabel(d)}, ${h}:00. Enter adds an event.`}
+                    onFocus={() => setStop({ day: d, hour: h })}
+                    onClick={() => ui.openNewEvent(d, `${String(h).padStart(2, "0")}:00`)}
+                    onKeyDown={(e) => onSlotKey(e, d, h)}
+                  />
                 ))}
                 {layoutDay(byDay.get(d)!, d).map((p) => {
                   const o = p.occ;

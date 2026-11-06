@@ -94,7 +94,13 @@ export interface CalendarEvent {
   people: Person[];
   /** Minutes before the start, or null for no reminder. */
   reminder: number | null;
+  /**
+   * The engine's Series. In storage the rule is one field and each skipped date its own field
+   * (`repeat.skip.<date>`), so two devices that skip different dates both keep their skip.
+   */
   repeat: Series | null;
+  /** Set on the one-off copy made by "This event" on a repeating event: which date of which event it replaces. */
+  overrideOf: { id: string; date: string } | null;
   /** Events of a subscribed calendar cannot be changed here. */
   readOnly: boolean;
   deletedAt: string | null;
@@ -178,10 +184,11 @@ export interface NewEvent {
   repeat?: Repeat | null;
   /** An existing series, kept as given (used when a series is split). */
   series?: Series | null;
+  overrideOf?: { id: string; date: string } | null;
 }
 
 export type EventPatch = Partial<
-  Pick<CalendarEvent, "title" | "calendarId" | "allDay" | "start" | "end" | "place" | "notes" | "people" | "reminder" | "repeat">
+  Pick<CalendarEvent, "title" | "calendarId" | "allDay" | "start" | "end" | "place" | "notes" | "people" | "reminder" | "repeat" | "overrideOf">
 >;
 
 /** One event read from a subscribed calendar's feed. */

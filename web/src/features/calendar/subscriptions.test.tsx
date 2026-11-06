@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocalStore } from "../../store/LocalStore";
 import { MemoryPersistence } from "../../store/persistence";
 import { StoreProvider } from "../../store/context";
-import { FeedError, REFRESH_MS, fetchFeed, refreshCalendar, useSubscriptionRefresh } from "./subscriptions";
+import { FeedError, HTTPS_ONLY, REFRESH_MS, fetchFeed, refreshCalendar, useSubscriptionRefresh } from "./subscriptions";
 
 const FEED = ["BEGIN:VCALENDAR", "BEGIN:VEVENT", "DTSTART:20261107T090000", "SUMMARY:Open day", "END:VEVENT", "END:VCALENDAR"].join("\r\n");
 const ok = (body = FEED) => vi.fn(async () => new Response(body)) as unknown as typeof fetch;
@@ -11,6 +11,30 @@ const ok = (body = FEED) => vi.fn(async () => new Response(body)) as unknown as 
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+});
+
+describe("hostile feeds", () => {
+  it("refuses http:// and does not even try", async () => {
+    const fetchFn = ok();
+    await expect(fetchFeed("http://example.com/a.ics", fetchFn)).rejects.toThrow(HTTPS_ONLY);
+    expect(HTTPS_ONLY).toBe("Use an https:// link");
+    expect(fetchFn).not.toHaveBeenCalled();
+    await expect(fetchFeed("not a link", fetchFn)).rejects.toThrow(/web address/);
+    await expect(fetchFeed("ftp://example.com/a.ics", fetchFn)).rejects.toThrow(HTTPS_ONLY);
+  });
+
+  it("refuses a body over 5 MiB, by its declared length or as it streams", async () => {
+    const big = "x".repeat(5 * 1024 * 1024 + 10);
+    const declared = vi.fn(async () => new Response("BEGIN:VCALENDAR", { headers: { "content-length": String(big.length) } })) as unknown as typeof fetch;
+    await expect(fetchFeed("https://e.com/a.ics", declared)).rejects.toThrow(/larger than 5 MiB/);
+    const streamed = vi.fn(async () => new Response(big)) as unknown as typeof fetch;
+    await expect(fetchFeed("https://e.com/a.ics", streamed)).rejects.toThrow(/larger than 5 MiB/);
+  });
+
+  it("refuses a feed with too many events, with the reason", async () => {
+    const events = Array.from({ length: 5001 }, (_, i) => `BEGIN:VEVENT\r\nUID:${i}\r\nDTSTART:20261107T090000\r\nSUMMARY:x\r\nEND:VEVENT`).join("\r\n");
+    await expect(fetchFeed("https://e.com/a.ics", ok(`BEGIN:VCALENDAR\r\n${events}\r\nEND:VCALENDAR`))).rejects.toThrow(/more than 5000 events/);
+  });
 });
 
 describe("fetchFeed", () => {

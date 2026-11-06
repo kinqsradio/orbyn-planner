@@ -1,4 +1,4 @@
-import { addDays, makeDue, parseDue } from "../lib/dates";
+import { addWall, daysBetween, lastDayOf } from "../lib/wall";
 import { occurrences as seriesOccurrences } from "./repeat";
 import type { CalendarEvent } from "./types";
 
@@ -13,18 +13,32 @@ export interface Occurrence {
   allDay: boolean;
 }
 
-const dayDiff = (a: string, b: string): number =>
-  Math.round((Date.UTC(+b.slice(0, 4), +b.slice(5, 7) - 1, +b.slice(8, 10)) - Date.UTC(+a.slice(0, 4), +a.slice(5, 7) - 1, +a.slice(8, 10))) / 86_400_000);
-
-/** Moves an event's start and end to start on `date`, keeping its length. */
+/** Moves an event's start and end to start on `date`, keeping its length and its times of day. */
 export function shiftTo(event: Pick<CalendarEvent, "start" | "end" | "allDay">, date: string): { start: string; end: string } {
-  const days = dayDiff(event.start.slice(0, 10), date);
+  const days = daysBetween(event.start, date);
   if (days === 0) return { start: event.start, end: event.end };
-  const move = (value: string) => {
-    const { date: d, hasTime } = parseDue(value);
-    return makeDue(addDays(d, days), hasTime);
-  };
-  return { start: move(event.start), end: move(event.end) };
+  return { start: addWall(event.start, days), end: addWall(event.end, days) };
+}
+
+const cache = new WeakMap<CalendarEvent, Map<string, Occurrence[]>>();
+
+/** The occurrences of one repeating event in a range, remembered per event and range. */
+function repeating(event: CalendarEvent, from: string, to: string): Occurrence[] {
+  let ranges = cache.get(event);
+  if (!ranges) cache.set(event, (ranges = new Map()));
+  const key = `${from}|${to}`;
+  const hit = ranges.get(key);
+  if (hit) return hit;
+  const length = Math.max(daysBetween(event.start, lastDayOf(event.start, event.end, event.allDay)), 0);
+  const early = addWall(from, -length);
+  const out: Occurrence[] = [];
+  for (const date of seriesOccurrences(event.repeat!, early, to)) {
+    const { start, end } = shiftTo(event, date);
+    if (lastDayOf(start, end, event.allDay) >= from) out.push({ event, date, start, end, allDay: event.allDay });
+  }
+  if (ranges.size > 50) ranges.clear();
+  ranges.set(key, out);
+  return out;
 }
 
 /** Every occurrence of the visible events that touches the days `from` to `to` (inclusive, `YYYY-MM-DD`), in start order. */
@@ -32,18 +46,10 @@ export function expandEvents(events: readonly CalendarEvent[], from: string, to:
   const out: Occurrence[] = [];
   for (const event of events) {
     if (event.deletedAt !== null) continue;
-    const length = Math.max(dayDiff(event.start.slice(0, 10), event.end.slice(0, 10)), 0);
-    const first = event.start.slice(0, 10);
-    if (!event.repeat) {
-      if (first <= to && event.end.slice(0, 10) >= from) {
-        out.push({ event, date: first, start: event.start, end: event.end, allDay: event.allDay });
-      }
-      continue;
-    }
-    const early = makeDue(addDays(parseDue(from).date, -length), false);
-    for (const date of seriesOccurrences(event.repeat, early, to)) {
-      const { start, end } = shiftTo(event, date);
-      if (end.slice(0, 10) >= from) out.push({ event, date, start, end, allDay: event.allDay });
+    if (event.repeat) {
+      out.push(...repeating(event, from, to));
+    } else if (event.start.slice(0, 10) <= to && lastDayOf(event.start, event.end, event.allDay) >= from) {
+      out.push({ event, date: event.start.slice(0, 10), start: event.start, end: event.end, allDay: event.allDay });
     }
   }
   return out.sort((a, b) => a.start.localeCompare(b.start) || a.event.title.localeCompare(b.event.title));
