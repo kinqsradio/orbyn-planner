@@ -49,8 +49,8 @@ let counter = 0;
 class FakeDeviceKeys implements DeviceKeys {
   constructor(private readonly signing: Uint8Array, private readonly agreement: Uint8Array) {}
 
-  export() {
-    return concat(this.signing, this.agreement);
+  export(wrapSecret: Uint8Array) {
+    return fakeSeal(wrapSecret, "keys", concat(this.signing, this.agreement));
   }
   signingKey() {
     return encodeBytes(this.signing);
@@ -104,43 +104,82 @@ export class FakeAuthCrypto implements AuthCrypto {
       const n = ++counter;
       return new FakeDeviceKeys(fakeDigest(utf8("signing"), utf8(String(n)), utf8(String(Math.random()))), fakeDigest(utf8("agreement"), utf8(String(n)), utf8(String(Math.random()))));
     },
-    import: (bytes: Uint8Array): DeviceKeys => new FakeDeviceKeys(bytes.slice(0, 32), bytes.slice(32, 64)),
+    import: (sealed: Uint8Array, wrapSecret: Uint8Array): DeviceKeys => {
+      const bytes = fakeOpen(wrapSecret, "keys", sealed);
+      return new FakeDeviceKeys(bytes.slice(0, 32), bytes.slice(32, 64));
+    },
   };
 
-  approvals(keys: DeviceKeys, accountId: string, deviceId: string): ApprovalEngine {
-    return fakeApprovals(keys, accountId, deviceId);
-  }
+  engine: AuthCrypto["engine"] = {
+    create: (keys: DeviceKeys, accountId: string, deviceId: string): ApprovalEngine => fakeApprovals(keys, accountId, deviceId, { pinned: [deviceId], counted: 0 }),
+    restore: (keys: DeviceKeys, sealed: Uint8Array, wrapSecret: Uint8Array): ApprovalEngine => {
+      let state: { accountId: string; deviceId: string; signing: string; pinned: string[]; counted: number };
+      try {
+        state = JSON.parse(new TextDecoder().decode(fakeOpen(wrapSecret, "snapshot", sealed)));
+      } catch {
+        throw new Error("open_failed: wrong wrapping secret or changed bytes");
+      }
+      if (state.signing !== keys.signingKey()) throw new Error("open_failed: this snapshot belongs to other keys");
+      return fakeApprovals(keys, state.accountId, state.deviceId, state);
+    },
+  };
 
   normalizeEmail(email: string) {
     return normalizeEmail(email) ?? undefined;
   }
 }
 
+/**
+ * Stand-in sealing for tests ONLY: hides the bytes under the wrapping secret and refuses another
+ * secret, so a test can check that what is stored is sealed. The real one is XChaCha20-Poly1305 in the module.
+ */
+function keystream(secret: Uint8Array, purpose: string, n: number): Uint8Array {
+  const out = new Uint8Array(n);
+  for (let i = 0; i < n; i += 32) out.set(fakeDigest(secret, utf8(purpose), utf8(String(i))).slice(0, Math.min(32, n - i)), i);
+  return out;
+}
+export function fakeSeal(secret: Uint8Array, purpose: string, plain: Uint8Array): Uint8Array {
+  const ks = keystream(secret, purpose, plain.length);
+  const tag = fakeDigest(secret, utf8(purpose), plain).slice(0, 8);
+  return concat(tag, plain.map((b, i) => b ^ ks[i]!));
+}
+export function fakeOpen(secret: Uint8Array, purpose: string, sealed: Uint8Array): Uint8Array {
+  const ks = keystream(secret, purpose, Math.max(sealed.length - 8, 0));
+  const plain = sealed.slice(8).map((b, i) => b ^ ks[i]!);
+  const tag = fakeDigest(secret, utf8(purpose), plain).slice(0, 8);
+  if (sealed.length < 8 || !tag.every((b, i) => b === sealed[i])) throw new Error("open_failed: wrong wrapping secret or changed bytes");
+  return plain;
+}
+
+const approver = new WeakMap<object, { parts: PairingParts; pairing: Uint8Array; rA: Uint8Array; rD?: Uint8Array; used: boolean }>();
+const device = new WeakMap<object, { pairing: Uint8Array; rD: Uint8Array; used: boolean; approverSigning: string }>();
 const random32 = () => Uint8Array.from({ length: 32 }, () => Math.floor(Math.random() * 256));
 const ten = 600;
 
 /** Approval functions with the same order and refusals as the engine's, over the stand-in hash. */
-function fakeApprovals(keys: DeviceKeys, accountId: string, deviceId: string): ApprovalEngine {
-  const approver = new WeakMap<object, { parts: PairingParts; pairing: Uint8Array; rA: Uint8Array; rD?: Uint8Array; used: boolean }>();
-  const device = new WeakMap<object, { pairing: Uint8Array; rD: Uint8Array; used: boolean; approverSigning: string }>();
+function fakeApprovals(keys: DeviceKeys, accountId: string, deviceId: string, initial: { pinned: string[]; counted: number }): ApprovalEngine {
   /** What this engine has counted: removals seen in a verified list, and the devices it pins. */
-  let counted = 0;
-  const pinned = new Set<string>([deviceId]);
+  let counted = initial.counted;
+  const pinned = new Set<string>(initial.pinned);
   return {
+    snapshot(wrapSecret) {
+      const state = { accountId, deviceId, signing: keys.signingKey(), pinned: [...pinned], counted };
+      return fakeSeal(wrapSecret, "snapshot", utf8(JSON.stringify(state)));
+    },
     verifyDevices(list) {
-      for (const r of list.removals) counted = Math.max(counted, r.sequence);
-      // Self, then devices linked to a pinned one by a recorded approval; the server's `state` is not used.
-      const out = new Set(pinned);
+      // A removal counts when a device this one pins made it.
+      for (const r of list.removals) if (pinned.has(r.removed_by)) counted = Math.max(counted, r.sequence);
+      // Devices linked to a pinned one by a recorded approval become pinned; the server's `state` is not used.
       for (let grew = true; grew; ) {
         grew = false;
         for (const d of list.devices) {
-          if (!out.has(d.id) && d.approval_signature && d.approved_by && out.has(d.approved_by)) {
-            out.add(d.id);
+          if (!pinned.has(d.id) && d.approval_signature && d.approved_by && pinned.has(d.approved_by)) {
+            pinned.add(d.id);
             grew = true;
           }
         }
       }
-      return [...out].filter((id) => list.devices.some((d) => d.id === id));
+      return [...pinned].filter((id) => list.devices.some((d) => d.id === id));
     },
     signRemoval(target) {
       const sequence = counted + 1;

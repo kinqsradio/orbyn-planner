@@ -29,8 +29,8 @@ export interface PendingLogin {
 
 /** One device's keys. */
 export interface DeviceKeys {
-  /** The secret bytes for this device's key store (64 of them). */
-  export(): Uint8Array;
+  /** The keys sealed under the wrapping secret, for this device's key store (see `wrapSecret.ts`). */
+  export(wrapSecret: Uint8Array): Uint8Array;
   signingKey(): string;
   agreementKey(): string;
   sign(context: string, message: Uint8Array): Uint8Array;
@@ -67,6 +67,8 @@ export interface DevicePairing {
 
 /** The approval functions of the sync engine for one device (orbyn-wasm's `SyncEngine`). */
 export interface ApprovalEngine {
+  /** The engine's state sealed under the wrapping secret, for the key store. It holds who this device trusts and the removal sequence. */
+  snapshot(wrapSecret: Uint8Array): Uint8Array;
   /**
    * The ids in the list this device verifies by approval chain: its own view of who is trusted,
    * never the server's `state`. Also counts the list's removals, so the next one is signed with a
@@ -100,13 +102,18 @@ export interface AuthCrypto {
   startLogin(password: Uint8Array): PendingLogin;
   /** Returns `LoginFinish.credential_finalization`. A wrong password throws `auth_failed`. */
   finishLogin(pending: PendingLogin, password: Uint8Array, response: Uint8Array): Uint8Array;
-  /** `DeviceKeys.create()` and `DeviceKeys.import(bytes)` in the module. */
+  /** `DeviceKeys.create()` and `DeviceKeys.import(sealed, wrapSecret)` in the module. */
   deviceKeys: {
     create(): DeviceKeys;
-    import(bytes: Uint8Array): DeviceKeys;
+    import(sealed: Uint8Array, wrapSecret: Uint8Array): DeviceKeys;
   };
-  /** `SyncEngine.create(keys, accountId, deviceId)` in the module, for its approval functions. */
-  approvals(keys: DeviceKeys, accountId: string, deviceId: string): ApprovalEngine;
+  /** `SyncEngine.create(keys, accountId, deviceId)` and `SyncEngine.restore(keys, sealed, wrapSecret, nowMillis)`. */
+  engine: {
+    /** A device with no snapshot yet: it trusts only itself, and its approver once approved. */
+    create(keys: DeviceKeys, accountId: string, deviceId: string): ApprovalEngine;
+    /** From a snapshot sealed under the same wrapping secret. Throws if it was sealed otherwise or changed. */
+    restore(keys: DeviceKeys, sealed: Uint8Array, wrapSecret: Uint8Array, nowMillis: number): ApprovalEngine;
+  };
   /** Trims and lowercases an address; undefined when it is not one. */
   normalizeEmail(email: string): string | undefined;
 }

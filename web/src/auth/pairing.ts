@@ -1,5 +1,5 @@
 import { ApiFailure } from "../api/auth";
-import type { ApprovalEngine, ApproverPairing, DevicePairing } from "../api/authCrypto";
+import type { ApproverPairing, DevicePairing } from "../api/authCrypto";
 import type { StoredSession } from "../api/keyStore";
 import type { Device } from "../generated/Device";
 import type { AuthServices, PollSchedule } from "./services";
@@ -106,18 +106,9 @@ export function* delays(poll: PollSchedule): Generator<number> {
 const nowSecs = (services: AuthServices) => Math.floor(services.now() / 1000);
 const isGone = (e: unknown) => e instanceof ApiFailure && (e.status === 404 || e.status === 410 || e.code === "approval_expired" || e.code === "invalid_commitment");
 
-function engineFor(services: AuthServices, session: StoredSession): Promise<ApprovalEngine> {
-  return services.keys.loadKeys().then((saved) => {
-    if (!saved) throw new ApiFailure("device_not_trusted", 403, "This device has no keys, so it can’t take part in an approval.");
-    const crypto = services.crypto();
-    return crypto.approvals(crypto.deviceKeys.import(saved), session.accountId, session.deviceId);
-  });
-}
-
 /** The trusted device's side. */
 export class ApproverController extends Controller<ApproverState> {
   private id: string | null = null;
-  private engine: ApprovalEngine | null = null;
   private pairing: ApproverPairing | null = null;
   private ended = false;
 
@@ -132,8 +123,7 @@ export class ApproverController extends Controller<ApproverState> {
   /** Creates the approval and walks to the comparison. */
   async start(): Promise<void> {
     try {
-      this.engine = await engineFor(this.services, this.session);
-      this.pairing = this.engine.startApproval(this.pending, nowSecs(this.services));
+      this.pairing = await this.services.engine.run(this.session, (e) => e.startApproval(this.pending, nowSecs(this.services)));
       const created = await this.services.api.createApproval(this.pairing.createRequest);
       this.id = created.id;
       this.set({ phase: "waiting" });
@@ -160,12 +150,14 @@ export class ApproverController extends Controller<ApproverState> {
 
   /** "They match": only now does this device sign the approval. */
   async confirm(): Promise<void> {
-    if (this.state.phase !== "compare" || !this.engine || !this.pairing || !this.id) return;
+    if (this.state.phase !== "compare" || !this.pairing || !this.id) return;
     const id = this.id;
     this.set({ phase: "confirming" });
     try {
       const devices = await this.services.api.devices();
-      await this.services.api.confirmApproval(id, this.engine.confirmApproval(this.pairing, devices));
+      const pairing = this.pairing;
+      const body = await this.services.engine.run(this.session, (e) => e.confirmApproval(pairing, devices));
+      await this.services.api.confirmApproval(id, body);
       this.set({ phase: "finishing" });
       const done = await this.poll(async () => {
         const list = await this.services.api.devices();
@@ -226,7 +218,6 @@ export class ApproverController extends Controller<ApproverState> {
 
 /** The new device's side. */
 export class DeviceController extends Controller<DeviceState> {
-  private engine: ApprovalEngine | null = null;
   private pairing: DevicePairing | null = null;
   private approvalId: string | null = null;
   private typed: string | undefined;
@@ -298,8 +289,7 @@ export class DeviceController extends Controller<DeviceState> {
       }
       if (this.approvalId !== view.id) {
         this.set({ phase: "joining" });
-        this.engine ??= await engineFor(this.services, this.session);
-        this.pairing = this.engine.joinApproval(view, nowSecs(this.services));
+        this.pairing = await this.services.engine.run(this.session, (e) => e.joinApproval(view, nowSecs(this.services)));
         this.approvalId = view.id;
         this.budget = 0;
         await this.services.api.submitNonce(view.id, this.pairing.nonce);
@@ -310,8 +300,9 @@ export class DeviceController extends Controller<DeviceState> {
         this.set({ phase: "compare", sas: this.pairing!.sas(view) });
         return false;
       }
-      if (this.state.phase === "finishing" && view.signature && this.engine && this.pairing) {
-        const code = this.engine.finishApproval(this.pairing, view, this.typed, nowSecs(this.services));
+      if (this.state.phase === "finishing" && view.signature && this.pairing) {
+        const pairing = this.pairing;
+        const code = await this.services.engine.run(this.session, (e) => e.finishApproval(pairing, view, this.typed, nowSecs(this.services)));
         await this.services.api.submitCode(view.id, { code });
         // The planner opens on "Continue", so the person sees that this device is trusted.
         this.set({ phase: "trusted" });

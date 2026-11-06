@@ -21,6 +21,7 @@ export interface WasmDeviceSession {
 export interface WasmSyncEngine {
   verifyDevices(devicesJson: string): string;
   signRemoval(deviceJson: string): string;
+  snapshot(wrapSecret: Uint8Array): Uint8Array;
   startApproval(deviceJson: string, nowSecs: number): WasmApproverSession;
   confirmApproval(session: WasmApproverSession, devicesJson: string): string;
   joinApproval(viewJson: string, nowSecs: number): WasmDeviceSession;
@@ -40,20 +41,27 @@ export interface OrbynWasmModule {
   finishLogin(pending: PendingLogin, password: Uint8Array, response: Uint8Array): Uint8Array;
   DeviceKeys: {
     create(): DeviceKeys;
-    import(bytes: Uint8Array): DeviceKeys;
+    import(sealed: Uint8Array, wrapSecret: Uint8Array): DeviceKeys;
   };
   SyncEngine: {
     create(keys: DeviceKeys, accountId: string, deviceId: string): WasmSyncEngine;
+    restore(keys: DeviceKeys, sealed: Uint8Array, wrapSecret: Uint8Array, nowMillis: number): WasmSyncEngine;
   };
   normalizeEmail(email: string): string | undefined;
 }
 
 /** The approval functions over a loaded module: typed objects in, the module's JSON strings underneath. */
+/**
+ * A session is its own object in the module, independent of the engine that made it, so it can be
+ * used with another engine restored from the same snapshot.
+ */
+const sessions = new WeakMap<object, WasmApproverSession | WasmDeviceSession>();
+
 function wasmApprovals(engine: WasmSyncEngine): ApprovalEngine {
-  const sessions = new WeakMap<object, WasmApproverSession | WasmDeviceSession>();
   const approver = (s: ApproverPairing) => sessions.get(s) as WasmApproverSession;
   const device = (s: DevicePairing) => sessions.get(s) as WasmDeviceSession;
   return {
+    snapshot: (wrapSecret) => engine.snapshot(wrapSecret),
     verifyDevices: (devices) => JSON.parse(engine.verifyDevices(JSON.stringify(devices))) as string[],
     signRemoval: (target) => JSON.parse(engine.signRemoval(JSON.stringify(target))) as RemoveDevice,
     startApproval: (target, nowSecs) => {
@@ -90,9 +98,12 @@ export function wasmAuthCrypto(module: OrbynWasmModule): AuthCrypto {
     finishLogin: (pending, password, response) => module.finishLogin(pending, password, response),
     deviceKeys: {
       create: () => module.DeviceKeys.create(),
-      import: (bytes) => module.DeviceKeys.import(bytes),
+      import: (sealed, wrapSecret) => module.DeviceKeys.import(sealed, wrapSecret),
     },
-    approvals: (keys, accountId, deviceId) => wasmApprovals(module.SyncEngine.create(keys, accountId, deviceId)),
+    engine: {
+      create: (keys, accountId, deviceId) => wasmApprovals(module.SyncEngine.create(keys, accountId, deviceId)),
+      restore: (keys, sealed, wrapSecret, nowMillis) => wasmApprovals(module.SyncEngine.restore(keys, sealed, wrapSecret, nowMillis)),
+    },
     normalizeEmail: (email) => module.normalizeEmail(email),
   };
 }

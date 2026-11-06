@@ -21,6 +21,15 @@ export interface KeyStore {
   loadKeys(): Promise<Uint8Array | null>;
   saveKeys(bytes: Uint8Array): Promise<void>;
   clearKeys(): Promise<void>;
+  /** The sync engine's state, sealed by the module under the wrapping secret. Never stored unsealed. */
+  loadSnapshot(): Promise<Uint8Array | null>;
+  saveSnapshot(sealed: Uint8Array): Promise<void>;
+  clearSnapshot(): Promise<void>;
+  /** The non-extractable WebCrypto key the wrapping secret comes from. It can be stored but not read. */
+  loadWrapKey(): Promise<CryptoKey | null>;
+  saveWrapKey(key: CryptoKey): Promise<void>;
+  /** Forgets this device: keys, snapshot and wrapping key together (the snapshot is bound to the keys). */
+  clearDevice(): Promise<void>;
   loadSession(): Promise<StoredSession | null>;
   saveSession(session: StoredSession): Promise<void>;
   clearSession(): Promise<void>;
@@ -40,10 +49,11 @@ export function createIdbKeyStore(factory: IDBFactory = indexedDB): KeyStore {
   let db: Promise<IDBDatabase> | null = null;
   const open = () =>
     (db ??= new Promise<IDBDatabase>((resolve, reject) => {
-      const req = factory.open(KEY_DB_NAME, 1);
+      const req = factory.open(KEY_DB_NAME, 2);
       req.onupgradeneeded = () => {
-        req.result.createObjectStore("device");
-        req.result.createObjectStore("session");
+        for (const name of ["device", "session", "snapshot", "wrap"]) {
+          if (!req.result.objectStoreNames.contains(name)) req.result.createObjectStore(name);
+        }
       };
       req.onsuccess = () => {
         req.result.onversionchange = () => {
@@ -86,6 +96,16 @@ export function createIdbKeyStore(factory: IDBFactory = indexedDB): KeyStore {
     loadKeys: () => get<Uint8Array>("device"),
     saveKeys: (bytes) => put("device", bytes),
     clearKeys: () => remove("device"),
+    loadSnapshot: () => get<Uint8Array>("snapshot"),
+    saveSnapshot: (b) => put("snapshot", b),
+    clearSnapshot: () => remove("snapshot"),
+    loadWrapKey: () => get<CryptoKey>("wrap"),
+    saveWrapKey: (k) => put("wrap", k),
+    clearDevice: async () => {
+      await remove("device");
+      await remove("snapshot");
+      await remove("wrap");
+    },
     loadSession: () => get<StoredSession>("session"),
     saveSession: (s) => put("session", s),
     clearSession: () => remove("session"),
@@ -95,11 +115,23 @@ export function createIdbKeyStore(factory: IDBFactory = indexedDB): KeyStore {
 /** Keeps everything for this visit only. Used where IndexedDB does not exist; nothing here is written to localStorage. */
 export function createMemoryKeyStore(): KeyStore {
   let keys: Uint8Array | null = null;
+  let snapshot: Uint8Array | null = null;
+  let wrap: CryptoKey | null = null;
   let session: StoredSession | null = null;
   return {
     loadKeys: async () => keys,
     saveKeys: async (b) => void (keys = b),
     clearKeys: async () => void (keys = null),
+    loadSnapshot: async () => snapshot,
+    saveSnapshot: async (b) => void (snapshot = b),
+    clearSnapshot: async () => void (snapshot = null),
+    loadWrapKey: async () => wrap,
+    saveWrapKey: async (k) => void (wrap = k),
+    clearDevice: async () => {
+      keys = null;
+      snapshot = null;
+      wrap = null;
+    },
     loadSession: async () => session,
     saveSession: async (s) => void (session = s),
     clearSession: async () => void (session = null),

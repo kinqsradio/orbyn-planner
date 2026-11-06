@@ -50,7 +50,7 @@ describe("the WebAssembly adapter", () => {
     const login = crypto.startLogin(password);
     crypto.finishLogin(login, password, new Uint8Array([8]));
     const keys = crypto.deviceKeys.create();
-    crypto.deviceKeys.import(new Uint8Array(64));
+    crypto.deviceKeys.import(new Uint8Array(64), new Uint8Array(32));
     expect(crypto.normalizeEmail(" A@B.co ")).toBe("a@b.co");
     expect(keys.signingKey()).toBe("signing");
     expect(log).toEqual([
@@ -61,7 +61,9 @@ describe("the WebAssembly adapter", () => {
   it("approvals go to the module's SyncEngine, with JSON in and out", () => {
     const { module, log } = WasmAuthCrypto_forTests();
     const crypto = wasmAuthCrypto(module);
-    const engine = crypto.approvals(crypto.deviceKeys.create(), "acct", "dev");
+    const engine = crypto.engine.create(crypto.deviceKeys.create(), "acct", "dev");
+    expect(engine.snapshot(new Uint8Array(32))).toEqual(new Uint8Array([1]));
+    crypto.engine.restore(crypto.deviceKeys.create(), new Uint8Array([1]), new Uint8Array(32), 0);
     expect(engine.verifyDevices({ devices: [], removals: [] })).toEqual(["a"]);
     expect(engine.signRemoval({ id: "d" } as never)).toEqual({ sequence: 1, signature: "s" });
     const a = engine.startApproval({ id: "d" } as never, 1);
@@ -73,7 +75,7 @@ describe("the WebAssembly adapter", () => {
     expect(d.nonce).toEqual({ nonce: "d" });
     expect(d.sas({} as never)).toBe("123456");
     expect(engine.finishApproval(d, {} as never, undefined, 3)).toBe("123456");
-    expect(log).toEqual(expect.arrayContaining(["SyncEngine.create", "verifyDevices", "signRemoval", "startApproval", "reveal", "confirmApproval", "joinApproval", "finishApproval"]));
+    expect(log).toEqual(expect.arrayContaining(["SyncEngine.create", "SyncEngine.restore", "snapshot", "verifyDevices", "signRemoval", "startApproval", "reveal", "confirmApproval", "joinApproval", "finishApproval"]));
   });
 
   it("loading initialises the module and nothing registers it", async () => {

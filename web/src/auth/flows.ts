@@ -54,7 +54,7 @@ export async function signUp(services: AuthServices, input: { name: string; emai
       device: describeDevice(keys),
       device_signature: encodeBytes(keys.signRegistration(email, upload)),
     });
-    await services.keys.saveKeys(keys.export());
+    await services.keys.saveKeys(keys.export(await services.wrapSecret()));
     const session = toStored(created, email, input.name.trim());
     await services.tokens.set(session);
     return session;
@@ -73,7 +73,7 @@ export async function signIn(services: AuthServices, input: { email: string; pas
     const email = emailOrFail(crypto, input.email);
     const password = utf8(input.password);
     const saved = await services.keys.loadKeys();
-    const known = saved ? crypto.deviceKeys.import(saved) : null;
+    const known = saved ? crypto.deviceKeys.import(saved, await services.wrapSecret()) : null;
     const pending = crypto.startLogin(password);
 
     let trusted: { signing_key: string; signed_at: bigint; signature: string } | undefined;
@@ -96,7 +96,7 @@ export async function signIn(services: AuthServices, input: { email: string; pas
       device: describeDevice(keys),
       device_signature: encodeBytes(keys.signLogin(started.login_id)),
     });
-    if (!known) await services.keys.saveKeys(keys.export());
+    if (!known) await services.keys.saveKeys(keys.export(await services.wrapSecret()));
     const session = toStored(created, email, input.name ?? "");
     await services.tokens.set(session);
     return session;
@@ -113,30 +113,35 @@ export async function signOut(services: AuthServices): Promise<void> {
     // Already over, or unreachable: either way this device forgets it.
   }
   await services.tokens.clear();
+  // Signing out forgets the device: its keys and the engine's snapshot, which is bound to them, go together.
+  await services.keys.clearDevice().catch(() => undefined);
 }
 
 /**
  * Removes a device. The engine asks for this device's signature over the account, the device, its
- * keys and a removal sequence one above every removal this device has counted, so the list is read
- * and counted first.
+ * keys and a removal sequence one above every removal this device has counted. The count lives in
+ * the engine's saved state, so it only goes up; the list is counted first, and again afterwards so
+ * this removal is counted before the next.
  */
 export async function removeDevice(services: AuthServices, session: StoredSession, device: Device): Promise<void> {
-  const saved = await services.keys.loadKeys();
-  if (!saved) throw new ApiFailure("device_not_trusted", 403, "This device has no keys, so it can’t remove another.");
-  const crypto = services.crypto();
-  const engine = crypto.approvals(crypto.deviceKeys.import(saved), session.accountId, session.deviceId);
-  engine.verifyDevices(await services.api.devices());
-  await services.api.removeDevice(device.id, engine.signRemoval(device));
+  const list = await services.api.devices();
+  const body = await services.engine.run(session, (engine) => {
+    engine.verifyDevices(list);
+    return engine.signRemoval(device);
+  });
+  await services.api.removeDevice(device.id, body);
+  try {
+    const after = await services.api.devices();
+    await services.engine.run(session, (engine) => void engine.verifyDevices(after));
+  } catch {
+    // The removal is done; the next one counts it from the list.
+  }
 }
 
 /** The ids of the devices this device itself verifies (never the server's word), or null if it can't tell. */
 export async function verifiedDevices(services: AuthServices, session: StoredSession, list: DeviceList): Promise<Set<string> | null> {
   try {
-    const saved = await services.keys.loadKeys();
-    if (!saved) return null;
-    const crypto = services.crypto();
-    const engine = crypto.approvals(crypto.deviceKeys.import(saved), session.accountId, session.deviceId);
-    return new Set(engine.verifyDevices(list));
+    return new Set(await services.engine.run(session, (engine) => engine.verifyDevices(list)));
   } catch {
     return null;
   }

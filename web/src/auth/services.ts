@@ -2,6 +2,8 @@ import { createAuthApi, type AuthApi } from "../api/auth";
 import { requireAuthCrypto, type AuthCrypto } from "../api/authCrypto";
 import { defaultKeyStore, type KeyStore } from "../api/keyStore";
 import { TokenStore } from "../api/tokenStore";
+import { wrapSecretFrom } from "../api/wrapSecret";
+import { createEngineHost, type EngineHost, type Lock } from "./engineHost";
 
 /** Everything the account screens use, so tests can swap the network, the storage and the crypto. */
 export interface AuthServices {
@@ -12,6 +14,10 @@ export interface AuthServices {
   crypto: () => AuthCrypto;
   /** The time in milliseconds; tests pin it. */
   now: () => number;
+  /** The secret keys and the engine snapshot are sealed under. */
+  wrapSecret: () => Promise<Uint8Array>;
+  /** This device's sync engine, kept sealed in the key store. */
+  engine: EngineHost;
   /** How a waiting device or approver asks the server again: back off from `firstMs` to `maxMs`, give up after `totalMs`. */
   poll: PollSchedule;
 }
@@ -32,6 +38,8 @@ export interface AuthServiceOptions {
   crypto?: () => AuthCrypto;
   now?: () => number;
   poll?: PollSchedule;
+  wrapSecret?: () => Promise<Uint8Array>;
+  lock?: Lock;
 }
 
 export function createAuthServices(options: AuthServiceOptions = {}): AuthServices {
@@ -44,5 +52,9 @@ export function createAuthServices(options: AuthServiceOptions = {}): AuthServic
     // A 401 on a signed-in call: the session is over, so forget the token.
     onUnauthorized: () => void tokens.clear(),
   });
-  return { api, tokens, keys, crypto: options.crypto ?? requireAuthCrypto, now: options.now ?? Date.now, poll: options.poll ?? DEFAULT_POLL };
+  const crypto = options.crypto ?? requireAuthCrypto;
+  const now = options.now ?? Date.now;
+  const wrapSecret = options.wrapSecret ?? (() => wrapSecretFrom(keys));
+  const engine = createEngineHost({ keys, crypto, wrapSecret, now, lock: options.lock });
+  return { api, tokens, keys, crypto, now, poll: options.poll ?? DEFAULT_POLL, wrapSecret, engine };
 }

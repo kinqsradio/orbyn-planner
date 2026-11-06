@@ -23,8 +23,17 @@ let nowMs = NOW.getTime();
 /** Fast polling so the tests do not wait; the real schedule is 2 s backing off to 10 s. */
 const FAST_POLL = { firstMs: 5, maxMs: 20, totalMs: 5000 };
 
+/** Each browser has a wrapping secret of its own, as each has its own non-extractable key. */
+const wraps = new WeakMap<KeyStore, Uint8Array>();
+const wrapFor = (keys: KeyStore) => {
+  let w = wraps.get(keys);
+  if (!w) wraps.set(keys, (w = Uint8Array.from({ length: 32 }, () => Math.floor(Math.random() * 256))));
+  return w;
+};
+
 function services(keys: KeyStore = createMemoryKeyStore(), useRealCrypto = false, poll = FAST_POLL): AuthServices {
   return createAuthServices({
+    wrapSecret: async () => wrapFor(keys),
     fetch: engine.fetch,
     baseUrl: "http://engine.test",
     keys,
@@ -331,6 +340,37 @@ describe("adding a device", () => {
     void a;
   });
 
+  it("a device approved by another is shown as trusting it after a reload, because its engine state was saved", async () => {
+    const { b, dialog, onDevice, onA, onB } = await compared();
+    await userEvent.click(within(dialog).getByRole("button", { name: "They match" }));
+    await userEvent.click(onDevice.getByRole("button", { name: "They match" }));
+    await userEvent.click(await onDevice.findByRole("button", { name: "Continue" }));
+    await onDevice.findByRole("heading", { name: "Nothing planned yet" });
+    const sealed = await b.keys.loadSnapshot();
+    expect(sealed).not.toBeNull();
+    onA.unmount();
+    onB.unmount();
+
+    // A page load later: the saved state says who this device pinned after the digits matched.
+    const reloaded = services(b.keys);
+    const open = async () => {
+      const view = await mount(reloaded, "/settings");
+      await openAccount();
+      const list = await screen.findByRole("list", { name: "Devices" });
+      await waitFor(() => expect(within(list).getAllByRole("listitem")).toHaveLength(2));
+      return { view, list };
+    };
+    const first = await open();
+    expect(within(first.list).queryAllByRole("button", { name: /^Approve/ })).toHaveLength(0);
+    expect(within(first.list).queryByText("Needs approving again")).not.toBeInTheDocument();
+    first.view.unmount();
+
+    // Without the saved state the other device would look untrusted.
+    await b.keys.clearSnapshot();
+    const second = await open();
+    await waitFor(() => expect(within(second.list).getAllByRole("button", { name: /^Approve/ })).toHaveLength(1));
+  });
+
   it("the new device can type the digits instead of tapping", async () => {
     const { dialog, sasA, onDevice } = await compared();
     await userEvent.click(within(dialog).getByRole("button", { name: "They match" }));
@@ -392,7 +432,7 @@ describe("adding a device", () => {
     const { a } = await twoDevices();
     const short = services(createMemoryKeyStore(), false, { firstMs: 5, maxMs: 10, totalMs: 60 });
     // Same keys as A, a short patience; no new device is mounted, so nothing joins.
-    const withKeys = createAuthServices({ fetch: engine.fetch, baseUrl: "http://engine.test", keys: a.keys, crypto: () => crypto, now: () => nowMs, poll: { firstMs: 5, maxMs: 10, totalMs: 60 } });
+    const withKeys = createAuthServices({ fetch: engine.fetch, baseUrl: "http://engine.test", keys: a.keys, crypto: () => crypto, now: () => nowMs, wrapSecret: async () => wrapFor(a.keys), poll: { firstMs: 5, maxMs: 10, totalMs: 60 } });
     void short;
     await mount(withKeys, "/settings");
     await openAccount();
@@ -463,7 +503,7 @@ describe("removing a device and approving one again", () => {
     const account = [...engine.accounts.values()][0]!;
     const keysC = createMemoryKeyStore();
     const material = crypto.deviceKeys.create();
-    await keysC.saveKeys(material.export());
+    await keysC.saveKeys(material.export(wrapFor(keysC)));
     const old = {
       id: "00000000-0000-4000-8000-0000000000c1", name: "Old phone", platform: "ios" as const, state: "trusted" as const, signing_key: material.signingKey(),
       agreement_key: material.agreementKey(), created_at: new Date(NOW.getTime() - 86_400_000).toISOString(), approved_by: null, approval_signature: null, current: false,
@@ -540,13 +580,16 @@ describe("signing out", () => {
   it("Sign out ends the session on the server and here, and shows the landing page", async () => {
     const auth = await signedIn();
     await openAccount();
+    await waitFor(async () => expect(await auth.keys.loadSnapshot()).not.toBeNull()); // opening Account made the engine's state
     await userEvent.click(await screen.findByRole("button", { name: "Sign out" }));
     expect(await screen.findByRole("heading", { name: /Your tasks and calendar/ })).toBeInTheDocument();
     const out = engine.calls.find((c) => c.method === "DELETE" && c.path === "/v1/sessions/current")!;
     expect(out.authorization).toMatch(/^Bearer token-/);
     expect(auth.tokens.token()).toBeNull();
     expect(await auth.keys.loadSession()).toBeNull();
-    expect(await auth.keys.loadKeys()).not.toBeNull(); // the device keeps its keys for the next sign-in
+    expect(await auth.keys.loadKeys()).toBeNull(); // signing out forgets the device: keys, snapshot and wrapping key
+    expect(await auth.keys.loadSnapshot()).toBeNull();
+    expect(await auth.keys.loadWrapKey()).toBeNull();
   });
 
   it("a 401 on a signed-in call clears the token and signs the person out", async () => {

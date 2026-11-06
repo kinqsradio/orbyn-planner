@@ -25,7 +25,8 @@ describe("polling", () => {
     const engine = createMockEngine();
     const crypto = new FakeAuthCrypto();
     const keys = createMemoryKeyStore();
-    const services = createAuthServices({ fetch: engine.fetch, baseUrl: "http://e.test", keys, crypto: () => crypto });
+    const wrap = new Uint8Array(32).fill(5);
+    const services = createAuthServices({ fetch: engine.fetch, baseUrl: "http://e.test", keys, crypto: () => crypto, wrapSecret: async () => wrap });
     // A pending device with a session on the mock server.
     const account = { id: "00000000-0000-4000-8000-0000000000a1", email: "a@b.co", verifier: new Uint8Array(32), devices: [] as Device[] };
     const pendingDevice: Device = {
@@ -35,7 +36,7 @@ describe("polling", () => {
     account.devices.push(pendingDevice);
     engine.accounts.set("a@b.co", account);
     engine.sessions.set("tok", { accountId: account.id, deviceId: pendingDevice.id });
-    await keys.saveKeys(crypto.deviceKeys.create().export());
+    await keys.saveKeys(crypto.deviceKeys.create().export(wrap));
     await services.tokens.set({ token: "tok", accountId: account.id, deviceId: pendingDevice.id, deviceState: "pending", expiresAt: "2027-01-01T00:00:00Z", email: "a@b.co", name: "" });
     const controller = new DeviceController(services, services.tokens.getSession()!);
     void controller.run();
@@ -58,8 +59,8 @@ describe("the approval functions of the stand-in crypto", () => {
     id: "00000000-0000-4000-8000-0000000000d1", name: "New", platform: "web", state: "pending", signing_key: deviceKeys.signingKey(),
     agreement_key: deviceKeys.agreementKey(), created_at: "2026-11-07T10:00:00Z", approved_by: null, approval_signature: null, current: false,
   });
-  const approverEngine = crypto.approvals(approverKeys, accountId, "00000000-0000-4000-8000-0000000000a2");
-  const deviceEngine = crypto.approvals(deviceKeys, accountId, pending().id);
+  const approverEngine = crypto.engine.create(approverKeys, accountId, "00000000-0000-4000-8000-0000000000a2");
+  const deviceEngine = crypto.engine.create(deviceKeys, accountId, pending().id);
   const NOW = 1_794_000_000;
 
   function viewFrom(a: ReturnType<typeof approverEngine.startApproval>, extra: Partial<PendingApproval> = {}): PendingApproval {
@@ -117,7 +118,7 @@ describe("the approval functions of the stand-in crypto", () => {
   it("a removal is signed one above the highest sequence counted from the list", () => {
     const target = pending();
     expect(approverEngine.signRemoval(target).sequence).toBe(1);
-    approverEngine.verifyDevices({ devices: [], removals: [{ device_id: "x", signing_key: "k", agreement_key: "k", removed_by: "y", sequence: 4, signature: "s" }] });
+    approverEngine.verifyDevices({ devices: [], removals: [{ device_id: "x", signing_key: "k", agreement_key: "k", removed_by: "00000000-0000-4000-8000-0000000000a2", sequence: 4, signature: "s" }] });
     expect(approverEngine.signRemoval(target).sequence).toBe(5);
   });
 
