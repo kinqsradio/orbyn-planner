@@ -27,6 +27,15 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
+      # The wire types must match orbyn-engine's main branch.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: kinqsradio/orbyn-engine
+          path: engine
+          persist-credentials: false
+      - run: npm run generate:check
+        env:
+          ORBYN_ENGINE_DIR: ${{ github.workspace }}/engine
       - run: npm run check
       - run: npm test
       - run: npm run build

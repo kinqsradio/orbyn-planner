@@ -13,7 +13,7 @@
   --btn: #111; --btnt: #fff;
   /* The design's #c2710a is 3.4:1 on the page; this is 4.6:1 even on the amber tint. */
   --amber: #a35a05; --amber-bg: rgba(245,158,11,.07); --amber-line: rgba(217,119,6,.32);
-  --red: #d42a2a; --red-bg: rgba(239,68,68,.07);
+  --red: #c42020; --red-bg: rgba(239,68,68,.07);
   --c1: #3b82f6; --c2: #16a34a; --c3: #a855f7; --c4: #f97316;
 }
 :root[data-theme="dark"] {
@@ -93,7 +93,7 @@ button { cursor: pointer; }
 .sheet:focus { outline: none; }
 
 .ph { display: flex; align-items: baseline; gap: 12px; padding: 22px 28px 6px; }
-.ph h1, .ph h3 { font-size: 22px; font-weight: 500; letter-spacing: -.015em; color: var(--t1); }
+.ph h1, .ph h2, .ph h3 { font-size: 22px; font-weight: 500; letter-spacing: -.015em; color: var(--t1); }
 .ph .sub { color: var(--t3); }
 .ph .acts { margin-left: auto; display: flex; gap: 6px; align-self: center; }
 
@@ -165,7 +165,7 @@ button { cursor: pointer; }
 .split > .l .nav { width: 100%; border: 0; background: transparent; text-align: left; font-size: 13px; }
 .split > .l .nav.on { background: var(--sel); }
 .split > .r { min-width: 0; display: flex; flex-direction: column; }
-.split .ph h1 { font-size: 18px; }
+.split .ph h1, .split .ph h2 { font-size: 18px; }
 
 /* Phone */
 .tabbar { display: none; }
@@ -214,3 +214,5 @@ button { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }

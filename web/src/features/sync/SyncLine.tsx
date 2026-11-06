@@ -74,19 +74,26 @@ export function useSyncStatus(pending = 0): { status: SyncStatus; retry: () => v
     let streak = 0;
     let last: boolean | null = null;
 
+    // One check at a time: a visibility change during a slow check must not
+    // start a second loop of timers.
+    let inFlight = false;
     const check = async () => {
+      if (inFlight) return;
+      inFlight = true;
       clearTimeout(timer);
       let ok: boolean;
       try {
         ok = (await getHealth(controller.signal)).status === "ok";
       } catch {
-        if (controller.signal.aborted) return;
         ok = false;
+      } finally {
+        inFlight = false;
       }
       if (controller.signal.aborted) return;
       streak = ok === last ? streak + 1 : 0;
       last = ok;
       setHealthy(ok);
+      clearTimeout(timer);
       timer = setTimeout(check, healthDelay(ok, streak) * 1000);
     };
     const onVisible = () => {
