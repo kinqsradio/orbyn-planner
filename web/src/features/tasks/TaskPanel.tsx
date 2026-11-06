@@ -1,3 +1,4 @@
+import { linksIn } from "../../app/links";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNow } from "../../app/clock";
 import { useUi } from "../../app/ui";
@@ -303,6 +304,15 @@ function Panel({ task }: { task: Task }) {
         onChange={(e) => setNotes(e.target.value)}
         onBlur={() => notes !== task.notes && store.updateTask(task.id, { notes })}
       />
+      {linksIn(notes).length > 0 && (
+        <ul className="note-links" aria-label="Links in the notes">
+          {linksIn(notes).map((u) => (
+            <li key={u}>
+              <a href={u} target="_blank" rel="noopener noreferrer" className="t3">{u}</a>
+            </li>
+          ))}
+        </ul>
+      )}
 
       <div className="tp-foot">
         <button type="button" className="ghost danger" onClick={remove}>Delete</button>

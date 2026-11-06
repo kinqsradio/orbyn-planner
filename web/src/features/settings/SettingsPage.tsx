@@ -5,6 +5,7 @@ import { Icon } from "../../components/Icon";
 import { CalendarForms, CalendarList } from "../calendar/CalendarList";
 import { AccountSettings } from "../auth/AccountSettings";
 import { NotificationsSettings } from "./NotificationsSettings";
+import { InstallHint } from "../../components/InstallHint";
 
 const LABELS: Record<ThemeChoice, string> = { system: "System", light: "Light", dark: "Dark", dim: "Dim" };
 const CATEGORIES = ["Account", "Planning", "Notifications", "Connected apps", "Calendars", "Privacy"] as const;
@@ -83,6 +84,7 @@ export function SettingsPage() {
                   </div>
                 </div>
               </div>
+              <InstallHint />
             </>
           ) : category === "Account" ? (
             <AccountSettings />

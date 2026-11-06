@@ -19,6 +19,7 @@ import { StoreProvider, usePlanner } from "../store/context";
 import type { PlannerStore } from "../store/types";
 import { Toast } from "../components/Toast";
 import { useNow } from "./clock";
+import { useExternalLinks } from "./links";
 import { UiProvider, useUi } from "./ui";
 import { AuthProvider } from "../auth/AuthProvider";
 import type { AuthServices } from "../auth/services";
@@ -164,6 +165,7 @@ function Shell() {
 
 /** `auth` turns accounts on: signed out, the public pages show first. Without it the planner runs on this device alone. */
 export function App({ store, auth }: { store?: PlannerStore; auth?: AuthServices }) {
+  useExternalLinks();
   const [own] = useState(() => store ?? new LocalStore());
   return (
     <StoreProvider store={own}>
