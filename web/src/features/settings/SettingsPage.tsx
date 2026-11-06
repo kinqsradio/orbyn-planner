@@ -3,6 +3,7 @@ import { CHOICES, chooseTheme, readStoredChoice, type ThemeChoice } from "../../
 import { usePrefs } from "../../app/prefs";
 import { Icon } from "../../components/Icon";
 import { CalendarForms, CalendarList } from "../calendar/CalendarList";
+import { AccountSettings } from "../auth/AccountSettings";
 import { NotificationsSettings } from "./NotificationsSettings";
 
 const LABELS: Record<ThemeChoice, string> = { system: "System", light: "Light", dark: "Dark", dim: "Dim" };
@@ -83,6 +84,8 @@ export function SettingsPage() {
                 </div>
               </div>
             </>
+          ) : category === "Account" ? (
+            <AccountSettings />
           ) : category === "Notifications" ? (
             <NotificationsSettings />
           ) : category === "Calendars" ? (

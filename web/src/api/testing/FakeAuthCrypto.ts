@@ -1,5 +1,17 @@
-import { AuthCryptoError, type AuthCrypto, type DeviceKeys } from "../authCrypto";
-import { concat, utf8 } from "../bytes";
+import type { AuthCrypto, DeviceKeys, PendingLogin, PendingRegistration } from "../authCrypto";
+import { concat, encodeBytes, utf8 } from "../bytes";
+import {
+  DEVICE_APPROVAL_CONTEXT,
+  DEVICE_LOGIN_CONTEXT,
+  DEVICE_REGISTER_CONTEXT,
+  TRUSTED_START_CONTEXT,
+  approvalMessage,
+  loginMessage,
+  normalizeEmail,
+  registerMessage,
+  trustedStartMessage,
+} from "./authMessages";
+import { decodeBytes } from "../bytes";
 
 /**
  * A stand-in for the real OPAQUE and Ed25519 code, for tests ONLY. It is not secure and must never
@@ -19,7 +31,7 @@ function digest(...parts: Uint8Array[]): Uint8Array {
   return out;
 }
 
-const passwordTag = (password: string) => digest(utf8("pw"), utf8(password));
+const passwordTag = (password: Uint8Array) => digest(utf8("pw"), password);
 
 export function fakeSignature(signing: Uint8Array, context: string, message: Uint8Array): Uint8Array {
   const half = digest(signing, utf8(context), message);
@@ -32,51 +44,75 @@ export function fakeVerify(signing: Uint8Array, context: string, message: Uint8A
 }
 
 /** What the mock server stores for a password, and checks at sign-in. */
-export const fakeVerifierFor = (password: string) => passwordTag(password);
+export const fakeVerifierFor = (password: string) => passwordTag(utf8(password));
 
 let counter = 0;
+
+class FakeDeviceKeys implements DeviceKeys {
+  constructor(private readonly signing: Uint8Array, private readonly agreement: Uint8Array) {}
+
+  export() {
+    return concat(this.signing, this.agreement);
+  }
+  signingKey() {
+    return encodeBytes(this.signing);
+  }
+  agreementKey() {
+    return encodeBytes(this.agreement);
+  }
+  sign(context: string, message: Uint8Array) {
+    return fakeSignature(this.signing, context, message);
+  }
+  signRegistration(email: string, upload: Uint8Array) {
+    const normal = normalizeEmail(email);
+    if (!normal) throw new Error("invalid_email: not an email");
+    return this.sign(DEVICE_REGISTER_CONTEXT, registerMessage(normal, upload, { signing: this.signing, agreement: this.agreement }));
+  }
+  signLogin(loginId: string) {
+    return this.sign(DEVICE_LOGIN_CONTEXT, loginMessage(loginId, { signing: this.signing, agreement: this.agreement }));
+  }
+  signTrustedStart(email: string, credentialRequest: Uint8Array, signedAt: number) {
+    const normal = normalizeEmail(email);
+    if (!normal) throw new Error("invalid_email: not an email");
+    return this.sign(TRUSTED_START_CONTEXT, trustedStartMessage(normal, credentialRequest, signedAt));
+  }
+  signApproval(accountId: string, deviceId: string, signingKey: string, agreementKey: string) {
+    return this.sign(DEVICE_APPROVAL_CONTEXT, approvalMessage(accountId, deviceId, { signing: decodeBytes(signingKey), agreement: decodeBytes(agreementKey) }));
+  }
+}
 
 export class FakeAuthCrypto implements AuthCrypto {
   readonly marker = FAKE_AUTH_MARKER;
 
-  async startRegistration(password: string) {
-    return { state: { password }, request: utf8("fake-registration-request") };
+  startRegistration(): PendingRegistration {
+    return { request: utf8("fake-registration-request") };
   }
 
-  async finishRegistration(state: unknown, password: string, response: Uint8Array) {
-    if (new TextDecoder().decode(response) !== "fake-registration-response") throw new AuthCryptoError("invalid_message");
-    void state;
-    return { upload: concat(utf8("fake-upload:"), passwordTag(password)) };
+  finishRegistration(_pending: PendingRegistration, password: Uint8Array, response: Uint8Array) {
+    if (new TextDecoder().decode(response) !== "fake-registration-response") throw new Error("invalid_message: not the server's answer");
+    return concat(utf8("fake-upload:"), passwordTag(password));
   }
 
-  async startLogin(password: string) {
-    return { state: { password }, request: utf8("fake-login-request") };
+  startLogin(): PendingLogin {
+    return { request: utf8("fake-login-request") };
   }
 
-  async finishLogin(state: unknown, password: string, response: Uint8Array) {
+  finishLogin(_pending: PendingLogin, password: Uint8Array, response: Uint8Array) {
     // The server's response carries the verifier; a wrong password does not match, on the device.
     const verifier = response.slice("fake-login-response:".length);
-    if (!passwordTag(password).every((b, i) => b === verifier[i])) throw new AuthCryptoError("login_failed");
-    void state;
-    return { finalization: utf8("fake-login-finalization") };
+    if (!passwordTag(password).every((b, i) => b === verifier[i])) throw new Error("auth_failed: the password is wrong or the server could not be verified");
+    return utf8("fake-login-finalization");
   }
 
-  async createDeviceKeys(): Promise<DeviceKeys> {
-    const n = ++counter;
-    const signing = digest(utf8("signing"), utf8(String(n)), utf8(String(Math.random())));
-    const agreement = digest(utf8("agreement"), utf8(String(n)), utf8(String(Math.random())));
-    return { signing, agreement, secret: null };
-  }
+  deviceKeys = {
+    create: (): DeviceKeys => {
+      const n = ++counter;
+      return new FakeDeviceKeys(digest(utf8("signing"), utf8(String(n)), utf8(String(Math.random()))), digest(utf8("agreement"), utf8(String(n)), utf8(String(Math.random()))));
+    },
+    import: (bytes: Uint8Array): DeviceKeys => new FakeDeviceKeys(bytes.slice(0, 32), bytes.slice(32, 64)),
+  };
 
-  async exportDeviceKeys(keys: DeviceKeys) {
-    return concat(keys.signing, keys.agreement);
-  }
-
-  async importDeviceKeys(bytes: Uint8Array): Promise<DeviceKeys> {
-    return { signing: bytes.slice(0, 32), agreement: bytes.slice(32, 64), secret: null };
-  }
-
-  async sign(keys: DeviceKeys, context: string, message: Uint8Array) {
-    return fakeSignature(keys.signing, context, message);
+  normalizeEmail(email: string) {
+    return normalizeEmail(email) ?? undefined;
   }
 }

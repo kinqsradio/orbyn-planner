@@ -18,16 +18,20 @@ export function PendingScreen() {
   const [left, setLeft] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const refresh = useCallback(async () => {
-    try {
-      const next = await services.api.currentDevice();
-      setCurrent(next);
-      if (next.device.state === "trusted") await services.tokens.update({ deviceState: "trusted" });
-    } catch (e) {
-      // A 401 has already signed this device out; other failures are shown by the next action.
-      if (!(e instanceof ApiFailure && e.status === 401)) setError(describeError(e));
-    }
-  }, [services]);
+  const refresh = useCallback(
+    () =>
+      services.api.currentDevice().then(
+        async (next) => {
+          setCurrent(next);
+          if (next.device.state === "trusted") await services.tokens.update({ deviceState: "trusted" });
+        },
+        (e: unknown) => {
+          // A 401 has already signed this device out; other failures are shown by the next action.
+          if (!(e instanceof ApiFailure && e.status === 401)) setError(describeError(e));
+        },
+      ),
+    [services],
+  );
 
   useEffect(() => {
     void refresh();
@@ -59,7 +63,7 @@ export function PendingScreen() {
   return (
     <main className="public-page" id="content" tabIndex={-1}>
       <form className="authcard" onSubmit={submit} aria-label="Approve this device">
-        <b className="auth-title">Approve this device</b>
+        <h1 className="auth-title">Approve this device</h1>
         <p className="t3">
           {auth.session?.email} is already open on another device. Open Orbyn Planner there, choose Allow for “{current?.device.name ?? "this device"}”, and type the 6-digit code it shows.
         </p>

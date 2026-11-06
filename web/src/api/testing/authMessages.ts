@@ -1,4 +1,4 @@
-import { concat, utf8, uuidBytes } from "./bytes";
+import { concat, utf8, uuidBytes } from "../bytes";
 
 /**
  * The messages devices sign, byte for byte as orbyn-auth-client builds them (a port of

@@ -1,0 +1,427 @@
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { App } from "../../app/App";
+import { ClockProvider } from "../../app/clock";
+import { SIGN_IN_UNAVAILABLE, registerAuthCrypto } from "../../api/authCrypto";
+import { createMemoryKeyStore, type KeyStore } from "../../api/keyStore";
+import { FakeAuthCrypto } from "../../api/testing/FakeAuthCrypto";
+import { createMockEngine, type MockEngine } from "../../api/testing/MockEngine";
+import { createAuthServices, type AuthServices } from "../../auth/services";
+import { deviceName } from "../../auth/deviceName";
+import { LocalStore } from "../../store/LocalStore";
+import { MemoryPersistence } from "../../store/persistence";
+
+const NOW = new Date(2026, 10, 7, 10, 0);
+const SAM = { name: "Sam Rivera", email: "Sam@Example.com", password: "correct horse battery" };
+const crypto = new FakeAuthCrypto();
+
+let engine: MockEngine;
+
+function services(keys: KeyStore = createMemoryKeyStore(), useRealCrypto = false): AuthServices {
+  return createAuthServices({
+    fetch: engine.fetch,
+    baseUrl: "http://engine.test",
+    keys,
+    crypto: useRealCrypto ? undefined : () => crypto,
+    now: () => NOW.getTime(),
+  });
+}
+
+async function mount(auth: AuthServices, path = "/today") {
+  window.history.replaceState(null, "", path);
+  const store = new LocalStore({ persistence: new MemoryPersistence(), now: () => NOW, broadcast: false });
+  await store.ready;
+  const root = document.createElement("div");
+  root.id = "root";
+  document.body.appendChild(root);
+  const view = render(
+    <ClockProvider value={() => NOW}>
+      <App store={store} auth={auth} />
+    </ClockProvider>,
+    { container: root },
+  );
+  return {
+    unmount: () => {
+      view.unmount();
+      root.remove();
+    },
+  };
+}
+
+beforeEach(() => {
+  vi.unstubAllGlobals();
+  // The planner's own health check, which the account screens do not use.
+  vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("offline"))));
+  engine = createMockEngine(() => NOW.getTime());
+});
+afterEach(() => {
+  cleanup();
+  document.getElementById("root")?.remove();
+  registerAuthCrypto(null);
+});
+
+async function fillSignUp(user = SAM) {
+  await userEvent.click(await screen.findByRole("button", { name: "Get started" }));
+  await userEvent.type(screen.getByLabelText("Name"), user.name);
+  await userEvent.type(screen.getByLabelText("Email"), user.email);
+  await userEvent.type(screen.getByLabelText("Password"), user.password);
+  await userEvent.click(screen.getByRole("button", { name: "Create account" }));
+}
+
+async function fillSignIn(email = SAM.email, password = SAM.password) {
+  await userEvent.type(await screen.findByLabelText("Email"), email);
+  await userEvent.type(screen.getByLabelText("Password"), password);
+  await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+}
+
+const todayShown = () => screen.findByRole("heading", { name: "Nothing planned yet" });
+const openAccount = async () => {
+  await userEvent.click(await screen.findByRole("button", { name: "Account" }));
+};
+
+describe("the public pages", () => {
+  it("shows the landing page when signed out, and the planner works without an account", async () => {
+    await mount(services());
+    expect(await screen.findByRole("heading", { name: /Your tasks and calendar/ })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Primary" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Use without an account" }));
+    await todayShown();
+    expect(localStorage.getItem("orbyn-planner.local-only")).toBe("1");
+    expect(engine.calls).toEqual([]);
+  });
+
+  it("remembers the choice to go on without an account", async () => {
+    const first = await mount(services());
+    await userEvent.click(await screen.findByRole("button", { name: "Use without an account" }));
+    await todayShown();
+    first.unmount();
+    await mount(services());
+    await todayShown();
+  });
+
+  it("Settings · Account offers sign-in when there is no account, and the sign-in screens open over the planner", async () => {
+    await mount(services(), "/settings");
+    await userEvent.click(await screen.findByRole("button", { name: "Use without an account" }));
+    await openAccount();
+    expect(screen.getByText("This device only")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(screen.getByRole("form", { name: "Sign in" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Back to the planner" }));
+    expect(screen.getByText("This device only")).toBeInTheDocument();
+  });
+
+  it("the Can’t sign in page offers approval from a trusted device and says the rest is not ready", async () => {
+    await mount(services());
+    await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
+    await userEvent.click(screen.getByRole("button", { name: "Can’t sign in?" }));
+    const group = screen.getByRole("group", { name: "Can’t sign in?" });
+    expect(within(group).getByText("Approve from a trusted device")).toBeInTheDocument();
+    expect(within(group).getAllByText("Not available yet.")).toHaveLength(3);
+    await userEvent.click(within(group).getByRole("button", { name: "Back to sign in" }));
+    expect(screen.getByRole("form", { name: "Sign in" })).toBeInTheDocument();
+  });
+
+  it("says plainly that sign-in is not in this build, and sends nothing", async () => {
+    registerAuthCrypto(null);
+    await mount(services(createMemoryKeyStore(), true));
+    await fillSignUp();
+    expect(await screen.findByRole("alert")).toHaveTextContent(`${SIGN_IN_UNAVAILABLE}.`);
+    expect(engine.calls).toEqual([]);
+    expect(screen.queryByRole("heading", { name: "Nothing planned yet" })).not.toBeInTheDocument();
+  });
+});
+
+describe("sign up", () => {
+  it("creates the account, signs this device in as its trusted first device and opens the planner", async () => {
+    const auth = services();
+    await mount(auth);
+    await fillSignUp();
+    await todayShown();
+    expect(engine.calls.map((c) => `${c.method} ${c.path}`).slice(0, 2)).toEqual(["POST /v1/accounts/register/start", "POST /v1/accounts/register/finish"]);
+    const finish = engine.calls[1]!.body as { email: string; device: { platform: string; name: string } };
+    expect(finish.email).toBe("sam@example.com"); // trimmed and lowercased
+    expect(finish.device).toMatchObject({ platform: "web", name: deviceName() });
+    const session = auth.tokens.getSession()!;
+    expect(session).toMatchObject({ email: "sam@example.com", name: "Sam Rivera", deviceState: "trusted" });
+    expect(await auth.keys.loadSession()).toEqual(session); // kept for a reload
+    expect(await auth.keys.loadKeys()).not.toBeNull();
+    expect(localStorage.getItem("orbyn-planner.local-only")).toBeNull();
+  });
+
+  it("needs a password of 8 characters", async () => {
+    await mount(services());
+    await userEvent.click(await screen.findByRole("button", { name: "Get started" }));
+    await userEvent.type(screen.getByLabelText("Email"), "sam@example.com");
+    await userEvent.type(screen.getByLabelText("Password"), "short");
+    expect(screen.getByRole("button", { name: "Create account" })).toBeDisabled();
+  });
+
+  it("an email that is taken says so", async () => {
+    const first = await mount(services());
+    await fillSignUp();
+    await todayShown();
+    first.unmount();
+    await mount(services());
+    await fillSignUp();
+    expect(await screen.findByRole("alert")).toHaveTextContent("That email can’t be used for a new account");
+  });
+
+  it("an invalid email is refused before anything is sent", async () => {
+    await mount(services());
+    await fillSignUp({ ...SAM, email: "not an email" });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Enter a valid email address.");
+    expect(engine.calls).toEqual([]);
+  });
+
+  it("a session that has expired sends the person back to the landing page on the next visit", async () => {
+    const keys = createMemoryKeyStore();
+    const first = await mount(services(keys));
+    await fillSignUp();
+    await todayShown();
+    first.unmount();
+    await keys.saveSession({ ...(await keys.loadSession())!, expiresAt: "2026-01-01T00:00:00.000Z" });
+    await mount(services(keys));
+    expect(await screen.findByRole("heading", { name: /Your tasks and calendar/ })).toBeInTheDocument();
+  });
+});
+
+describe("sign in", () => {
+  async function accountWithSignedOutBrowser() {
+    const keys = createMemoryKeyStore();
+    const first = await mount(services(keys));
+    await fillSignUp();
+    await todayShown();
+    first.unmount();
+    await keys.clearSession(); // signed out; the device keeps its keys
+    return keys;
+  }
+
+  it("a wrong password gets a plain message and the second request is never sent", async () => {
+    await accountWithSignedOutBrowser();
+    await mount(services());
+    await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
+    await fillSignIn(SAM.email, "wrong wrong wrong");
+    expect(await screen.findByRole("alert")).toHaveTextContent("That email and password don’t match.");
+    expect(engine.calls.some((c) => c.path === "/v1/sessions/login/finish")).toBe(false);
+    expect(screen.queryByRole("heading", { name: "Nothing planned yet" })).not.toBeInTheDocument();
+  });
+
+  it("an unknown email looks exactly like a wrong password", async () => {
+    await mount(services());
+    await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
+    await fillSignIn("nobody@example.com", "whatever whatever");
+    expect(await screen.findByRole("alert")).toHaveTextContent("That email and password don’t match.");
+  });
+
+  it("too many attempts says to wait", async () => {
+    await mount(services());
+    await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
+    engine.refuseNext("/v1/sessions/login/start", 429, "too_many_attempts");
+    await fillSignIn();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Too many attempts. Wait a little while, then try again.");
+  });
+
+  it("a browser that is already trusted signs in with its proof and goes straight to the planner", async () => {
+    const keys = await accountWithSignedOutBrowser();
+    const auth = services(keys);
+    await mount(auth);
+    await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
+    await fillSignIn();
+    await todayShown();
+    expect(engine.state.trustedProofs).toBe(1);
+    const start = engine.calls.filter((c) => c.path === "/v1/sessions/login/start").at(-1)!.body as { trusted_device?: { signed_at: number } };
+    expect(start.trusted_device?.signed_at).toBe(Math.floor(NOW.getTime() / 1000));
+    expect(auth.tokens.getSession()?.deviceState).toBe("trusted");
+  });
+
+  it("a new browser signs in as a pending device and waits for approval", async () => {
+    await accountWithSignedOutBrowser();
+    const second = services();
+    await mount(second);
+    await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
+    await fillSignIn();
+    expect(await screen.findByRole("heading", { name: "Approve this device" })).toBeInTheDocument();
+    expect(await screen.findByText("Waiting for a trusted device to approve this one.")).toBeInTheDocument();
+    expect(second.tokens.getSession()?.deviceState).toBe("pending");
+    expect(engine.state.trustedProofs).toBe(0);
+    // The planner behind it is not open.
+    expect(screen.queryByRole("navigation", { name: "Primary" })).not.toBeInTheDocument();
+  });
+});
+
+describe("adding a device", () => {
+  /** A is signed up; B has signed in and waits. */
+  async function twoDevices() {
+    const keysA = createMemoryKeyStore();
+    const keysB = createMemoryKeyStore();
+    const a = services(keysA);
+    const b = services(keysB);
+    const first = await mount(a);
+    await fillSignUp();
+    await todayShown();
+    first.unmount();
+    const second = await mount(b);
+    await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
+    await fillSignIn();
+    await screen.findByRole("heading", { name: "Approve this device" });
+    second.unmount();
+    return { a, b };
+  }
+
+  it("the trusted device approves and shows the code; the new device types it and opens", async () => {
+    const { a, b } = await twoDevices();
+
+    // Device A: Settings · Account lists B as waiting, and Allow shows the code.
+    const onA = await mount(a, "/settings");
+    await openAccount();
+    const list = await screen.findByRole("list", { name: "Devices" });
+    await waitFor(() => expect(within(list).getAllByRole("listitem")).toHaveLength(2));
+    expect(within(list).getByText(/this device/)).toBeInTheDocument();
+    expect(within(list).getByText("Waiting for approval")).toBeInTheDocument();
+    await userEvent.click(within(list).getByRole("button", { name: `Approve ${deviceName()}` }));
+    const dialog = screen.getByRole("dialog", { name: "New sign-in" });
+    expect(within(dialog).queryByTestId("approval-code")).not.toBeInTheDocument(); // not before it is allowed
+    await userEvent.click(within(dialog).getByRole("button", { name: "Allow" }));
+    expect(await within(dialog).findByTestId("approval-code")).toHaveTextContent("418 207");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Done" }));
+    onA.unmount();
+
+    // Device B: the code input, with attempts left after a wrong code.
+    await mount(b);
+    const code = await screen.findByLabelText("6-digit code");
+    await userEvent.type(code, "111111");
+    await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(await screen.findByText("The code is wrong. Attempts left: 4.")).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("6-digit code"), "418 207");
+    await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await todayShown();
+    expect(b.tokens.getSession()?.deviceState).toBe("trusted");
+    expect((await b.keys.loadSession())?.deviceState).toBe("trusted");
+  });
+
+  it("the code needs six digits", async () => {
+    const { a, b } = await twoDevices();
+    const onA = await mount(a, "/settings");
+    await openAccount();
+    await userEvent.click(await screen.findByRole("button", { name: `Approve ${deviceName()}` }));
+    await userEvent.click(screen.getByRole("button", { name: "Allow" }));
+    await screen.findByTestId("approval-code");
+    onA.unmount();
+    await mount(b);
+    await userEvent.type(await screen.findByLabelText("6-digit code"), "4182");
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+  });
+
+  it("a refused approval is explained and Allow can be tried again", async () => {
+    const { a } = await twoDevices();
+    await mount(a, "/settings");
+    await openAccount();
+    await userEvent.click(await screen.findByRole("button", { name: `Approve ${deviceName()}` }));
+    engine.refuseNext("/v1/devices/approvals", 429, "too_many_attempts");
+    await userEvent.click(screen.getByRole("button", { name: "Allow" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Too many attempts");
+    await userEvent.click(screen.getByRole("button", { name: "Allow" }));
+    expect(await screen.findByTestId("approval-code")).toBeInTheDocument();
+  });
+
+  it("Add a device explains the steps", async () => {
+    await mount(services(), "/settings");
+    await userEvent.click(await screen.findByRole("button", { name: "Get started" }));
+    await userEvent.type(screen.getByLabelText("Email"), SAM.email);
+    await userEvent.type(screen.getByLabelText("Password"), SAM.password);
+    await userEvent.click(screen.getByRole("button", { name: "Create account" }));
+    await openAccount();
+    await userEvent.click(await screen.findByRole("button", { name: "Add a device" }));
+    expect(within(screen.getByRole("dialog", { name: "Add a device" })).getByText(/sign in with your email and password/)).toBeInTheDocument();
+  });
+
+  it("removing a device asks first, and the list updates", async () => {
+    const { a } = await twoDevices();
+    await mount(a, "/settings");
+    await openAccount();
+    const list = await screen.findByRole("list", { name: "Devices" });
+    await waitFor(() => expect(within(list).getAllByRole("listitem")).toHaveLength(2));
+    await userEvent.click(within(list).getByRole("button", { name: `Remove ${deviceName()}` }));
+    const dialog = screen.getByRole("dialog", { name: "Remove device" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(within(list).getAllByRole("listitem")).toHaveLength(2);
+    await userEvent.click(within(list).getByRole("button", { name: `Remove ${deviceName()}` }));
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Remove device" })).getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(within(screen.getByRole("list", { name: "Devices" })).getAllByRole("listitem")).toHaveLength(1));
+    // This device has no Remove: that is Sign out.
+    expect(screen.queryByRole("button", { name: /^Remove/ })).not.toBeInTheDocument();
+  });
+
+  it("the last trusted device is refused with a plain message", async () => {
+    const { a } = await twoDevices();
+    await mount(a, "/settings");
+    await openAccount();
+    await userEvent.click(await screen.findByRole("button", { name: `Remove ${deviceName()}` }));
+    engine.refuseNext("/v1/devices/", 409, "last_trusted_device", "The last trusted device cannot be removed.");
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Remove device" })).getByRole("button", { name: "Remove" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("This is your last trusted device. Approve another device first, then remove this one.");
+    expect(screen.getByRole("dialog", { name: "Remove device" })).toBeInTheDocument();
+  });
+});
+
+describe("signing out", () => {
+  async function signedIn(path = "/settings") {
+    const auth = services();
+    await mount(auth, path);
+    await fillSignUp();
+    await screen.findByRole("navigation", { name: "Primary" });
+    return auth;
+  }
+
+  it("Sign out ends the session on the server and here, and shows the landing page", async () => {
+    const auth = await signedIn();
+    await openAccount();
+    await userEvent.click(await screen.findByRole("button", { name: "Sign out" }));
+    expect(await screen.findByRole("heading", { name: /Your tasks and calendar/ })).toBeInTheDocument();
+    const out = engine.calls.find((c) => c.method === "DELETE" && c.path === "/v1/sessions/current")!;
+    expect(out.authorization).toMatch(/^Bearer token-/);
+    expect(auth.tokens.token()).toBeNull();
+    expect(await auth.keys.loadSession()).toBeNull();
+    expect(await auth.keys.loadKeys()).not.toBeNull(); // the device keeps its keys for the next sign-in
+  });
+
+  it("a 401 on a signed-in call clears the token and signs the person out", async () => {
+    const auth = await signedIn();
+    await openAccount();
+    await screen.findByRole("list", { name: "Devices" });
+    engine.expireAllSessions();
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(await screen.findByRole("heading", { name: /Your tasks and calendar/ })).toBeInTheDocument();
+    expect(auth.tokens.token()).toBeNull();
+    expect(await auth.keys.loadSession()).toBeNull();
+  });
+
+  it("after a 401 a person who chose no account goes back to the planner on this device", async () => {
+    localStorage.setItem("orbyn-planner.local-only", "1");
+    const auth = services();
+    await mount(auth, "/settings");
+    await openAccount();
+    await userEvent.click(screen.getByRole("button", { name: "Create an account" }));
+    await userEvent.type(screen.getByLabelText("Email"), SAM.email);
+    await userEvent.type(screen.getByLabelText("Password"), SAM.password);
+    await userEvent.click(screen.getByRole("button", { name: "Create account" }));
+    await screen.findByRole("list", { name: "Devices" });
+    engine.expireAllSessions();
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(auth.tokens.token()).toBeNull());
+    expect(await screen.findByText("This device only")).toBeInTheDocument();
+  });
+
+  it("every signed-in call carries the token as a Bearer header and nothing else carries it", async () => {
+    await signedIn();
+    await openAccount();
+    await screen.findByRole("list", { name: "Devices" });
+    const signedInCalls = engine.calls.filter((c) => c.path === "/v1/devices");
+    expect(signedInCalls.length).toBeGreaterThan(0);
+    expect(signedInCalls.every((c) => /^Bearer token-/.test(c.authorization ?? ""))).toBe(true);
+    expect(engine.calls.filter((c) => c.path.startsWith("/v1/accounts") || c.path.includes("/login/")).every((c) => c.authorization === null)).toBe(true);
+    expect(localStorage.getItem("token")).toBeNull();
+    expect(JSON.stringify({ ...localStorage })).not.toMatch(/token-/);
+  });
+});

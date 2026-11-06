@@ -1,43 +1,65 @@
-import type { DevicePublic } from "./authMessages";
-
-/** A device's keys: the public halves go to the server, `secret` is whatever the implementation needs to sign. */
-export interface DeviceKeys extends DevicePublic {
-  readonly secret: unknown;
-}
-
-/** Raised by an implementation when a step fails. `login_failed` is a wrong password. */
-export class AuthCryptoError extends Error {
-  constructor(readonly kind: "login_failed" | "invalid_message" | "failed", message?: string) {
-    super(message ?? kind);
-    this.name = "AuthCryptoError";
-  }
-}
-
 /**
- * The OPAQUE password protocol and the device keys (Ed25519 for signing, X25519 for agreement). The
- * engine's WebAssembly module, orbyn-wasm, will implement this; the planner only calls it. The
- * password never leaves it except as OPAQUE messages. The signing context is the domain separation
- * string (see authMessages.ts), which the implementation applies when it signs.
+ * The OPAQUE password protocol and the device keys (Ed25519 for signing, X25519 for agreement),
+ * shaped to match the engine's WebAssembly module, orbyn-wasm, name for name (its README has the
+ * table). Passwords and messages go in and out as bytes, public keys as base64url, and a failure
+ * throws an `Error` whose message starts with a stable code, such as `auth_failed: ...` for a wrong
+ * password. The planner builds and signs no protocol message itself: the module does, under the
+ * engine's own domain contexts, so the two can never drift apart.
  */
-export interface AuthCrypto {
-  /** Starts sign-up. `request` is sent as `registration_request`; `state` comes back to `finishRegistration`. */
-  startRegistration(password: string): Promise<{ state: unknown; request: Uint8Array }>;
-  /** Finishes sign-up with the server's `registration_response`. `upload` is sent as `registration_upload`. */
-  finishRegistration(state: unknown, password: string, response: Uint8Array): Promise<{ upload: Uint8Array }>;
-  startLogin(password: string): Promise<{ state: unknown; request: Uint8Array }>;
-  /** Throws `AuthCryptoError("login_failed")` for a wrong password, before anything is sent. */
-  finishLogin(state: unknown, password: string, response: Uint8Array): Promise<{ finalization: Uint8Array }>;
 
-  createDeviceKeys(): Promise<DeviceKeys>;
-  /** The bytes to keep on this device; non-extractable keys are not possible with every implementation. */
-  exportDeviceKeys(keys: DeviceKeys): Promise<Uint8Array>;
-  importDeviceKeys(bytes: Uint8Array): Promise<DeviceKeys>;
-  sign(keys: DeviceKeys, context: string, message: Uint8Array): Promise<Uint8Array>;
+/** Sign-up between its two requests. */
+export interface PendingRegistration {
+  /** `RegisterStart.registration_request`. */
+  readonly request: Uint8Array;
+}
+
+/** Sign-in between its two requests. */
+export interface PendingLogin {
+  /** `LoginStart.credential_request`. */
+  readonly request: Uint8Array;
+}
+
+/** One device's keys. */
+export interface DeviceKeys {
+  /** The secret bytes for this device's key store (64 of them). */
+  export(): Uint8Array;
+  signingKey(): string;
+  agreementKey(): string;
+  sign(context: string, message: Uint8Array): Uint8Array;
+  /** The `device_signature` of `RegisterFinish`. Normalises the email. */
+  signRegistration(email: string, upload: Uint8Array): Uint8Array;
+  /** The `device_signature` of `LoginFinish`, for the `login_id` from `LoginStarted`. */
+  signLogin(loginId: string): Uint8Array;
+  /** The `signature` of a `TrustedDeviceProof`; `signedAt` is Unix seconds. */
+  signTrustedStart(email: string, credentialRequest: Uint8Array, signedAt: number): Uint8Array;
+  /** The `signature` of `CreateApproval` for a pending device and its keys. */
+  signApproval(accountId: string, deviceId: string, signingKey: string, agreementKey: string): Uint8Array;
+}
+
+export interface AuthCrypto {
+  startRegistration(password: Uint8Array): PendingRegistration;
+  /** Returns `RegisterFinish.registration_upload`. Works once. */
+  finishRegistration(pending: PendingRegistration, password: Uint8Array, response: Uint8Array): Uint8Array;
+  startLogin(password: Uint8Array): PendingLogin;
+  /** Returns `LoginFinish.credential_finalization`. A wrong password throws `auth_failed`. */
+  finishLogin(pending: PendingLogin, password: Uint8Array, response: Uint8Array): Uint8Array;
+  /** `DeviceKeys.create()` and `DeviceKeys.import(bytes)` in the module. */
+  deviceKeys: {
+    create(): DeviceKeys;
+    import(bytes: Uint8Array): DeviceKeys;
+  };
+  /** Trims and lowercases an address; undefined when it is not one. */
+  normalizeEmail(email: string): string | undefined;
+}
+
+/** True for the module's error for a wrong password. */
+export function isAuthFailed(error: unknown): boolean {
+  return error instanceof Error && /^auth_failed\b/.test(error.message);
 }
 
 let registered: AuthCrypto | null = null;
 
-/** The real implementation registers itself here when its module is loaded. */
+/** The real implementation registers itself here once its module is loaded. */
 export function registerAuthCrypto(impl: AuthCrypto | null): void {
   registered = impl;
 }

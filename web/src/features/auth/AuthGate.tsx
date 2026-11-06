@@ -10,6 +10,14 @@ export function AuthGate({ children }: { children: ReactNode }) {
   if (auth.status === "loading") return null;
   if (auth.status === "landing") return <AuthScreens start="landing" />;
   if (auth.status === "pending") return <PendingScreen />;
-  if (auth.overlay) return <AuthScreens start={auth.overlay} />;
-  return <>{children}</>;
+  // Over the planner (from Settings): the planner stays mounted but hidden, so coming back finds
+  // the page as it was. It is always in the same wrapper, which takes no part in the layout.
+  return (
+    <>
+      <div hidden={auth.overlay !== null} style={auth.overlay ? undefined : { display: "contents" }}>
+        {children}
+      </div>
+      {auth.overlay && <AuthScreens start={auth.overlay} />}
+    </>
+  );
 }

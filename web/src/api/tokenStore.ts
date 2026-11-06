@@ -22,7 +22,7 @@ export class TokenStore {
 
   /** Reads the saved session on start-up. A session past its expiry is dropped. */
   async load(now = Date.now()): Promise<StoredSession | null> {
-    let saved: StoredSession | null = null;
+    let saved: StoredSession | null;
     try {
       saved = await this.keys.loadSession();
     } catch {

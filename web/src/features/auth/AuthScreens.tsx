@@ -54,8 +54,8 @@ function SignUp({ go }: { go: (s: AuthScreen) => void }) {
   };
 
   return (
-    <form className="authcard" onSubmit={submit} aria-label="Create your account">
-      <b className="auth-title">Create your account</b>
+    <form className="authcard" onSubmit={submit} aria-label="Create your account" noValidate>
+      <h1 className="auth-title">Create your account</h1>
       <div className="form" style={{ width: "auto" }}>
         <label htmlFor="su-name">Name</label>
         <input id="su-name" className="field" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} />
@@ -101,8 +101,8 @@ function SignIn({ go }: { go: (s: AuthScreen) => void }) {
   };
 
   return (
-    <form className="authcard" onSubmit={submit} aria-label="Sign in">
-      <b className="auth-title">Sign in</b>
+    <form className="authcard" onSubmit={submit} aria-label="Sign in" noValidate>
+      <h1 className="auth-title">Sign in</h1>
       <div className="form" style={{ width: "auto" }}>
         <label htmlFor="si-email">Email</label>
         <input id="si-email" className="field" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
@@ -133,7 +133,7 @@ function CantSignIn({ go }: { go: (s: AuthScreen) => void }) {
   ];
   return (
     <div className="authcard" role="group" aria-label="Can’t sign in?" style={{ width: 420 }}>
-      <b className="auth-title">Can’t sign in?</b>
+      <h1 className="auth-title">Can’t sign in?</h1>
       <ul className="auth-options">
         {options.map((o) => (
           <li key={o.label} className="nav" style={{ height: "auto", minHeight: 44, background: "var(--raise)", alignItems: "flex-start", padding: "10px 8px", opacity: o.ready ? 1 : 0.7 }}>
