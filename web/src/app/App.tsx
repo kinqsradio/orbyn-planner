@@ -24,6 +24,7 @@ import { useExternalLinks } from "./links";
 import { UiProvider, useUi } from "./ui";
 import { AuthProvider, useAuth } from "../auth/AuthProvider";
 import type { AuthServices } from "../auth/services";
+import { DeviceDataOffer } from "../features/auth/DeviceDataOffer";
 import { AuthGate } from "../features/auth/AuthGate";
 import { PrefsProvider } from "./prefs";
 import { CalendarsDialog } from "../features/calendar/CalendarsDialog";
@@ -197,6 +198,7 @@ function PlannerStores({ fixed, children }: { fixed?: PlannerStore; children: Re
   const store = useMemo(() => fixed ?? plannerFor(accountId), [fixed, accountId]);
   return (
     <StoreProvider key={fixed ? "fixed" : (accountId ?? "device")} store={store}>
+      {!fixed && accountId && <DeviceDataOffer accountId={accountId} />}
       {children}
     </StoreProvider>
   );

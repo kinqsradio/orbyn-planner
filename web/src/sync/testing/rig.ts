@@ -39,6 +39,8 @@ export interface SyncRig {
     refuseUploads: Map<string, { status: number; code: string }>;
     /** Milliseconds every request waits, to make a pass long enough to stop. */
     delayMs: number;
+    /** Runs when an upload reaches the server, before it answers: an edit made while the upload is out. */
+    onUpload?: () => void;
   };
 }
 
@@ -46,7 +48,7 @@ export interface SyncRig {
 export async function createSyncRig(): Promise<SyncRig> {
   const crypto = realAuthCrypto();
   const clock = { now: Date.UTC(2026, 10, 7, 10, 0, 0) };
-  const network = { down: false, loseAnswer: false, refuseKeys: false, dropZoneMake: false, refuseUploads: new Map<string, { status: number; code: string }>(), delayMs: 0 };
+  const network: SyncRig["network"] = { down: false, loseAnswer: false, refuseKeys: false, dropZoneMake: false, refuseUploads: new Map<string, { status: number; code: string }>(), delayMs: 0 };
   const engine = createMockEngine(() => clock.now);
   const fetchFn = (async (url: string, init?: RequestInit) => {
     if (network.down) throw new TypeError("Failed to fetch");
@@ -64,6 +66,7 @@ export async function createSyncRig(): Promise<SyncRig> {
       const refused = network.refuseUploads.get(zone);
       if (refused) return new Response(JSON.stringify({ code: refused.code, message: "Refused." }), { status: refused.status, headers: { "content-type": "application/json" } });
     }
+    if (method === "POST" && /\/v1\/zones\/[^/]+\/changes$/.test(String(url))) network.onUpload?.();
     if (network.loseAnswer && init?.method === "POST" && String(url).endsWith("/changes")) {
       network.loseAnswer = false;
       await engine.fetch(url, init);

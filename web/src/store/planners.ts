@@ -29,17 +29,33 @@ export function closePlanner(accountId: string): void {
   open.delete(name);
 }
 
-/** Closes an account's planner and deletes its database from this browser: its records and its outbox. */
-export async function removeAccountPlanner(accountId: string): Promise<void> {
-  closePlanner(accountId);
+async function deleteDatabase(name: string): Promise<void> {
   if (typeof indexedDB === "undefined") return;
   await new Promise<void>((resolve, reject) => {
-    const request = indexedDB.deleteDatabase(accountDb(accountId));
+    const request = indexedDB.deleteDatabase(name);
     request.onsuccess = () => resolve();
     request.onerror = () => reject(request.error);
     // Another tab still has it open: it closes on the version change and the delete goes through.
     request.onblocked = () => undefined;
   });
+}
+
+/** Closes an account's planner and deletes its database from this browser: its records and its outbox. */
+export async function removeAccountPlanner(accountId: string): Promise<void> {
+  closePlanner(accountId);
+  await deleteDatabase(accountDb(accountId));
+}
+
+/** Lets go of the planner kept on this device alone (its database stays). */
+export function closeDevicePlanner(): void {
+  open.get(DEVICE_DB)?.close();
+  open.delete(DEVICE_DB);
+}
+
+/** Empties the planner kept on this device alone: its database is deleted, and it starts again empty when next opened. */
+export async function removeDevicePlanner(): Promise<void> {
+  closeDevicePlanner();
+  await deleteDatabase(DEVICE_DB);
 }
 
 /** Lets go of every open planner. For tests. */

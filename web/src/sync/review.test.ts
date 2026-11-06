@@ -275,3 +275,84 @@ describe("a remote delete meets local edits waiting", () => {
     void encodeBytes;
   });
 });
+
+describe("the outbox is cleared only for what was sent", () => {
+  it("an edit made while the upload is out is staged next pass, not cleared with the older one", async () => {
+    const r = await createSyncRig();
+    const task = r.a.store.addTask({ title: "One" });
+    await sync(r.a);
+    r.a.store.updateTask(task.id, { title: "Two" });
+    let edited = false;
+    r.network.onUpload = () => {
+      if (edited) return;
+      edited = true;
+      r.a.store.updateTask(task.id, { title: "Three" }); // after "Two" was staged, before its answer
+    };
+    await sync(r.a);
+    expect(r.a.store.getState().outbox.some((o) => o.id === task.id)).toBe(true); // "Three" still waits
+    r.network.onUpload = undefined;
+    await sync(r.a);
+    await sync(r.b);
+    expect(r.b.store.getState().tasks.find((x) => x.id === task.id)?.title).toBe("Three");
+  });
+});
+
+describe("keys are sent again when the set of trusted devices changes", () => {
+  it("a device that became trusted after the first pass gets the zone's keys on the next one", async () => {
+    const r = await createSyncRig();
+    r.a.store.addTask({ title: "For the new device" });
+    const real = r.engine.fetch;
+    let hideB = true;
+    r.engine.fetch = (async (url: string, init?: RequestInit) => {
+      const response = await real(url, init);
+      if (hideB && (init?.method ?? "GET") === "GET" && new URL(String(url)).pathname === "/v1/devices") {
+        const body = (await response.json()) as { devices: { id: string }[] };
+        return new Response(JSON.stringify({ ...body, devices: body.devices.filter((d) => d.id !== r.b.id) }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return response;
+    }) as typeof fetch;
+    await sync(r.a); // B is not on the list yet: the keys go to nobody else
+    hideB = false;
+    await sync(r.a); // B appears, with nothing to upload: the keys must still go out again
+    r.engine.fetch = real;
+    await sync(r.b);
+    expect(titles(r.b)).toEqual(["For the new device"]);
+  });
+});
+
+describe("an edit is staged at the time it was made", () => {
+  it("a stale edit synced later doesn't beat a newer edit of the same field", async () => {
+    const r = await createSyncRig();
+    const task = r.a.store.addTask({ title: "Plan" });
+    await sync(r.a);
+    await sync(r.b);
+    r.clock.now += 1000;
+    r.a.store.updateTask(task.id, { title: "A, early" });
+    r.clock.now += 2000;
+    r.b.store.updateTask(task.id, { title: "B, later" });
+    await sync(r.b); // B goes first
+    r.clock.now += 60_000;
+    await sync(r.a); // A syncs a minute later, with the older edit
+    await sync(r.b);
+    for (const d of [r.a, r.b]) expect(d.store.getState().tasks.find((x) => x.id === task.id)?.title).toBe("B, later");
+  });
+});
+
+describe("a device-only planner added to the account", () => {
+  it("is uploaded the normal way and reaches the other device", async () => {
+    const r = await createSyncRig();
+    const { LocalStore } = await import("../store/LocalStore");
+    const { MemoryPersistence } = await import("../store/persistence");
+    const device = new LocalStore({ persistence: new MemoryPersistence(), broadcast: false });
+    await device.ready;
+    const trip = device.addList("Trip", "c3");
+    device.addTask({ title: "Passport", listId: trip.id });
+    device.addTask({ title: "Charger" });
+    r.a.store.adopt(device.getState());
+    await sync(r.a);
+    await sync(r.b);
+    expect(titles(r.b)).toEqual(["Charger", "Passport"]);
+    expect(r.b.store.getState().lists.some((l) => l.id === trip.id)).toBe(true);
+    expect(r.a.store.getState().outbox).toEqual([]);
+  });
+});

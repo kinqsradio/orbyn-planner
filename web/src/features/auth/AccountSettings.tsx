@@ -23,7 +23,7 @@ function when(iso: string): string {
 /** "418207" as "418 207", the way it is read out. */
 export const groupCode = (code: string) => (code.length === 6 ? `${code.slice(0, 3)} ${code.slice(3)}` : code);
 
-function Modal({ label, onClose, children }: { label: string; onClose: () => void; children: React.ReactNode }) {
+export function Modal({ label, onClose, children }: { label: string; onClose: () => void; children: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   useDialog(ref, onClose);
   return (

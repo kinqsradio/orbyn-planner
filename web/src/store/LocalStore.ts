@@ -112,6 +112,28 @@ export class LocalStore implements PlannerStore {
     return this.writes;
   }
 
+  /**
+   * Takes in records from another planner (the one kept on this device alone) as new local edits: they go
+   * through the outbox like anything typed here, and upload with the normal keys. A record whose id is
+   * already here (the Inbox, the Personal calendar, or something taken in earlier) is left as it is, so
+   * taking in the same planner twice adds nothing. Returns how many records were added.
+   */
+  adopt(from: PlannerState): number {
+    this.assertReady();
+    const inputs: PatchInput[] = [];
+    const add = <T extends { id: string }>(type: RecordType, records: readonly T[]) => {
+      for (const record of records) if (!this.current(type, record.id)) inputs.push({ type, id: record.id, op: "create", record } as unknown as PatchInput);
+    };
+    // Whatever a record belongs to goes first.
+    add("list", from.lists);
+    add("calendar", from.calendars);
+    add("project", from.projects);
+    add("task", from.tasks);
+    add("event", from.events);
+    if (inputs.length > 0) this.commit(inputs);
+    return inputs.length;
+  }
+
   /** Stops listening to other tabs. */
   close(): void {
     this.channel?.close();

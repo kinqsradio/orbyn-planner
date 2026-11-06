@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { SyncController } from "../sync/controller";
 import { LocalStore } from "../store/LocalStore";
+import { MemoryPersistence } from "../store/persistence";
 import { pairedBrowsers, until, engineUrl, type Browser } from "./testing/support";
 
 const DELAYS = { debounceMs: 30, pollMs: 5_000, retryMs: [100, 1000] as [number, number], socketMs: [100, 1000] as [number, number] };
@@ -68,6 +69,26 @@ describe.skipIf(!engineUrl)("record sync against a real engine", () => {
       const again = run({ ...a, store: reloaded });
       await until("the purge to reach B", () => !b.store.getState().tasks.some((t) => t.id === task.id));
       again.stop();
+    } finally {
+      ca.stop();
+      cb.stop();
+    }
+  }, 120_000);
+
+  it("what was made on this device alone is added to the account and reaches the other device", async () => {
+    const { a, b } = await pairedBrowsers(`e2e-adopt-${Date.now()}@example.com`);
+    // The planner kept on A's device alone, from before it signed in.
+    const deviceOnly = new LocalStore({ persistence: new MemoryPersistence(), broadcast: false });
+    await deviceOnly.ready;
+    const trip = deviceOnly.addList("Trip", "c3");
+    const task = deviceOnly.addTask({ title: "Passport", listId: trip.id });
+    deviceOnly.addEvent({ title: "Flight", start: "2026-12-01T09:00", end: "2026-12-01T11:00" });
+    expect(a.store.adopt(deviceOnly.getState())).toBe(3);
+    const ca = run(a);
+    const cb = run(b);
+    try {
+      await until("the records to reach B", () => b.store.getState().tasks.some((t) => t.id === task.id) && b.store.getState().lists.some((l) => l.id === trip.id) && b.store.getState().events.some((e) => e.title === "Flight"));
+      await until("A's outbox to clear", () => a.store.getState().outbox.length === 0);
     } finally {
       ca.stop();
       cb.stop();
