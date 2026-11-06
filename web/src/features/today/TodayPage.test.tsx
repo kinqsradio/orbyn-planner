@@ -47,10 +47,10 @@ describe("Today page", () => {
     });
 
     const rows = Array.from(document.querySelectorAll(".row .what")).map((el) => el.textContent);
-    expect(rows).toEqual(["all day", "noon", "evening", "late yesterday", "earlier today"]);
+    expect(rows).toEqual(["noon", "evening", "all day", "late yesterday", "earlier today"]);
     expect(screen.getByText("Overdue", { selector: "b" })).toHaveClass("amber");
     const times = Array.from(document.querySelectorAll(".row .time")).map((el) => el.textContent);
-    expect(times).toEqual(["Any", "12:00", "18:30", "Fri", "08:00"]);
+    expect(times).toEqual(["12:00", "18:30", "Any", "Fri", "08:00"]);
 
     const glance = screen.getByRole("list", { name: "The week at a glance" });
     const days = within(glance).getAllByRole("listitem").map((li) => li.textContent);
