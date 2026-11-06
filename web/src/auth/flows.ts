@@ -2,6 +2,8 @@ import { ApiFailure } from "../api/auth";
 import { isAuthFailed, type AuthCrypto, type DeviceKeys } from "../api/authCrypto";
 import { decodeBytes, encodeBytes, utf8 } from "../api/bytes";
 import type { StoredSession } from "../api/keyStore";
+import type { Device } from "../generated/Device";
+import type { DeviceList } from "../generated/DeviceList";
 import type { NewDevice } from "../generated/NewDevice";
 import type { SessionCreated } from "../generated/SessionCreated";
 import { deviceName } from "./deviceName";
@@ -111,4 +113,31 @@ export async function signOut(services: AuthServices): Promise<void> {
     // Already over, or unreachable: either way this device forgets it.
   }
   await services.tokens.clear();
+}
+
+/**
+ * Removes a device. The engine asks for this device's signature over the account, the device, its
+ * keys and a removal sequence one above every removal this device has counted, so the list is read
+ * and counted first.
+ */
+export async function removeDevice(services: AuthServices, session: StoredSession, device: Device): Promise<void> {
+  const saved = await services.keys.loadKeys();
+  if (!saved) throw new ApiFailure("device_not_trusted", 403, "This device has no keys, so it can’t remove another.");
+  const crypto = services.crypto();
+  const engine = crypto.approvals(crypto.deviceKeys.import(saved), session.accountId, session.deviceId);
+  engine.verifyDevices(await services.api.devices());
+  await services.api.removeDevice(device.id, engine.signRemoval(device));
+}
+
+/** The ids of the devices this device itself verifies (never the server's word), or null if it can't tell. */
+export async function verifiedDevices(services: AuthServices, session: StoredSession, list: DeviceList): Promise<Set<string> | null> {
+  try {
+    const saved = await services.keys.loadKeys();
+    if (!saved) return null;
+    const crypto = services.crypto();
+    const engine = crypto.approvals(crypto.deviceKeys.import(saved), session.accountId, session.deviceId);
+    return new Set(engine.verifyDevices(list));
+  } catch {
+    return null;
+  }
 }

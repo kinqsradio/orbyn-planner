@@ -8,10 +8,10 @@ import { groupCode } from "./AccountSettings";
  * then show the same six digits and the person confirms on each. Typing the other device's digits
  * is the alternative to tapping "They match".
  */
-export function PendingScreen() {
+export function PendingScreen({ repair = false, onDone }: { repair?: boolean; onDone?: () => void } = {}) {
   const auth = useAuth()!;
   const { services } = auth;
-  const controller = useMemo(() => new DeviceController(services, auth.session!), [services, auth.session]);
+  const controller = useMemo(() => new DeviceController(services, auth.session!, repair), [services, auth.session, repair]);
   const state = useSyncExternalStore(controller.subscribe, controller.getState);
   const [typing, setTyping] = useState(false);
   const [typed, setTyped] = useState("");
@@ -30,7 +30,7 @@ export function PendingScreen() {
   return (
     <main className="public-page" id="content" tabIndex={-1}>
       <div className="authcard" aria-label="Approve this device">
-        <h1 className="auth-title">Approve this device</h1>
+        <h1 className="auth-title">{repair ? "Approve this device again" : "Approve this device"}</h1>
         {(state.phase === "waiting" || state.phase === "joining" || state.phase === "joined") && (
           <>
             <p className="t3">
@@ -62,15 +62,20 @@ export function PendingScreen() {
         {state.phase === "trusted" && (
           <>
             <p role="status">This device is trusted.</p>
-            <button type="button" className="btn" onClick={() => void controller.continue()}>Continue</button>
+            <button type="button" className="btn" onClick={() => void controller.continue().then(onDone)}>Continue</button>
           </>
         )}
         {state.phase === "closed" && (
           <>
             <p className="err" role="alert">{state.message}</p>
-            <button type="button" className="btn" onClick={() => { setTyping(false); setTyped(""); controller.startAgain(); }}>Start again</button>
+            {repair ? (
+              <button type="button" className="btn" onClick={onDone}>Back to the planner</button>
+            ) : (
+              <button type="button" className="btn" onClick={() => { setTyping(false); setTyped(""); controller.startAgain(); }}>Start again</button>
+            )}
           </>
         )}
+        {repair && state.phase === "compare" && <p className="t3 small">A trusted device asked to approve this one again, because it no longer trusts it.</p>}
         <button type="button" className="link-btn quiet-link" onClick={() => void auth.signOut()}>Sign out</button>
       </div>
     </main>

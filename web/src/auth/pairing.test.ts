@@ -102,6 +102,25 @@ describe("the approval functions of the stand-in crypto", () => {
     expect(() => approverEngine.confirmApproval(a, { devices: [], removals: [] })).toThrow(/already_finished/);
   });
 
+  it("trust is its own view: the server's state is ignored, and a device it already pins is refused", () => {
+    const devices: Device[] = [
+      { ...pending(), id: "00000000-0000-4000-8000-0000000000a2", state: "trusted", current: true },
+      { ...pending(), id: "00000000-0000-4000-8000-0000000000e1", state: "trusted" }, // trusted by the server, no approval it can verify
+      { ...pending(), id: "00000000-0000-4000-8000-0000000000e2", state: "trusted", approved_by: "00000000-0000-4000-8000-0000000000a2", approval_signature: "sig" },
+    ];
+    const verified = approverEngine.verifyDevices({ devices, removals: [] });
+    expect(verified.sort()).toEqual(["00000000-0000-4000-8000-0000000000a2", "00000000-0000-4000-8000-0000000000e2"]);
+    expect(() => approverEngine.startApproval(devices[0]!, NOW)).toThrow(/already trusts/);
+    expect(() => approverEngine.startApproval(devices[1]!, NOW)).not.toThrow(); // stranded: approved again
+  });
+
+  it("a removal is signed one above the highest sequence counted from the list", () => {
+    const target = pending();
+    expect(approverEngine.signRemoval(target).sequence).toBe(1);
+    approverEngine.verifyDevices({ devices: [], removals: [{ device_id: "x", signing_key: "k", agreement_key: "k", removed_by: "y", sequence: 4, signature: "s" }] });
+    expect(approverEngine.signRemoval(target).sequence).toBe(5);
+  });
+
   it("an approval older than ten minutes is refused on joining", () => {
     const a = approverEngine.startApproval(pending(), NOW);
     expect(() => deviceEngine.joinApproval(viewFrom(a), NOW + 601)).toThrow(/approval_expired/);

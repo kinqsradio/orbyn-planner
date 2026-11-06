@@ -62,6 +62,8 @@ describe("the WebAssembly adapter", () => {
     const { module, log } = WasmAuthCrypto_forTests();
     const crypto = wasmAuthCrypto(module);
     const engine = crypto.approvals(crypto.deviceKeys.create(), "acct", "dev");
+    expect(engine.verifyDevices({ devices: [], removals: [] })).toEqual(["a"]);
+    expect(engine.signRemoval({ id: "d" } as never)).toEqual({ sequence: 1, signature: "s" });
     const a = engine.startApproval({ id: "d" } as never, 1);
     expect(a.deviceFingerprint()).toBe("fp");
     expect(a.reveal({} as never)).toEqual({ nonce: "n" });
@@ -71,7 +73,7 @@ describe("the WebAssembly adapter", () => {
     expect(d.nonce).toEqual({ nonce: "d" });
     expect(d.sas({} as never)).toBe("123456");
     expect(engine.finishApproval(d, {} as never, undefined, 3)).toBe("123456");
-    expect(log).toEqual(expect.arrayContaining(["SyncEngine.create", "startApproval", "reveal", "confirmApproval", "joinApproval", "finishApproval"]));
+    expect(log).toEqual(expect.arrayContaining(["SyncEngine.create", "verifyDevices", "signRemoval", "startApproval", "reveal", "confirmApproval", "joinApproval", "finishApproval"]));
   });
 
   it("loading initialises the module and nothing registers it", async () => {

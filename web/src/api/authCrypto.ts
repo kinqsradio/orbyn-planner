@@ -13,6 +13,7 @@ import type { CreateApproval } from "../generated/CreateApproval";
 import type { Device } from "../generated/Device";
 import type { DeviceList } from "../generated/DeviceList";
 import type { PendingApproval } from "../generated/PendingApproval";
+import type { RemoveDevice } from "../generated/RemoveDevice";
 
 /** Sign-up between its two requests. */
 export interface PendingRegistration {
@@ -66,7 +67,19 @@ export interface DevicePairing {
 
 /** The approval functions of the sync engine for one device (orbyn-wasm's `SyncEngine`). */
 export interface ApprovalEngine {
-  /** Step 1: starts approving a pending device. `nowSecs` is Unix seconds. */
+  /**
+   * The ids in the list this device verifies by approval chain: its own view of who is trusted,
+   * never the server's `state`. Also counts the list's removals, so the next one is signed with a
+   * sequence above them.
+   */
+  verifyDevices(devices: DeviceList): string[];
+  /** The `DELETE /v1/devices/{id}` body that removes a device: a sequence one above every removal this device has counted, and the signature over it. */
+  signRemoval(device: Device): RemoveDevice;
+  /**
+   * Step 1: starts approving a device this device does not verify: a pending one, or one the server
+   * lists as trusted that this device no longer trusts (stranded by a removal, say) and approves
+   * again. Throws for a device this device pins. `nowSecs` is Unix seconds.
+   */
   startApproval(device: Device, nowSecs: number): ApproverPairing;
   /** Step 4, only after the person tapped "They match" on this device: the body for `…/confirm`. Uses the session up. */
   confirmApproval(session: ApproverPairing, devices: DeviceList): ConfirmApproval;

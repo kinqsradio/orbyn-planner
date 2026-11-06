@@ -444,10 +444,87 @@ describe("adding a device", () => {
     await mount(a, "/settings");
     await openAccount();
     await userEvent.click(await screen.findByRole("button", { name: `Remove ${deviceName()}` }));
-    engine.refuseNext("/v1/devices/", 409, "last_trusted_device", "The last trusted device cannot be removed.");
+    engine.refuseNext("/v1/devices/0", 409, "last_trusted_device", "The last trusted device cannot be removed.");
     await userEvent.click(within(screen.getByRole("dialog", { name: "Remove device" })).getByRole("button", { name: "Remove" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("This is your last trusted device. Approve another device first, then remove this one.");
     expect(screen.getByRole("dialog", { name: "Remove device" })).toBeInTheDocument();
+  });
+});
+
+describe("removing a device and approving one again", () => {
+  /** A is signed up; C is a device the server lists as trusted but A never approved (stranded), with a session of its own. */
+  async function withStranded() {
+    const keysA = createMemoryKeyStore();
+    const a = services(keysA);
+    const first = await mount(a);
+    await fillSignUp();
+    await todayShown();
+    first.unmount();
+    const account = [...engine.accounts.values()][0]!;
+    const keysC = createMemoryKeyStore();
+    const material = crypto.deviceKeys.create();
+    await keysC.saveKeys(material.export());
+    const old = {
+      id: "00000000-0000-4000-8000-0000000000c1", name: "Old phone", platform: "ios" as const, state: "trusted" as const, signing_key: material.signingKey(),
+      agreement_key: material.agreementKey(), created_at: new Date(NOW.getTime() - 86_400_000).toISOString(), approved_by: null, approval_signature: null, current: false,
+    };
+    account.devices.push(old);
+    engine.sessions.set("token-c", { accountId: account.id, deviceId: old.id });
+    const c = services(keysC);
+    await c.tokens.set({ token: "token-c", accountId: account.id, deviceId: old.id, deviceState: "trusted", expiresAt: new Date(NOW.getTime() + 86_400_000).toISOString(), email: "sam@example.com", name: "" });
+    return { a, c, old, account };
+  }
+
+  it("removing sends the sequence and signature the engine asks for, one above what was counted", async () => {
+    const { a, account } = await withStranded();
+    const second = { ...account.devices[1]!, id: "00000000-0000-4000-8000-0000000000c2", name: "Tablet" };
+    account.devices.push(second);
+    await mount(a, "/settings");
+    await openAccount();
+    await userEvent.click(await screen.findByRole("button", { name: "Remove Old phone" }));
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Remove device" })).getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(engine.calls.filter((c) => c.method === "DELETE" && c.path.startsWith("/v1/devices/"))).toHaveLength(1));
+    const first = engine.calls.find((c) => c.method === "DELETE" && c.path.startsWith("/v1/devices/"))!.body as { sequence: number; signature: string };
+    expect(first.sequence).toBe(1);
+    expect(first.signature).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(account.removals).toHaveLength(1);
+    await userEvent.click(await screen.findByRole("button", { name: "Remove Tablet" }));
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Remove device" })).getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(account.removals).toHaveLength(2));
+    // The list now carries the first removal, which the device counts before it signs the next.
+    expect(account.removals![1]!.sequence).toBe(2);
+  });
+
+  it("a device this one doesn't verify is offered for approval again, whatever the server calls it", async () => {
+    const { a } = await withStranded();
+    await mount(a, "/settings");
+    await openAccount();
+    const list = await screen.findByRole("list", { name: "Devices" });
+    await waitFor(() => expect(within(list).getByText("Needs approving again")).toBeInTheDocument());
+    expect(within(list).getByRole("button", { name: "Approve Old phone again" })).toBeInTheDocument();
+    // This device itself is never offered.
+    expect(within(list).getAllByRole("button", { name: /^Approve/ })).toHaveLength(1);
+  });
+
+  it("the stranded device is shown the same comparison, and both confirm", async () => {
+    const { a, c, account } = await withStranded();
+    const onA = await mount(a, "/settings");
+    await openAccount();
+    const onC = await mount(c);
+    await userEvent.click(await screen.findByRole("button", { name: "Approve Old phone again" }));
+    const dialog = screen.getByRole("dialog", { name: "New sign-in" });
+    const sasA = (await within(dialog).findByTestId("approval-code")).textContent;
+    const device = within(onC.root);
+    expect(await device.findByRole("heading", { name: "Approve this device again" })).toBeInTheDocument();
+    expect((await device.findByTestId("approval-code")).textContent).toBe(sasA);
+    await userEvent.click(within(dialog).getByRole("button", { name: "They match" }));
+    await userEvent.click(device.getByRole("button", { name: "They match" }));
+    expect(await device.findByText("This device is trusted.")).toBeInTheDocument();
+    await userEvent.click(device.getByRole("button", { name: "Continue" }));
+    expect(await device.findByRole("heading", { name: "Nothing planned yet" })).toBeInTheDocument();
+    // The server's record of how the device was approved is replaced by this approval.
+    expect(account.devices.find((d) => d.name === "Old phone")).toMatchObject({ state: "trusted", approval_signature: expect.any(String) });
+    void onA;
   });
 });
 

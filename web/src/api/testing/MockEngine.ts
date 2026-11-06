@@ -33,6 +33,15 @@ interface Account {
   email: string;
   verifier: Uint8Array;
   devices: Device[];
+  removals?: Removal[];
+}
+interface Removal {
+  device_id: string;
+  signing_key: string;
+  agreement_key: string;
+  removed_by: string;
+  sequence: number;
+  signature: string;
 }
 /** An approval as the server holds it: the fields each step adds, in order. */
 interface Approval {
@@ -230,7 +239,7 @@ export function createMockEngine(now: () => number = () => Date.now()) {
       const sas = fakeSas(pairingBytes(partsOfView(account.id, v)), decodeBytes(a.approverNonce), decodeBytes(a.deviceNonce));
       a.closed = true;
       if ((body as { code: string }).code !== sas) return fail(400, "wrong_code", "The code is wrong. Attempts left: 0.");
-      device.state = "trusted";
+      device.state = "trusted"; // or, for a device approved again, stays so with the new approver and signature
       device.approved_by = a.approverId;
       device.approval_signature = a.signature;
       return json(200, view(device));
@@ -238,14 +247,15 @@ export function createMockEngine(now: () => number = () => Date.now()) {
 
     if (device.state !== "trusted") return fail(403, "device_not_trusted", "This device is not trusted.");
 
-    if (method === "GET" && path === "/v1/devices") return json(200, { devices: account.devices.map(view), removals: [] });
+    if (method === "GET" && path === "/v1/devices") return json(200, { devices: account.devices.map(view), removals: account.removals ?? [] });
     if (method === "DELETE" && path === "/v1/sessions") {
       for (const [t, s] of sessions) if (s.accountId === account.id) sessions.delete(t);
       return json(204, null);
     }
     if (method === "POST" && path === "/v1/devices/approvals") {
       const b = body as CreateApproval;
-      const pending = account.devices.find((d) => d.id === b.device_id && d.state === "pending");
+      // A pending device, or a trusted one approved again; the server cannot tell why.
+      const pending = account.devices.find((d) => d.id === b.device_id && d.id !== device.id);
       if (!pending) return fail(404, "not_found", "Not found.");
       if (Math.abs(now() / 1000 - b.created_at) > 300) return fail(400, "invalid_request", "The time is too far from the server's.");
       if (approvals.has(b.approval_id)) return fail(409, "invalid_request", "That approval id was used.");
@@ -280,12 +290,18 @@ export function createMockEngine(now: () => number = () => Date.now()) {
       return json(204, null);
     }
     if (method === "DELETE" && /^\/v1\/devices\/[^/]+$/.test(path)) {
+      // The remover's sequence (at most 2^53 - 1) and signature are required, as the engine requires them.
+      const b = body as { sequence?: unknown; signature?: unknown } | undefined;
+      if (typeof b?.sequence !== "number" || !Number.isSafeInteger(b.sequence) || b.sequence < 0 || typeof b.signature !== "string" || b.signature === "") {
+        return fail(400, "invalid_request", "A removal needs its sequence and signature.");
+      }
       const target = account.devices.find((d) => d.id === path.split("/")[3]);
       if (!target) return fail(404, "not_found", "Not found.");
       if (target.state === "trusted" && account.devices.filter((d) => d.state === "trusted").length === 1) {
         return fail(409, "last_trusted_device", "The last trusted device cannot be removed.");
       }
       account.devices = account.devices.filter((d) => d.id !== target.id);
+      (account.removals ??= []).push({ device_id: target.id, signing_key: target.signing_key, agreement_key: target.agreement_key, removed_by: device.id, sequence: b.sequence, signature: b.signature });
       for (const [t, s] of sessions) if (s.deviceId === target.id) sessions.delete(t);
       return json(204, null);
     }

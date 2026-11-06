@@ -2,6 +2,7 @@ import type { ApprovalNonce } from "../generated/ApprovalNonce";
 import type { ConfirmApproval } from "../generated/ConfirmApproval";
 import type { CreateApproval } from "../generated/CreateApproval";
 import type { PendingApproval } from "../generated/PendingApproval";
+import type { RemoveDevice } from "../generated/RemoveDevice";
 import type { ApprovalEngine, ApproverPairing, AuthCrypto, DeviceKeys, DevicePairing, PendingLogin, PendingRegistration } from "./authCrypto";
 
 /** `ApproverSession` in orbyn-wasm. */
@@ -18,6 +19,8 @@ export interface WasmDeviceSession {
 }
 /** `SyncEngine` in orbyn-wasm, as far as approving a device needs it. Data goes in and out as JSON. */
 export interface WasmSyncEngine {
+  verifyDevices(devicesJson: string): string;
+  signRemoval(deviceJson: string): string;
   startApproval(deviceJson: string, nowSecs: number): WasmApproverSession;
   confirmApproval(session: WasmApproverSession, devicesJson: string): string;
   joinApproval(viewJson: string, nowSecs: number): WasmDeviceSession;
@@ -51,6 +54,8 @@ function wasmApprovals(engine: WasmSyncEngine): ApprovalEngine {
   const approver = (s: ApproverPairing) => sessions.get(s) as WasmApproverSession;
   const device = (s: DevicePairing) => sessions.get(s) as WasmDeviceSession;
   return {
+    verifyDevices: (devices) => JSON.parse(engine.verifyDevices(JSON.stringify(devices))) as string[],
+    signRemoval: (target) => JSON.parse(engine.signRemoval(JSON.stringify(target))) as RemoveDevice,
     startApproval: (target, nowSecs) => {
       const inner = engine.startApproval(JSON.stringify(target), nowSecs);
       const pairing: ApproverPairing = {

@@ -16,6 +16,8 @@ export function WasmAuthCrypto_forTests(): { module: OrbynWasmModule; log: strin
       create: () => {
         log.push("SyncEngine.create");
         return {
+          verifyDevices: () => (log.push("verifyDevices"), '["a"]'),
+          signRemoval: () => (log.push("signRemoval"), '{"sequence":1,"signature":"s"}'),
           startApproval: () => (log.push("startApproval"), { createJson: "{}", deviceFingerprint: () => "fp", reveal: () => (log.push("reveal"), '{"nonce":"n"}'), sas: () => "123456" }),
           confirmApproval: () => (log.push("confirmApproval"), '{"signature":"s"}'),
           joinApproval: () => (log.push("joinApproval"), { nonceJson: '{"nonce":"d"}', sas: () => "123456" }),

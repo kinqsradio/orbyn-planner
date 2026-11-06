@@ -2,6 +2,7 @@ import type { ApiError } from "../generated/ApiError";
 import type { ApprovalCode } from "../generated/ApprovalCode";
 import type { ApprovalNonce } from "../generated/ApprovalNonce";
 import type { ConfirmApproval } from "../generated/ConfirmApproval";
+import type { RemoveDevice } from "../generated/RemoveDevice";
 import type { PendingApproval } from "../generated/PendingApproval";
 import type { ApprovalCreated } from "../generated/ApprovalCreated";
 import type { CreateApproval } from "../generated/CreateApproval";
@@ -128,7 +129,8 @@ export function createAuthApi(options: AuthApiOptions) {
     cancelApproval: (id: string) => call<void>("POST", `/v1/devices/approvals/${encodeURIComponent(id)}/cancel`, undefined, true),
     submitCode: (approvalId: string, body: ApprovalCode) =>
       call<Device>("POST", `/v1/devices/approvals/${encodeURIComponent(approvalId)}/code`, body, true),
-    removeDevice: (id: string) => call<void>("DELETE", `/v1/devices/${encodeURIComponent(id)}`, undefined, true),
+    /** The body is the remover's sequence and signature, made by `signRemoval`. */
+    removeDevice: (id: string, body: RemoveDevice) => call<void>("DELETE", `/v1/devices/${encodeURIComponent(id)}`, body, true),
   };
 }
 

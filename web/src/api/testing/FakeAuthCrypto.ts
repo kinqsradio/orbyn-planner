@@ -123,8 +123,31 @@ const ten = 600;
 function fakeApprovals(keys: DeviceKeys, accountId: string, deviceId: string): ApprovalEngine {
   const approver = new WeakMap<object, { parts: PairingParts; pairing: Uint8Array; rA: Uint8Array; rD?: Uint8Array; used: boolean }>();
   const device = new WeakMap<object, { pairing: Uint8Array; rD: Uint8Array; used: boolean; approverSigning: string }>();
+  /** What this engine has counted: removals seen in a verified list, and the devices it pins. */
+  let counted = 0;
+  const pinned = new Set<string>([deviceId]);
   return {
+    verifyDevices(list) {
+      for (const r of list.removals) counted = Math.max(counted, r.sequence);
+      // Self, then devices linked to a pinned one by a recorded approval; the server's `state` is not used.
+      const out = new Set(pinned);
+      for (let grew = true; grew; ) {
+        grew = false;
+        for (const d of list.devices) {
+          if (!out.has(d.id) && d.approval_signature && d.approved_by && out.has(d.approved_by)) {
+            out.add(d.id);
+            grew = true;
+          }
+        }
+      }
+      return [...out].filter((id) => list.devices.some((d) => d.id === id));
+    },
+    signRemoval(target) {
+      const sequence = counted + 1;
+      return { sequence, signature: encodeBytes(keys.sign("orbyn/device-removal/v1", utf8(`${accountId}|${target.id}|${target.signing_key}|${target.agreement_key}|${sequence}`))) };
+    },
     startApproval(target, nowSecs) {
+      if (pinned.has(target.id)) throw new Error("invalid_input: this device already trusts that one");
       const parts: PairingParts = {
         accountId, approvalId: `${Math.random().toString(16).slice(2, 10)}-${nowSecs}-${target.id}`.padEnd(36, "0").slice(0, 36), createdAt: nowSecs, approverId: deviceId,
         approverSigning: keys.signingKey(), approverAgreement: keys.agreementKey(), deviceId: target.id, deviceSigning: target.signing_key, deviceAgreement: target.agreement_key,
@@ -160,7 +183,7 @@ function fakeApprovals(keys: DeviceKeys, accountId: string, deviceId: string): A
       state.used = true;
       return {
         signature: encodeBytes(keys.sign(APPROVAL_CONTEXT, confirmMessage(state.pairing, state.rA, state.rD))),
-        endorsement: encodeBytes(keys.sign("orbyn/approval-endorsement/v1", state.pairing)),
+        endorsement: encodeBytes(keys.sign("orbyn/approval-endorsement/v2", state.pairing)),
       };
     },
     joinApproval(view, nowSecs) {
@@ -183,6 +206,7 @@ function fakeApprovals(keys: DeviceKeys, accountId: string, deviceId: string): A
       const state = device.get(session);
       if (!state || state.used) throw new Error("already_finished: this approval was used");
       if (!view.signature || !view.approver_nonce) throw new Error("approval_not_confirmed: the approver has not confirmed yet");
+      pinned.add(view.approver_id);
       state.used = true;
       if (nowSecs - view.created_at > ten) throw new Error("approval_expired: this approval is older than ten minutes");
       const rA = decodeBytes(view.approver_nonce);

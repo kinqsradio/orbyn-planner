@@ -37,7 +37,7 @@ describe("the account calls", () => {
     await client.confirmApproval("a b", { signature: "s" });
     await client.cancelApproval("a b");
     await client.submitCode("a b", { code: "123456" });
-    await client.removeDevice("d/1");
+    await client.removeDevice("d/1", { sequence: 1, signature: "s" });
     expect(fetchMock.mock.calls.map(([u, i]) => `${i.method} ${String(u).replace("http://engine.test", "")}`)).toEqual([
       "POST /v1/accounts/register/finish",
       "POST /v1/sessions/login/start",
@@ -64,7 +64,7 @@ describe("the account calls", () => {
 
   it("a 204 answer is nothing", async () => {
     const { client } = api(() => new Response(null, { status: 204 }));
-    await expect(client.removeDevice("d")).resolves.toBeUndefined();
+    await expect(client.removeDevice("d", { sequence: 1, signature: "s" })).resolves.toBeUndefined();
   });
 });
 

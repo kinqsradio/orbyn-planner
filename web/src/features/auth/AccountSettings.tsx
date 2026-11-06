@@ -6,6 +6,7 @@ import { Portal } from "../../components/Portal";
 import { useDialog } from "../../components/useDialog";
 import type { Device } from "../../generated/Device";
 import { useAuth } from "../../auth/AuthProvider";
+import { removeDevice, verifiedDevices } from "../../auth/flows";
 import { ApproverController } from "../../auth/pairing";
 import { describeError } from "./AuthScreens";
 
@@ -58,6 +59,7 @@ function ApproveDialog({ device, onClose, onDone }: { device: Device; onClose: (
   return (
     <Modal label="New sign-in" onClose={close}>
       <b className="card-title">New sign-in</b>
+      {device.state !== "pending" && <p className="t3 small">{device.name} is signed in, but this device doesn’t trust it (it may have been approved under a device that was removed). Approve it again to trust it.</p>}
       <div className="kv"><span>Device</span><b>{device.name}</b></div>
       <div className="kv"><span>Kind</span><b>{PLATFORMS[device.platform]}</b></div>
       <div className="kv"><span>When</span><b>{when(device.created_at)}</b></div>
@@ -119,7 +121,7 @@ function RemoveDialog({ device, onClose, onDone }: { device: Device; onClose: ()
     setBusy(true);
     setError(null);
     try {
-      await auth.services.api.removeDevice(device.id);
+      await removeDevice(auth.services, auth.session!, device);
       onDone();
     } catch (e) {
       setError(describeError(e));
@@ -160,6 +162,8 @@ function SignedInAccount() {
   const auth = useAuth()!;
   const { session, services } = auth;
   const [devices, setDevices] = useState<Device[] | null>(null);
+  /** The devices this device itself verifies; null until known. Approving is offered from this, never from the server's `state`. */
+  const [verified, setVerified] = useState<Set<string> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [approving, setApproving] = useState<Device | null>(null);
   const [removing, setRemoving] = useState<Device | null>(null);
@@ -171,18 +175,23 @@ function SignedInAccount() {
         (list) => {
           setDevices(list.devices);
           setError(null);
+          if (session) void verifiedDevices(services, session, list).then(setVerified);
         },
         (e: unknown) => {
           // A 401 has signed this device out already, and this screen is going away.
           if (!(e instanceof ApiFailure && e.status === 401)) setError(describeError(e));
         },
       ),
-    [services],
+    [services, session],
   );
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  // A device this one does not verify can be approved: a new one, or one the server lists as trusted
+  // that this device no longer trusts (stranded by a removal, or approved before the two-way code).
+  const needsApproval = (d: Device) => session?.deviceState === "trusted" && !d.current && verified !== null && !verified.has(d.id);
 
   return (
     <>
@@ -201,9 +210,17 @@ function SignedInAccount() {
               {d.current && <span className="t3"> · this device</span>}
             </span>
             <b className="ctl">
-              {d.state === "pending" ? <span className="amber-text">Waiting for approval</span> : <span className="t3">Added {when(d.created_at)}</span>}
-              {d.state === "pending" && session?.deviceState === "trusted" && (
-                <button type="button" className="ghost" aria-label={`Approve ${d.name}`} onClick={() => setApproving(d)}>Approve</button>
+              {d.state === "pending" ? (
+                <span className="amber-text">Waiting for approval</span>
+              ) : needsApproval(d) ? (
+                <span className="amber-text">Needs approving again</span>
+              ) : (
+                <span className="t3">Added {when(d.created_at)}</span>
+              )}
+              {needsApproval(d) && (
+                <button type="button" className="ghost" aria-label={d.state === "pending" ? `Approve ${d.name}` : `Approve ${d.name} again`} onClick={() => setApproving(d)}>
+                  {d.state === "pending" ? "Approve" : "Approve again"}
+                </button>
               )}
               {!d.current && (
                 <button type="button" className="ghost" aria-label={`Remove ${d.name}`} onClick={() => setRemoving(d)}>Remove</button>

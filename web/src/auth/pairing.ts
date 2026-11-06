@@ -235,9 +235,15 @@ export class DeviceController extends Controller<DeviceState> {
   private running = false;
   private budget = 0;
 
+  /**
+   * `repair`: this device is already trusted by the server, and a trusted device approves it again
+   * because that device no longer trusts it. The server lists it as trusted either way, so this
+   * never stops at "trusted"; it follows the approval it is given.
+   */
   constructor(
     private readonly services: AuthServices,
     private readonly session: StoredSession,
+    private readonly repair = false,
   ) {
     super({ phase: "waiting" });
   }
@@ -275,12 +281,16 @@ export class DeviceController extends Controller<DeviceState> {
       if (e instanceof ApiFailure && e.status === 401) return true; // signed out already
       return false; // try again next time
     }
-    if (current.device.state === "trusted") {
+    if (current.device.state === "trusted" && !this.repair) {
       await this.continue();
       return true;
     }
     const view = current.approval && !this.dead.has(current.approval.id) ? current.approval : null;
     try {
+      if (!view && this.repair && !this.approvalId) {
+        this.set({ phase: "closed", reason: "closed", message: REASONS.closed });
+        return true;
+      }
       if (!view) {
         // An approval we were in has gone: closed from the other side, or timed out.
         if (this.approvalId) await this.close("closed", false);
