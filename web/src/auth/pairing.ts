@@ -39,6 +39,8 @@ export type DeviceState =
   | { phase: "joining" }
   /** Joined; waiting for the approver to reveal. */
   | { phase: "joined" }
+  /** Another tab of this browser answers this approval; this one waits and never cancels it. */
+  | { phase: "elsewhere" }
   | { phase: "compare"; sas: string }
   /** Confirmed here; waiting for the approver to confirm, then finishing. */
   | { phase: "finishing" }
@@ -49,6 +51,8 @@ class Controller<S> {
   protected state: S;
   private listeners = new Set<() => void>();
   protected disposed = false;
+  /** Set when the attempt is over (closed, cancelled, failed). Nothing that was already under way may change the state or post after it. */
+  protected ended = false;
   private wake: (() => void) | null = null;
 
   constructor(initial: S) {
@@ -62,8 +66,10 @@ class Controller<S> {
     return () => this.listeners.delete(listener);
   };
 
-  protected set(next: S): void {
+  /** Sets the state. After the attempt ended only the final closing state may be set (`final`). */
+  protected set(next: S, final = false): void {
     if (this.disposed) return;
+    if (this.ended && !final) return;
     this.state = next;
     for (const l of this.listeners) l();
   }
@@ -104,13 +110,14 @@ export function* delays(poll: PollSchedule): Generator<number> {
 }
 
 const nowSecs = (services: AuthServices) => Math.floor(services.now() / 1000);
+/** The approval is at another step: another tab of this device got there first. */
+const isOutOfOrder = (e: unknown) => e instanceof ApiFailure && (e.status === 409 || e.code === "approval_out_of_order");
 const isGone = (e: unknown) => e instanceof ApiFailure && (e.status === 404 || e.status === 410 || e.code === "approval_expired" || e.code === "invalid_commitment");
 
 /** The trusted device's side. */
 export class ApproverController extends Controller<ApproverState> {
   private id: string | null = null;
   private pairing: ApproverPairing | null = null;
-  private ended = false;
 
   constructor(
     private readonly services: AuthServices,
@@ -120,23 +127,32 @@ export class ApproverController extends Controller<ApproverState> {
     super({ phase: "starting" });
   }
 
-  /** Creates the approval and walks to the comparison. */
+  /** Creates the approval and walks to the comparison. After a cancel nothing here posts or changes the screen. */
   async start(): Promise<void> {
     try {
-      this.pairing = await this.services.engine.run(this.session, (e) => e.startApproval(this.pending, nowSecs(this.services)));
-      const created = await this.services.api.createApproval(this.pairing.createRequest);
+      const pairing = await this.services.engine.run(this.session, (e) => e.startApproval(this.pending, nowSecs(this.services)));
+      if (this.ended || this.disposed) return;
+      this.pairing = pairing;
+      const created = await this.services.api.createApproval(pairing.createRequest);
       this.id = created.id;
+      if (this.ended) {
+        // Cancelled while it was being created: close what the server just made.
+        await this.services.api.cancelApproval(created.id).catch(() => undefined);
+        return;
+      }
       this.set({ phase: "waiting" });
       // The new device sends its nonce once it has seen the approval; then this device reveals.
       const view = await this.poll(async () => {
         const v = await this.services.api.approval(created.id);
         return v.device_nonce ? v : undefined;
       });
-      if (!view) return;
-      await this.services.api.revealNonce(created.id, this.pairing.reveal(view));
-      const sas = this.pairing.sas();
+      if (!view || this.ended || this.disposed) return;
+      const nonce = pairing.reveal(view);
+      await this.services.api.revealNonce(created.id, nonce);
+      if (this.ended || this.disposed) return;
+      const sas = pairing.sas();
       if (!sas) throw new Error("failed: no digits after reveal");
-      this.set({ phase: "compare", sas, fingerprint: this.pairing.deviceFingerprint() });
+      this.set({ phase: "compare", sas, fingerprint: pairing.deviceFingerprint() });
       // While the person compares, notice if the other device closes the approval.
       void this.poll(async () => {
         if (this.state.phase !== "compare") return true;
@@ -148,16 +164,19 @@ export class ApproverController extends Controller<ApproverState> {
     }
   }
 
-  /** "They match": only now does this device sign the approval. */
+  /** "They match": only now does this device sign the approval, and never after a cancel. */
   async confirm(): Promise<void> {
-    if (this.state.phase !== "compare" || !this.pairing || !this.id) return;
+    if (this.ended || this.state.phase !== "compare" || !this.pairing || !this.id) return;
     const id = this.id;
+    const pairing = this.pairing;
     this.set({ phase: "confirming" });
     try {
       const devices = await this.services.api.devices();
-      const pairing = this.pairing;
-      const body = await this.services.engine.run(this.session, (e) => e.confirmApproval(pairing, devices));
+      if (this.ended || this.disposed) return;
+      const body = await this.services.engine.run(this.session, (e) => e.confirmApproval(pairing, devices)); // signs
+      if (this.ended || this.disposed) return;
       await this.services.api.confirmApproval(id, body);
+      if (this.ended || this.disposed) return;
       this.set({ phase: "finishing" });
       const done = await this.poll(async () => {
         const list = await this.services.api.devices();
@@ -177,12 +196,13 @@ export class ApproverController extends Controller<ApproverState> {
     this.ended = true;
     this.nudge();
     if (this.id) await this.services.api.cancelApproval(this.id).catch(() => undefined);
-    this.set({ phase: "closed", reason: "cancelled", message: REASONS.cancelled });
+    this.set({ phase: "closed", reason: "cancelled", message: REASONS.cancelled }, true);
   }
 
   private async poll<T>(ask: () => Promise<T | undefined>): Promise<T | undefined> {
     let waited = 0;
     for (const delay of delays(this.services.poll)) {
+      if (this.disposed || this.ended) return undefined;
       const got = await ask();
       if (got !== undefined) return got;
       if (this.disposed || this.ended) return undefined;
@@ -212,7 +232,7 @@ export class ApproverController extends Controller<ApproverState> {
       message = error.message;
     }
     if (this.id) await this.services.api.cancelApproval(this.id).catch(() => undefined);
-    this.set({ phase: "closed", reason, message });
+    this.set({ phase: "closed", reason, message }, true);
   }
 }
 
@@ -225,6 +245,8 @@ export class DeviceController extends Controller<DeviceState> {
   private dead = new Set<string>();
   private running = false;
   private budget = 0;
+  /** This tab ran `finishApproval`: the engine pinned the approver here. */
+  private finished = false;
 
   /**
    * `repair`: this device is already trusted by the server, and a trusted device approves it again
@@ -272,14 +294,17 @@ export class DeviceController extends Controller<DeviceState> {
       if (e instanceof ApiFailure && e.status === 401) return true; // signed out already
       return false; // try again next time
     }
-    if (current.device.state === "trusted" && !this.repair) {
+    // The server saying "trusted" ends the wait only where there is nothing left to finish here: a
+    // tab that joined an approval must run `finishApproval` itself (it pins the approver), unless it did.
+    if (current.device.state === "trusted" && !this.repair && (!this.pairing || this.finished)) {
       await this.continue();
       return true;
     }
     const view = current.approval && !this.dead.has(current.approval.id) ? current.approval : null;
     try {
       if (!view && this.repair && !this.approvalId) {
-        this.set({ phase: "closed", reason: "closed", message: REASONS.closed });
+        this.ended = true;
+        this.set({ phase: "closed", reason: "closed", message: REASONS.closed }, true);
         return true;
       }
       if (!view) {
@@ -289,10 +314,18 @@ export class DeviceController extends Controller<DeviceState> {
       }
       if (this.approvalId !== view.id) {
         this.set({ phase: "joining" });
-        this.pairing = await this.services.engine.run(this.session, (e) => e.joinApproval(view, nowSecs(this.services)));
+        const pairing = await this.services.engine.run(this.session, (e) => e.joinApproval(view, nowSecs(this.services)));
         this.approvalId = view.id;
         this.budget = 0;
-        await this.services.api.submitNonce(view.id, this.pairing.nonce);
+        try {
+          await this.services.api.submitNonce(view.id, pairing.nonce);
+        } catch (e) {
+          if (!isOutOfOrder(e)) throw e;
+          // Another tab of this device already sent its nonce and owns the approval; it is not ours to cancel.
+          this.set({ phase: "elsewhere" });
+          return false;
+        }
+        this.pairing = pairing;
         this.set({ phase: "joined" });
         return false;
       }
@@ -303,6 +336,7 @@ export class DeviceController extends Controller<DeviceState> {
       if (this.state.phase === "finishing" && view.signature && this.pairing) {
         const pairing = this.pairing;
         const code = await this.services.engine.run(this.session, (e) => e.finishApproval(pairing, view, this.typed, nowSecs(this.services)));
+        this.finished = true;
         await this.services.api.submitCode(view.id, { code });
         // The planner opens on "Continue", so the person sees that this device is trusted.
         this.set({ phase: "trusted" });
@@ -333,6 +367,7 @@ export class DeviceController extends Controller<DeviceState> {
 
   /** Closes the approval, from any step. */
   async cancel(): Promise<void> {
+    if (this.ended) return;
     await this.close("cancelled");
   }
 
@@ -342,17 +377,20 @@ export class DeviceController extends Controller<DeviceState> {
     this.pairing = null;
     this.typed = undefined;
     this.budget = 0;
+    this.finished = false;
+    this.ended = false;
     this.set({ phase: "waiting" });
     void this.run();
   }
 
   private async close(reason: CloseReason, tellServer = true): Promise<void> {
+    this.ended = true;
     const id = this.approvalId;
     if (id) {
       this.dead.add(id);
       if (tellServer) await this.services.api.cancelApproval(id).catch(() => undefined);
     }
-    this.set({ phase: "closed", reason, message: REASONS[reason] });
+    this.set({ phase: "closed", reason, message: REASONS[reason] }, true);
   }
 
   private async fail(error: unknown): Promise<void> {

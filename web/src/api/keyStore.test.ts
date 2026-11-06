@@ -3,6 +3,7 @@ import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it } from "vitest";
 import { KEY_DB_NAME, createIdbKeyStore, createMemoryKeyStore, type StoredSession } from "./keyStore";
 import { TokenStore } from "./tokenStore";
+import { wrapSecretFrom } from "./wrapSecret";
 
 const session: StoredSession = {
   token: "secret-token",
@@ -54,6 +55,42 @@ describe("the key store", () => {
     expect(await store.loadKeys()).not.toBeNull();
     await store.clearKeys();
     expect(await store.loadKeys()).toBeNull();
+  });
+});
+
+describe("forgetting a device in IndexedDB", () => {
+  it("removes the keys, the snapshot, the wrapping key and the identity together, and keeps the quarantine", async () => {
+    const store = createIdbKeyStore();
+    const wrap = await crypto.subtle.generateKey({ name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    await store.saveKeys(new Uint8Array([1]));
+    await store.saveSnapshot(new Uint8Array([2]));
+    await store.saveWrapKey(wrap);
+    await store.saveIdentity({ accountId: "a", deviceId: "d" });
+    await store.quarantineSnapshot(new Uint8Array([3]));
+    expect(await store.loadWrapKey()).not.toBeNull();
+    await createIdbKeyStore().clearDevice(); // another store object on the same database
+    expect(await store.loadKeys()).toBeNull();
+    expect(await store.loadSnapshot()).toBeNull();
+    expect(await store.loadWrapKey()).toBeNull();
+    expect(await store.loadIdentity()).toBeNull();
+    expect((await store.loadQuarantine()).map((b) => b[0])).toEqual([3]);
+  });
+
+  it("keeps the newest three unreadable snapshots", async () => {
+    const store = createIdbKeyStore();
+    for (let i = 1; i <= 5; i++) await store.quarantineSnapshot(new Uint8Array([i]));
+    expect((await store.loadQuarantine()).map((b) => b[0])).toEqual([3, 4, 5]);
+  });
+
+  it("the wrapping secret comes from a key that is stored but never readable", async () => {
+    const store = createIdbKeyStore();
+    const a = await wrapSecretFrom(store);
+    const b = await wrapSecretFrom(createIdbKeyStore());
+    expect(a).toHaveLength(32);
+    expect(Array.from(b)).toEqual(Array.from(a)); // the same stored key gives the same secret
+    expect((await store.loadWrapKey())!.extractable).toBe(false);
+    await store.clearDevice();
+    expect(Array.from(await wrapSecretFrom(store))).not.toEqual(Array.from(a)); // a new key after forgetting
   });
 });
 

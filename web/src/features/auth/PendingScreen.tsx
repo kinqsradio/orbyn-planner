@@ -58,6 +58,7 @@ export function PendingScreen({ repair = false, onDone }: { repair?: boolean; on
             )}
           </>
         )}
+        {state.phase === "elsewhere" && <p className="t3" role="status">This approval is being answered in another tab of this browser. Switch to it, or close it to answer here.</p>}
         {state.phase === "finishing" && <p className="t3" role="status">Waiting for the other device to confirm…</p>}
         {state.phase === "trusted" && (
           <>

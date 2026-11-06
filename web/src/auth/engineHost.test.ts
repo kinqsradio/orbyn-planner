@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { StoredSession } from "../api/keyStore";
 import { createMemoryKeyStore } from "../api/keyStore";
-import { FakeAuthCrypto } from "../api/testing/FakeAuthCrypto";
+import { FakeAuthCrypto, fakeSeal } from "../api/testing/FakeAuthCrypto";
 import type { Device } from "../generated/Device";
 import type { DeviceList } from "../generated/DeviceList";
-import { createEngineHost, type EngineHost } from "./engineHost";
+import { QUARANTINE_KEEP } from "../api/keyStore";
+import { createEngineHost, SNAPSHOT_UNREADABLE, type EngineHost } from "./engineHost";
 
 const crypto = new FakeAuthCrypto();
 const ME = "00000000-0000-4000-8000-0000000000a2";
@@ -21,8 +22,9 @@ const C = "00000000-0000-4000-8000-0000000000c1";
 async function setup() {
   const keys = createMemoryKeyStore();
   await keys.saveKeys(crypto.deviceKeys.create().export(wrap));
+  await keys.saveIdentity({ accountId: session.accountId, deviceId: session.deviceId });
   /** A new host over the same stored state: what another page load or tab sees. */
-  const host = (): EngineHost => createEngineHost({ keys, crypto: () => crypto, wrapSecret: async () => wrap, now: () => 0 });
+  const host = (): EngineHost => createEngineHost({ keys, crypto: () => crypto, wrapSecret: async () => wrap.slice(), now: () => 0 });
   return { keys, host };
 }
 
@@ -74,10 +76,98 @@ describe("the engine's saved state", () => {
     expect((await host().run(session, (e) => e.verifyDevices(list([own, device(B), device(C)])))).sort()).toEqual([ME, B, C].sort());
   });
 
-  it("an unreadable snapshot is dropped and the device starts again from itself", async () => {
+
+  async function withTrusted() {
+    const t = await setup();
+    const own = device(ME, { current: true });
+    await t.host().run(session, (e) => e.verifyDevices(list([own, device(B, { approved_by: ME, approval_signature: "s" })])));
+    return { ...t, own };
+  }
+
+  it("a snapshot these keys can't open is quarantined, dropped, and the person is told", async () => {
+    const { keys, host, own } = await withTrusted();
+    const stranger = fakeSeal(new Uint8Array(32).fill(9), "snapshot", new TextEncoder().encode("{}"));
+    await keys.saveSnapshot(stranger);
+    const h = host();
+    expect(await h.run(session, (e) => e.verifyDevices(list([own, device(B)])))).toEqual([ME]); // starts from itself
+    expect(await keys.loadQuarantine()).toEqual([stranger]); // the blob is kept
+    expect(h.notice.get()).toBe(SNAPSHOT_UNREADABLE);
+    // The live copy is the fresh engine's, sealed; the unreadable one is not it.
+    expect(await keys.loadSnapshot()).not.toEqual(stranger);
+  });
+
+  it("a snapshot in a format this version doesn't read is quarantined too, and kept", async () => {
+    const { keys, host, own } = await withTrusted();
+    const odd = fakeSeal(wrap, "snapshot", new TextEncoder().encode("not json"));
+    await keys.saveSnapshot(odd);
+    const h = host();
+    expect(await h.run(session, (e) => e.verifyDevices(list([own, device(B)])))).toEqual([ME]);
+    expect(await keys.loadQuarantine()).toEqual([odd]);
+    expect(h.notice.get()).toBe(SNAPSHOT_UNREADABLE);
+    h.notice.clear();
+    expect(h.notice.get()).toBeNull();
+  });
+
+  it("keeps at most three unreadable snapshots, the newest", async () => {
+    const { keys } = await setup();
+    for (let i = 1; i <= QUARANTINE_KEEP + 2; i++) await keys.quarantineSnapshot(new Uint8Array([i]));
+    expect((await keys.loadQuarantine()).map((b) => b[0])).toEqual([3, 4, 5]);
+  });
+
+  it("state made for another account or device is not used, and is not reported as unreadable", async () => {
+    const { keys, host, own } = await withTrusted();
+    for (const other of [{ accountId: "00000000-0000-4000-8000-0000000000ff", deviceId: ME }, { accountId: session.accountId, deviceId: "00000000-0000-4000-8000-0000000000fe" }]) {
+      await keys.saveIdentity(other);
+      const h = host();
+      expect(await h.run(session, (e) => e.verifyDevices(list([own, device(B)])))).toEqual([ME]);
+      expect(h.notice.get()).toBeNull();
+      expect(await keys.loadIdentity()).toEqual({ accountId: session.accountId, deviceId: session.deviceId });
+      await h.run(session, (e) => e.verifyDevices(list([own, device(B, { approved_by: ME, approval_signature: "s" })]))); // trusts B again
+    }
+  });
+
+  it("a failed save fails the action, so nothing that depended on it is sent", async () => {
     const { keys, host } = await setup();
-    await keys.saveSnapshot(new Uint8Array([1, 2, 3]));
-    expect(await host().run(session, (e) => e.verifyDevices(list([device(ME, { current: true })])))).toEqual([ME]);
-    expect((await keys.loadSnapshot())!.length).toBeGreaterThan(3); // replaced by a sealed one
+    const own = device(ME, { current: true });
+    const real = keys.saveSnapshot;
+    keys.saveSnapshot = async () => {
+      throw new Error("quota exceeded");
+    };
+    await expect(host().run(session, (e) => e.signRemoval(device(B)))).rejects.toThrow(/quota/);
+    // An action that failed itself reports its own error, not the save's.
+    await expect(
+      host().run(session, () => {
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    keys.saveSnapshot = real;
+    expect(await host().run(session, (e) => e.verifyDevices(list([own])))).toEqual([ME]);
+  });
+
+  it("forgetting waits for an action in progress, and an action after it cannot make a new wrapping secret", async () => {
+    const { keys } = await setup();
+    let secrets = 0;
+    const h = createEngineHost({ keys, crypto: () => crypto, wrapSecret: async () => (secrets++, wrap.slice()), now: () => 0 });
+    let release!: () => void;
+    const slow = h.run(session, () => new Promise<void>((r) => (release = r)));
+    const forgot = h.forget();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(await keys.loadKeys()).not.toBeNull(); // not forgotten while the action runs
+    release();
+    await slow;
+    await forgot;
+    expect(await keys.loadKeys()).toBeNull();
+    expect(await keys.loadSnapshot()).toBeNull(); // the action's own save came before the forgetting
+    const before = secrets;
+    await expect(h.run(session, () => 1)).rejects.toThrow(/no keys/);
+    expect(secrets).toBe(before); // no wrapping key was asked for
+  });
+
+  it("zeroes the wrapping secret after use", async () => {
+    const { keys } = await setup();
+    let given!: Uint8Array;
+    const h = createEngineHost({ keys, crypto: () => crypto, wrapSecret: async () => (given = wrap.slice()), now: () => 0 });
+    await h.run(session, (e) => e.verifyDevices(list([])));
+    expect([...given].every((b) => b === 0)).toBe(true);
   });
 });

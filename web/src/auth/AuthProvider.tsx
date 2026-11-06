@@ -28,6 +28,8 @@ interface AuthApiValue {
   /** "Use without an account": everything stays on this device. */
   useWithoutAccount: () => void;
   signOut: () => Promise<void>;
+  /** Something that went wrong while signing out, to show. */
+  problem: string | null;
 }
 
 const LOCAL_ONLY_KEY = "orbyn-planner.local-only";
@@ -49,6 +51,7 @@ export function AuthProvider({ services, children }: { services: AuthServices | 
   const [loaded, setLoaded] = useState(services === null);
   const [localOnly, setLocalOnly] = useState(readLocalOnly);
   const [overlay, setOverlay] = useState<AuthScreen | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
   const none = useMemo(() => ({ subscribe: () => () => undefined, get: () => null as StoredSession | null }), []);
   const session = useSyncExternalStore(services ? services.tokens.subscribe : none.subscribe, services ? services.tokens.getSession : none.get);
 
@@ -59,6 +62,12 @@ export function AuthProvider({ services, children }: { services: AuthServices | 
     return () => {
       live = false;
     };
+  }, [services]);
+
+  // Another tab signed out: this one drops its session too.
+  useEffect(() => {
+    if (!services) return;
+    return services.signedOut.listen(() => void services.tokens.clear());
   }, [services]);
 
   // Engine requests made outside the auth screens (calendar feeds) read the token from here. Only a
@@ -101,12 +110,18 @@ export function AuthProvider({ services, children }: { services: AuthServices | 
       openAuth: (screen = "signin") => setOverlay(screen),
       closeAuth: () => setOverlay(null),
       useWithoutAccount,
+      problem,
       signOut: async () => {
-        await signOutFlow(services);
+        setProblem(null);
+        try {
+          await signOutFlow(services);
+        } catch (e) {
+          setProblem(e instanceof Error ? e.message : "Signing out didn’t finish.");
+        }
         setOverlay(null);
       },
     };
-  }, [services, status, session, overlay, useWithoutAccount]);
+  }, [services, status, session, overlay, problem, useWithoutAccount]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

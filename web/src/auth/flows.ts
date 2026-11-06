@@ -54,7 +54,13 @@ export async function signUp(services: AuthServices, input: { name: string; emai
       device: describeDevice(keys),
       device_signature: encodeBytes(keys.signRegistration(email, upload)),
     });
-    await services.keys.saveKeys(keys.export(await services.wrapSecret()));
+    const wrap = await services.wrapSecret();
+    try {
+      await services.keys.saveKeys(keys.export(wrap));
+    } finally {
+      wrap.fill(0);
+    }
+    await services.keys.saveIdentity({ accountId: created.account_id, deviceId: created.device_id });
     const session = toStored(created, email, input.name.trim());
     await services.tokens.set(session);
     return session;
@@ -73,7 +79,15 @@ export async function signIn(services: AuthServices, input: { email: string; pas
     const email = emailOrFail(crypto, input.email);
     const password = utf8(input.password);
     const saved = await services.keys.loadKeys();
-    const known = saved ? crypto.deviceKeys.import(saved, await services.wrapSecret()) : null;
+    let known = null as ReturnType<typeof crypto.deviceKeys.import> | null;
+    if (saved) {
+      const wrap = await services.wrapSecret();
+      try {
+        known = crypto.deviceKeys.import(saved, wrap);
+      } finally {
+        wrap.fill(0);
+      }
+    }
     const pending = crypto.startLogin(password);
 
     let trusted: { signing_key: string; signed_at: bigint; signature: string } | undefined;
@@ -96,7 +110,7 @@ export async function signIn(services: AuthServices, input: { email: string; pas
       device: describeDevice(keys),
       device_signature: encodeBytes(keys.signLogin(started.login_id)),
     });
-    if (!known) await services.keys.saveKeys(keys.export(await services.wrapSecret()));
+    await bindKeys(services, keys, known !== null, created);
     const session = toStored(created, email, input.name ?? "");
     await services.tokens.set(session);
     return session;
@@ -105,7 +119,38 @@ export async function signIn(services: AuthServices, input: { email: string; pas
   }
 }
 
-/** Signs this device out. The session is forgotten here even if the server cannot be reached. */
+/**
+ * Ties the stored keys and the engine's saved state to the account and device this sign-in gave. New
+ * keys are stored. Keys made for another account are replaced, with the old state wiped; the same
+ * account under a new device id means the old row was removed, so the saved trust state is wiped.
+ */
+async function bindKeys(services: AuthServices, keys: DeviceKeys, existing: boolean, created: SessionCreated): Promise<void> {
+  const identity = await services.keys.loadIdentity();
+  const seal = async () => {
+    const wrap = await services.wrapSecret();
+    try {
+      await services.keys.saveKeys(keys.export(wrap));
+    } finally {
+      wrap.fill(0);
+    }
+  };
+  if (!existing) {
+    await services.keys.clearSnapshot(); // no keys were here: whatever snapshot there is is not theirs
+    await seal();
+  } else if (identity && identity.accountId !== created.account_id) {
+    await services.keys.clearDevice();
+    await seal();
+  } else if (!identity || identity.deviceId !== created.device_id) {
+    await services.keys.clearSnapshot();
+  }
+  await services.keys.saveIdentity({ accountId: created.account_id, deviceId: created.device_id });
+}
+
+/**
+ * Signs this device out. The session is forgotten here even if the server cannot be reached, and the
+ * other tabs are told. Then the device is forgotten too: its keys, the engine's saved state (bound to
+ * them) and the wrapping key go together. If that fails, the person is told.
+ */
 export async function signOut(services: AuthServices): Promise<void> {
   try {
     await services.api.signOut();
@@ -113,8 +158,12 @@ export async function signOut(services: AuthServices): Promise<void> {
     // Already over, or unreachable: either way this device forgets it.
   }
   await services.tokens.clear();
-  // Signing out forgets the device: its keys and the engine's snapshot, which is bound to them, go together.
-  await services.keys.clearDevice().catch(() => undefined);
+  services.signedOut.post();
+  try {
+    await services.engine.forget();
+  } catch {
+    throw new ApiFailure("forget_failed", 0, "You’re signed out, but this device’s saved keys couldn’t be removed. Clear this site’s data to be sure.");
+  }
 }
 
 /**

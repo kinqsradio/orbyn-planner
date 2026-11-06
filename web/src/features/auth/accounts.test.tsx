@@ -33,7 +33,7 @@ const wrapFor = (keys: KeyStore) => {
 
 function services(keys: KeyStore = createMemoryKeyStore(), useRealCrypto = false, poll = FAST_POLL): AuthServices {
   return createAuthServices({
-    wrapSecret: async () => wrapFor(keys),
+    wrapSecret: async () => wrapFor(keys).slice(),
     fetch: engine.fetch,
     baseUrl: "http://engine.test",
     keys,
@@ -432,7 +432,7 @@ describe("adding a device", () => {
     const { a } = await twoDevices();
     const short = services(createMemoryKeyStore(), false, { firstMs: 5, maxMs: 10, totalMs: 60 });
     // Same keys as A, a short patience; no new device is mounted, so nothing joins.
-    const withKeys = createAuthServices({ fetch: engine.fetch, baseUrl: "http://engine.test", keys: a.keys, crypto: () => crypto, now: () => nowMs, wrapSecret: async () => wrapFor(a.keys), poll: { firstMs: 5, maxMs: 10, totalMs: 60 } });
+    const withKeys = createAuthServices({ fetch: engine.fetch, baseUrl: "http://engine.test", keys: a.keys, crypto: () => crypto, now: () => nowMs, wrapSecret: async () => wrapFor(a.keys).slice(), poll: { firstMs: 5, maxMs: 10, totalMs: 60 } });
     void short;
     await mount(withKeys, "/settings");
     await openAccount();
@@ -503,7 +503,7 @@ describe("removing a device and approving one again", () => {
     const account = [...engine.accounts.values()][0]!;
     const keysC = createMemoryKeyStore();
     const material = crypto.deviceKeys.create();
-    await keysC.saveKeys(material.export(wrapFor(keysC)));
+    await keysC.saveKeys(material.export(wrapFor(keysC).slice()));
     const old = {
       id: "00000000-0000-4000-8000-0000000000c1", name: "Old phone", platform: "ios" as const, state: "trusted" as const, signing_key: material.signingKey(),
       agreement_key: material.agreementKey(), created_at: new Date(NOW.getTime() - 86_400_000).toISOString(), approved_by: null, approval_signature: null, current: false,
@@ -546,15 +546,29 @@ describe("removing a device and approving one again", () => {
     expect(within(list).getAllByRole("button", { name: /^Approve/ })).toHaveLength(1);
   });
 
-  it("the stranded device is shown the same comparison, and both confirm", async () => {
+  const nonceCalls = () => engine.calls.filter((c) => c.method === "POST" && c.path.endsWith("/nonce")).length;
+
+  it("a trusted device is only told, and joins nothing until the person taps Approve this device again", async () => {
     const { a, c, account } = await withStranded();
-    const onA = await mount(a, "/settings");
+    await mount(a, "/settings");
     await openAccount();
     const onC = await mount(c);
+    const device = within(onC.root);
     await userEvent.click(await screen.findByRole("button", { name: "Approve Old phone again" }));
     const dialog = screen.getByRole("dialog", { name: "New sign-in" });
+    // C sees a passive notice over its planner.
+    const notice = await screen.findByRole("status", { name: "Approval request" });
+    expect(notice).toHaveTextContent("Another device asked to approve this one again");
+    expect(await device.findByRole("heading", { name: "Nothing planned yet" })).toBeInTheDocument();
+    expect(device.queryByRole("heading", { name: "Approve this device again" })).not.toBeInTheDocument();
+    // Time passes: still nothing joined, no nonce sent, and the trusted device is still waiting for it.
+    await new Promise((r) => setTimeout(r, 150));
+    expect(nonceCalls()).toBe(0);
+    expect(within(dialog).queryByTestId("approval-code")).not.toBeInTheDocument();
+
+    await userEvent.click(within(notice).getByRole("button", { name: "Approve this device again" }));
     const sasA = (await within(dialog).findByTestId("approval-code")).textContent;
-    const device = within(onC.root);
+    expect(nonceCalls()).toBe(1);
     expect(await device.findByRole("heading", { name: "Approve this device again" })).toBeInTheDocument();
     expect((await device.findByTestId("approval-code")).textContent).toBe(sasA);
     await userEvent.click(within(dialog).getByRole("button", { name: "They match" }));
@@ -564,7 +578,21 @@ describe("removing a device and approving one again", () => {
     expect(await device.findByRole("heading", { name: "Nothing planned yet" })).toBeInTheDocument();
     // The server's record of how the device was approved is replaced by this approval.
     expect(account.devices.find((d) => d.name === "Old phone")).toMatchObject({ state: "trusted", approval_signature: expect.any(String) });
-    void onA;
+  });
+
+  it("dismissing the notice hides it for that approval and sends nothing", async () => {
+    const { a, c } = await withStranded();
+    await mount(a, "/settings");
+    await openAccount();
+    const onC = await mount(c);
+    await userEvent.click(await screen.findByRole("button", { name: "Approve Old phone again" }));
+    const notice = await screen.findByRole("status", { name: "Approval request" });
+    await userEvent.click(within(notice).getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByRole("status", { name: "Approval request" })).not.toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 150)); // it keeps polling, and stays hidden
+    expect(screen.queryByRole("status", { name: "Approval request" })).not.toBeInTheDocument();
+    expect(nonceCalls()).toBe(0);
+    void onC;
   });
 });
 
@@ -601,6 +629,34 @@ describe("signing out", () => {
     expect(await screen.findByRole("heading", { name: /Your tasks and calendar/ })).toBeInTheDocument();
     expect(auth.tokens.token()).toBeNull();
     expect(await auth.keys.loadSession()).toBeNull();
+    // An ended session is not a forgotten device: the keys and their saved state stay for the next sign-in.
+    expect(await auth.keys.loadKeys()).not.toBeNull();
+    expect(await auth.keys.loadSnapshot()).not.toBeNull();
+  });
+
+  it("if the device can't be forgotten the person is told, and is still signed out", async () => {
+    const auth = await signedIn();
+    await openAccount();
+    auth.keys.clearDevice = async () => {
+      throw new Error("blocked");
+    };
+    await userEvent.click(await screen.findByRole("button", { name: "Sign out" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("saved keys couldn’t be removed");
+    expect(auth.tokens.token()).toBeNull();
+  });
+
+  it("saved state that can't be read is quarantined and the person is told in Settings", async () => {
+    const auth = await signedIn();
+    await openAccount();
+    await waitFor(async () => expect(await auth.keys.loadSnapshot()).not.toBeNull());
+    const stranger = new Uint8Array([9, 9, 9, 9, 9, 9, 9, 9, 9, 9]);
+    await auth.keys.saveSnapshot(stranger);
+    await userEvent.click(await screen.findByRole("button", { name: "Refresh" }));
+    const notice = await screen.findByText(/saved trust state couldn’t be read/);
+    expect(notice).toBeInTheDocument();
+    expect(await auth.keys.loadQuarantine()).toEqual([stranger]);
+    await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByText(/saved trust state couldn’t be read/)).not.toBeInTheDocument();
   });
 
   it("after a 401 a person who chose no account goes back to the planner on this device", async () => {

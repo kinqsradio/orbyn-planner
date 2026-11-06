@@ -18,6 +18,8 @@ export interface AuthServices {
   wrapSecret: () => Promise<Uint8Array>;
   /** This device's sync engine, kept sealed in the key store. */
   engine: EngineHost;
+  /** Tabs tell each other when one signs out, so the others drop their session too. */
+  signedOut: { post(): void; listen(listener: () => void): () => void };
   /** How a waiting device or approver asks the server again: back off from `firstMs` to `maxMs`, give up after `totalMs`. */
   poll: PollSchedule;
 }
@@ -56,5 +58,23 @@ export function createAuthServices(options: AuthServiceOptions = {}): AuthServic
   const now = options.now ?? Date.now;
   const wrapSecret = options.wrapSecret ?? (() => wrapSecretFrom(keys));
   const engine = createEngineHost({ keys, crypto, wrapSecret, now, lock: options.lock });
-  return { api, tokens, keys, crypto, now, poll: options.poll ?? DEFAULT_POLL, wrapSecret, engine };
+  const channelName = "orbyn-planner-auth";
+  const signedOut = {
+    post: () => {
+      try {
+        const channel = new BroadcastChannel(channelName);
+        channel.postMessage("signed-out");
+        channel.close();
+      } catch {
+        // No BroadcastChannel: the other tabs find out on their next call.
+      }
+    },
+    listen: (listener: () => void) => {
+      if (typeof BroadcastChannel === "undefined") return () => undefined;
+      const channel = new BroadcastChannel(channelName);
+      channel.onmessage = (e: MessageEvent) => e.data === "signed-out" && listener();
+      return () => channel.close();
+    },
+  };
+  return { api, tokens, keys, crypto, now, poll: options.poll ?? DEFAULT_POLL, wrapSecret, engine, signedOut };
 }

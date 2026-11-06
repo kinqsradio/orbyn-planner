@@ -114,10 +114,11 @@ export class FakeAuthCrypto implements AuthCrypto {
     create: (keys: DeviceKeys, accountId: string, deviceId: string): ApprovalEngine => fakeApprovals(keys, accountId, deviceId, { pinned: [deviceId], counted: 0 }),
     restore: (keys: DeviceKeys, sealed: Uint8Array, wrapSecret: Uint8Array): ApprovalEngine => {
       let state: { accountId: string; deviceId: string; signing: string; pinned: string[]; counted: number };
+      const plain = fakeOpen(wrapSecret, "snapshot", sealed); // throws open_failed
       try {
-        state = JSON.parse(new TextDecoder().decode(fakeOpen(wrapSecret, "snapshot", sealed)));
+        state = JSON.parse(new TextDecoder().decode(plain));
       } catch {
-        throw new Error("open_failed: wrong wrapping secret or changed bytes");
+        throw new Error("invalid_json: the snapshot is not in a format this version reads");
       }
       if (state.signing !== keys.signingKey()) throw new Error("open_failed: this snapshot belongs to other keys");
       return fakeApprovals(keys, state.accountId, state.deviceId, state);

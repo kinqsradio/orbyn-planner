@@ -6,12 +6,14 @@ import { PendingScreen } from "./PendingScreen";
 /**
  * A trusted device can be asked to pair again (another device no longer trusts it). The server
  * returns an approval from `GET /v1/devices/current` for any device it is addressed to, so a signed-in
- * device asks now and then, and shows the same comparison screen when there is one.
+ * device asks now and then. It only tells the person: nothing is joined, and no nonce is sent, until
+ * they tap "Approve this device again". Dismissing hides the notice for that approval.
  */
-function useIncomingApproval(): { id: string | null; dismiss: () => void } {
+function useIncomingApproval() {
   const auth = useAuth();
   const [id, setId] = useState<string | null>(null);
-  const [dismissed, setDismissed] = useState<string | null>(null);
+  const [dismissed, setDismissed] = useState<string[]>([]);
+  const [accepted, setAccepted] = useState<string | null>(null);
   const active = auth?.status === "signedIn";
   const services = auth?.services;
   useEffect(() => {
@@ -20,7 +22,7 @@ function useIncomingApproval(): { id: string | null; dismiss: () => void } {
     let timer: ReturnType<typeof setTimeout>;
     const ask = () => {
       services.api.currentDevice().then(
-        // Once shown, the screen stays until the person leaves it: the approval closes when it succeeds.
+        // Once seen it stays until dealt with: the approval closes when it succeeds.
         (current) => live && setId((was) => current.approval?.id ?? was),
         () => undefined,
       );
@@ -32,7 +34,30 @@ function useIncomingApproval(): { id: string | null; dismiss: () => void } {
       clearTimeout(timer);
     };
   }, [active, services]);
-  return { id: id !== dismissed ? id : null, dismiss: () => setDismissed(id) };
+  const hidden = id !== null && dismissed.includes(id);
+  return {
+    id: hidden ? null : id,
+    accepted: accepted !== null && accepted === id,
+    accept: () => setAccepted(id),
+    dismiss: () => {
+      if (id) setDismissed((d) => [...d, id]);
+      setAccepted(null);
+    },
+  };
+}
+
+/** A passive notice: it joins nothing and sends nothing until the person agrees. */
+function RepairNotice({ onApprove, onDismiss }: { onApprove: () => void; onDismiss: () => void }) {
+  return (
+    <aside className="card" role="status" aria-label="Approval request" style={{ position: "fixed", top: 12, right: 12, zIndex: 60, maxWidth: 320, gap: 8 }}>
+      <b style={{ fontWeight: 500 }}>Another device asked to approve this one again</b>
+      <span className="t3 small">It no longer trusts this device. If you started that, approve it here and compare the digits on both.</span>
+      <div className="dialog-actions">
+        <button type="button" className="ghost" onClick={onDismiss}>Dismiss</button>
+        <button type="button" className="btn" onClick={onApprove}>Approve this device again</button>
+      </div>
+    </aside>
+  );
 }
 
 /** Shows the public pages while signed out, the approval screen while a device waits, and the planner otherwise. */
@@ -41,9 +66,16 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const incoming = useIncomingApproval();
   if (!auth) return <>{children}</>;
   if (auth.status === "loading") return null;
-  if (auth.status === "landing") return <AuthScreens start="landing" />;
+  if (auth.status === "landing") {
+    return (
+      <>
+        {auth.problem && <p className="err" role="alert" style={{ position: "fixed", top: 8, left: 16, right: 16, zIndex: 60 }}>{auth.problem}</p>}
+        <AuthScreens start="landing" />
+      </>
+    );
+  }
   if (auth.status === "pending") return <PendingScreen />;
-  if (auth.status === "signedIn" && incoming.id) return <PendingScreen key={incoming.id} repair onDone={incoming.dismiss} />;
+  if (auth.status === "signedIn" && incoming.id && incoming.accepted) return <PendingScreen key={incoming.id} repair onDone={incoming.dismiss} />;
   // Over the planner (from Settings): the planner stays mounted but hidden, so coming back finds
   // the page as it was. It is always in the same wrapper, which takes no part in the layout.
   return (
@@ -52,6 +84,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
         {children}
       </div>
       {auth.overlay && <AuthScreens start={auth.overlay} />}
+      {auth.status === "signedIn" && incoming.id && <RepairNotice onApprove={incoming.accept} onDismiss={incoming.dismiss} />}
     </>
   );
 }

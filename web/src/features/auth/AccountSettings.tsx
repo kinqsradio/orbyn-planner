@@ -158,6 +158,18 @@ function AddDeviceDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+function EngineNotice() {
+  const { services } = useAuth()!;
+  const message = useSyncExternalStore(services.engine.notice.subscribe, services.engine.notice.get);
+  if (!message) return null;
+  return (
+    <div className="card" role="status" style={{ gap: 6 }}>
+      <span className="t3">{message}</span>
+      <button type="button" className="ghost" onClick={() => services.engine.notice.clear()}>Dismiss</button>
+    </div>
+  );
+}
+
 function SignedInAccount() {
   const auth = useAuth()!;
   const { session, services } = auth;
@@ -195,6 +207,7 @@ function SignedInAccount() {
 
   return (
     <>
+      <EngineNotice />
       <div className="card" style={{ gap: 0, padding: "0 14px" }}>
         <div className="kv" style={{ height: 44, borderBottom: "1px solid var(--line)" }}><span>Name</span><b>{session?.name || "Not set"}</b></div>
         <div className="kv" style={{ height: 44 }}><span>Email</span><b>{session?.email}</b></div>

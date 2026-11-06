@@ -26,7 +26,7 @@ describe("polling", () => {
     const crypto = new FakeAuthCrypto();
     const keys = createMemoryKeyStore();
     const wrap = new Uint8Array(32).fill(5);
-    const services = createAuthServices({ fetch: engine.fetch, baseUrl: "http://e.test", keys, crypto: () => crypto, wrapSecret: async () => wrap });
+    const services = createAuthServices({ fetch: engine.fetch, baseUrl: "http://e.test", keys, crypto: () => crypto, wrapSecret: async () => wrap.slice() });
     // A pending device with a session on the mock server.
     const account = { id: "00000000-0000-4000-8000-0000000000a1", email: "a@b.co", verifier: new Uint8Array(32), devices: [] as Device[] };
     const pendingDevice: Device = {
