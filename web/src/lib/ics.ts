@@ -1,6 +1,5 @@
-import { nextOnOrAfter, newSeries, type Day, type Frequency, type Repeat, type Series } from "../store/repeat";
-import { addWall, daysBetween } from "./wall";
-import { dateKey } from "./dates";
+import { newSeries, type Day, type Frequency, type Repeat, type Series } from "../store/repeat";
+import { addWall } from "./wall";
 import { instantToWall, resolveZone, zonedInstant } from "./zones";
 import type { FeedEvent } from "../store/types";
 
@@ -80,6 +79,13 @@ function parseWhen(value: string, params: Record<string, string>, notes: Set<str
   return { value: wall, allDay: false, zone: null };
 }
 
+/** The date of a value in the series' own zone: a UTC (Z) or other-zone moment is converted before its date is taken. */
+function dayIn(when: When, zone: string | null): string {
+  if (when.allDay || !when.zone || !zone || when.zone === zone) return when.value.slice(0, 10);
+  const at = zonedInstant(when.zone, +when.value.slice(0, 4), +when.value.slice(5, 7), +when.value.slice(8, 10), +when.value.slice(11, 13), +when.value.slice(14, 16));
+  return ((at && instantToWall(zone, at)) ?? when.value).slice(0, 10);
+}
+
 const BY_DAY: Record<string, Day> = { MO: "mon", TU: "tue", WE: "wed", TH: "thu", FR: "fri", SA: "sat", SU: "sun" };
 const FREQ: Record<string, Frequency> = { DAILY: "daily", WEEKLY: "weekly", MONTHLY: "monthly", YEARLY: "yearly" };
 const WHOLE = /^\d{1,10}$/;
@@ -88,7 +94,7 @@ const WHOLE = /^\d{1,10}$/;
  * The rule's basic parts: FREQ, INTERVAL, BYDAY (weekly), COUNT, UNTIL. Anything else, or a number
  * that is not a whole number in the engine's range, makes the rule unsupported (null).
  */
-function parseRule(value: string, notes: Set<string>): Repeat | null {
+function parseRule(value: string, notes: Set<string>, zone: string | null): Repeat | null {
   const parts = Object.fromEntries(value.split(";").map((p) => p.split("=") as [string, string]));
   const frequency = FREQ[parts.FREQ ?? ""];
   if (!frequency) return null;
@@ -115,7 +121,7 @@ function parseRule(value: string, notes: Set<string>): Repeat | null {
   } else if (parts.UNTIL !== undefined) {
     const until = parseWhen(parts.UNTIL, {}, notes);
     if (!until) return null;
-    repeat.end = { type: "until", value: until.value.slice(0, 10) };
+    repeat.end = { type: "until", value: dayIn(until, zone) };
   }
   return repeat;
 }
@@ -135,22 +141,10 @@ interface Raw {
   event: FeedEvent;
 }
 
-const NOT_SUPPORTED = "Repeat not supported: this event is shown once, on its next date.";
+/** Added to the notes of an event whose repeat cannot be shown; the Calendars dialog lists these. */
+export const NOT_SUPPORTED = "Repeat not supported: only its first date is shown.";
 
-/**
- * For a repeat it cannot express, the next date on or after `today` found by stepping the first date
- * forward by FREQ and INTERVAL alone, ignoring every other part of the rule. Null if the rule has no
- * usable FREQ.
- */
-function nextStep(rule: string, firstDay: string, today: string): string | null {
-  const parts = Object.fromEntries(rule.split(";").map((p) => p.split("=") as [string, string]));
-  const frequency = FREQ[parts.FREQ ?? ""];
-  if (!frequency) return null;
-  const interval = parts.INTERVAL !== undefined && WHOLE.test(parts.INTERVAL) && Number(parts.INTERVAL) >= 1 && Number(parts.INTERVAL) <= 65535 ? Number(parts.INTERVAL) : 1;
-  return nextOnOrAfter({ start: firstDay, repeat: { frequency, interval, weekdays: [], end: { type: "never" } }, skipped: [] }, today);
-}
-
-function toEvent(props: Line[], today: string): Raw | null {
+function toEvent(props: Line[]): Raw | null {
   const get = (name: string) => props.find((p) => p.name === name);
   const notes = new Set<string>();
   const cancelled = get("STATUS")?.value.toUpperCase() === "CANCELLED";
@@ -158,7 +152,7 @@ function toEvent(props: Line[], today: string): Raw | null {
   const start = dtstart && parseWhen(dtstart.value, dtstart.params, notes);
   if (!dtstart || !start) return null;
 
-  let startValue = start.value;
+  const startValue = start.value;
   let end: string;
   const dtend = get("DTEND");
   const parsedEnd = dtend && parseWhen(dtend.value, dtend.params, notes);
@@ -183,13 +177,14 @@ function toEvent(props: Line[], today: string): Raw | null {
   if (!start.allDay && end < startValue) end = startValue;
 
   let series: Series | null = null;
+  const seriesZone = start.allDay ? null : start.zone;
   const rrule = get("RRULE");
   const skipped = props
     .filter((p) => p.name === "EXDATE")
-    .flatMap((p) => p.value.split(",").map((v) => parseWhen(v, p.params, notes)?.value.slice(0, 10)))
+    .flatMap((p) => p.value.split(",").map((v) => { const w = parseWhen(v, p.params, notes); return w ? dayIn(w, seriesZone) : undefined; }))
     .filter((d): d is string => Boolean(d));
   if (rrule) {
-    const rule = parseRule(rrule.value, notes);
+    const rule = parseRule(rrule.value, notes, seriesZone);
     let ok = false;
     if (rule) {
       try {
@@ -199,23 +194,15 @@ function toEvent(props: Line[], today: string): Raw | null {
         series = null;
       }
     }
-    if (!ok) {
-      // Shown once, on its next date: stepped forward by FREQ and INTERVAL only.
-      const next = nextStep(rrule.value, startValue.slice(0, 10), today);
-      if (next && next !== startValue.slice(0, 10)) {
-        const days = daysBetween(startValue.slice(0, 10), next);
-        startValue = addWall(startValue, days);
-        end = addWall(end, days);
-      }
-      notes.add(NOT_SUPPORTED);
-    }
+    // A rule it cannot say is never guessed at: only the first date is shown.
+    if (!ok) notes.add(NOT_SUPPORTED);
   }
 
   const recurrence = get("RECURRENCE-ID");
   const description = unescapeText(get("DESCRIPTION")?.value ?? "");
   return {
     uid: get("UID")?.value ?? "",
-    recurrenceId: recurrence ? (parseWhen(recurrence.value, recurrence.params, notes)?.value.slice(0, 10) ?? null) : null,
+    recurrenceId: recurrence ? (() => { const w = parseWhen(recurrence.value, recurrence.params, notes); return w ? dayIn(w, seriesZone) : null; })() : null,
     cancelled,
     event: {
       title: unescapeText(get("SUMMARY")?.value ?? "").trim() || "(No title)",
@@ -235,11 +222,10 @@ function toEvent(props: Line[], today: string): Raw | null {
  * DESCRIPTION, all-day dates, UTC times and TZID times (IANA and common Windows names), converted
  * to the viewer's time, basic RRULEs (FREQ, INTERVAL, BYDAY on weekly rules, COUNT, UNTIL), EXDATE,
  * and RECURRENCE-ID overrides, cancelled ones included. A rule it cannot express leaves a read-only
- * event, on its next date on or after today (stepped by FREQ and INTERVAL only), with a "Repeat not supported" note. Nested components such as VALARM are
+ * event on its first date only, with a "Repeat not supported" note; no dates are guessed. Nested components such as VALARM are
  * ignored. A feed with more than MAX_EVENTS events is refused.
  */
-export function parseIcs(text: string, now: Date = new Date()): FeedEvent[] {
-  const today = dateKey(now);
+export function parseIcs(text: string): FeedEvent[] {
   const all = lines(text);
   if (!all.some((l) => l.name === "BEGIN" && l.value.toUpperCase() === "VCALENDAR")) {
     throw new IcsError("This is not a calendar feed");
@@ -262,7 +248,7 @@ export function parseIcs(text: string, now: Date = new Date()): FeedEvent[] {
     } else if (line.name === "BEGIN") {
       nested = 1;
     } else if (line.name === "END" && kind === "VEVENT") {
-      const raw = toEvent(current, today);
+      const raw = toEvent(current);
       if (raw) raws.push(raw);
       current = null;
     } else {
