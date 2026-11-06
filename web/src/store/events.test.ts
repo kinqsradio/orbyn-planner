@@ -76,7 +76,8 @@ describe("events and calendars in the store", () => {
     await second.ready;
     await second.flush();
     expect(second.getState().events.map((x) => x.title)).toEqual(["A later one"]);
-    expect(second.getState().outbox.filter((x) => x.id === e.id)).toEqual([expect.objectContaining({ op: "delete", changedFields: {} })]);
+    // Never sent, so nothing is left for the engine to hear about.
+    expect(second.getState().outbox.filter((x) => x.id === e.id)).toEqual([]);
   });
 
   it("adds and changes calendars, and subscriptions", async () => {
