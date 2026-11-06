@@ -8,6 +8,7 @@ import { SIGN_IN_UNAVAILABLE, registerAuthCrypto } from "../../api/authCrypto";
 import { createMemoryKeyStore, type KeyStore } from "../../api/keyStore";
 import { FakeAuthCrypto } from "../../api/testing/FakeAuthCrypto";
 import { createMockEngine, type MockEngine } from "../../api/testing/MockEngine";
+import { signOut } from "../../auth/flows";
 import { createAuthServices, type AuthServices } from "../../auth/services";
 import { deviceName } from "../../auth/deviceName";
 import { LocalStore } from "../../store/LocalStore";
@@ -652,11 +653,38 @@ describe("signing out", () => {
     const stranger = new Uint8Array([9, 9, 9, 9, 9, 9, 9, 9, 9, 9]);
     await auth.keys.saveSnapshot(stranger);
     await userEvent.click(await screen.findByRole("button", { name: "Refresh" }));
-    const notice = await screen.findByText(/saved trust state couldn’t be read/);
+    const notice = await screen.findByText(/saved trust state couldn’t be used/);
     expect(notice).toBeInTheDocument();
     expect(await auth.keys.loadQuarantine()).toEqual([stranger]);
     await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
-    expect(screen.queryByText(/saved trust state couldn’t be read/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/saved trust state couldn’t be used/)).not.toBeInTheDocument();
+  });
+
+  it("the quarantine notice shows after a reload and when another tab quarantines", async () => {
+    const auth = await signedIn();
+    await openAccount();
+    await waitFor(async () => expect(await auth.keys.loadSnapshot()).not.toBeNull());
+    expect(screen.queryByText(/saved trust state couldn’t be used/)).not.toBeInTheDocument();
+    // Another tab of this browser, over the same stored state, finds the snapshot unreadable.
+    const otherTab = createAuthServices({
+      fetch: engine.fetch, baseUrl: "http://engine.test", keys: auth.keys, crypto: () => crypto, now: () => nowMs, poll: FAST_POLL, wrapSecret: async () => wrapFor(auth.keys).slice(),
+    });
+    await auth.keys.saveSnapshot(new Uint8Array([9, 9, 9, 9, 9, 9, 9, 9, 9, 9]));
+    await otherTab.engine.run(auth.tokens.getSession()!, () => 1);
+    expect(await screen.findByText(/saved trust state couldn’t be used/)).toBeInTheDocument();
+    // A reload: a new page over the same store shows it with nothing else happening.
+    cleanup();
+    await mount(services(auth.keys), "/settings");
+    await openAccount();
+    expect(await screen.findByText(/saved trust state couldn’t be used/)).toBeInTheDocument();
+  });
+
+  it("signing out in another tab signs this one out too", async () => {
+    await signedIn("/today");
+    await todayShown();
+    const elsewhere = services(); // another tab: its own page state, the same browser channel
+    await signOut(elsewhere);
+    expect(await screen.findByRole("heading", { name: /Your tasks and calendar/ })).toBeInTheDocument();
   });
 
   it("after a 401 a person who chose no account goes back to the planner on this device", async () => {

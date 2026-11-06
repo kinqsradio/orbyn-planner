@@ -76,10 +76,18 @@ describe("forgetting a device in IndexedDB", () => {
     expect((await store.loadQuarantine()).map((b) => b[0])).toEqual([3]);
   });
 
-  it("keeps the newest three unreadable snapshots", async () => {
+  it("pins the first unreadable snapshot and keeps the newest after it", async () => {
     const store = createIdbKeyStore();
     for (let i = 1; i <= 5; i++) await store.quarantineSnapshot(new Uint8Array([i]));
-    expect((await store.loadQuarantine()).map((b) => b[0])).toEqual([3, 4, 5]);
+    expect((await store.loadQuarantine()).map((b) => b[0])).toEqual([1, 4, 5]);
+  });
+
+  it("does not keep the same unreadable snapshot twice, so repeated failures can't push the original out", async () => {
+    const store = createIdbKeyStore();
+    await store.quarantineSnapshot(new Uint8Array([7]));
+    for (let i = 0; i < 10; i++) await store.quarantineSnapshot(new Uint8Array([8]));
+    for (let i = 0; i < 10; i++) await store.quarantineSnapshot(new Uint8Array([8]));
+    expect((await store.loadQuarantine()).map((b) => b[0])).toEqual([7, 8]);
   });
 
   it("the wrapping secret comes from a key that is stored but never readable", async () => {

@@ -20,13 +20,20 @@ export const browserLock: Lock = (fn) => {
   return next;
 };
 
-export const SNAPSHOT_UNREADABLE = "This device’s saved trust state couldn’t be read, so it is starting fresh. You may need to approve your other devices again.";
+export const SNAPSHOT_UNREADABLE = "This device’s saved trust state couldn’t be used, so it is starting fresh. The old copy is kept. You may need to approve your other devices again.";
 
-/** A message the person should see, held until they dismiss it. */
+/**
+ * What the person should know about the saved state. It is shown whenever the key store holds a
+ * quarantined snapshot, so it survives a reload and reaches every tab; dismissing hides it for this
+ * page until another snapshot is quarantined.
+ */
 export interface Notice {
   get(): string | null;
   subscribe(listener: () => void): () => void;
+  /** Hides it on this page. */
   clear(): void;
+  /** Reads the key store again (on opening a screen that shows it, or when another tab says something changed). */
+  refresh(): Promise<void>;
 }
 
 export interface EngineHost {
@@ -40,27 +47,62 @@ export interface EngineHost {
   run<T>(session: StoredSession, fn: (engine: ApprovalEngine) => T | Promise<T>): Promise<T>;
   /** Forgets this device (keys, snapshot, wrapping key), under the same lock so no action is half-saved. Rejects if it could not. */
   forget(): Promise<void>;
+  /** Runs `fn` under the engine's lock, for changes to the stored state that must not interleave with an action. Do not call `run` or `forget` from inside. */
+  exclusive<T>(fn: () => Promise<T>): Promise<T>;
   /** Something the person should know about the saved state. */
   notice: Notice;
 }
 
-function createNotice(): Notice & { set(message: string): void } {
-  let message: string | null = null;
+const NOTICE_CHANNEL = "orbyn-planner-engine-notice";
+
+function createNotice(keys: KeyStore): Notice & { announce(): Promise<void> } {
+  let count = 0;
+  let dismissed = false;
   const listeners = new Set<() => void>();
   const emit = () => listeners.forEach((l) => l());
+  const refresh = async () => {
+    try {
+      const next = (await keys.loadQuarantine()).length;
+      if (next !== count) {
+        count = next;
+        emit();
+      }
+    } catch {
+      // Nothing to show if the store can't be read.
+    }
+  };
+  const react = () => {
+    dismissed = false;
+    void refresh().then(emit);
+  };
+  if (typeof BroadcastChannel !== "undefined") {
+    const channel = new BroadcastChannel(NOTICE_CHANNEL);
+    channel.onmessage = react;
+  }
+  void refresh();
   return {
-    get: () => message,
+    get: () => (count > 0 && !dismissed ? SNAPSHOT_UNREADABLE : null),
     subscribe: (l) => {
       listeners.add(l);
       return () => listeners.delete(l);
     },
     clear: () => {
-      message = null;
+      dismissed = true;
       emit();
     },
-    set: (m) => {
-      message = m;
+    refresh,
+    /** This tab quarantined something: show it here and tell the other tabs. */
+    announce: async () => {
+      dismissed = false;
+      await refresh();
       emit();
+      try {
+        const channel = new BroadcastChannel(NOTICE_CHANNEL);
+        channel.postMessage("quarantined");
+        channel.close();
+      } catch {
+        // The other tabs read the store when they next open the screen.
+      }
     },
   };
 }
@@ -73,10 +115,11 @@ export function createEngineHost(deps: {
   lock?: Lock;
 }): EngineHost {
   const lock = deps.lock ?? browserLock;
-  const notice = createNotice();
+  const notice = createNotice(deps.keys);
   return {
     notice,
     forget: () => lock(() => deps.keys.clearDevice()),
+    exclusive: (fn) => lock(fn),
     run: (session, fn) =>
       lock(async () => {
         const crypto = deps.crypto();
@@ -90,8 +133,11 @@ export function createEngineHost(deps: {
           let snapshot = await deps.keys.loadSnapshot();
           // State made for another account or device is not this session's: it must not speak for it.
           if (snapshot && (!identity || identity.accountId !== session.accountId || identity.deviceId !== session.deviceId)) {
+            // Kept, not dropped: it may hold the zone keys of the account it was made for.
+            await deps.keys.quarantineSnapshot(snapshot);
             await deps.keys.clearSnapshot();
             snapshot = null;
+            await notice.announce();
           }
           let engine: ApprovalEngine | null = null;
           if (snapshot) {
@@ -101,7 +147,7 @@ export function createEngineHost(deps: {
               // Keep what couldn't be read. Only a genuine open failure (these keys do not open it) drops the live copy.
               await deps.keys.quarantineSnapshot(snapshot);
               if (e instanceof Error && /^open_failed\b/.test(e.message)) await deps.keys.clearSnapshot();
-              notice.set(SNAPSHOT_UNREADABLE);
+              await notice.announce();
             }
           }
           engine ??= crypto.engine.create(keys, session.accountId, session.deviceId);

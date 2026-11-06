@@ -108,22 +108,42 @@ describe("the engine's saved state", () => {
     expect(h.notice.get()).toBeNull();
   });
 
-  it("keeps at most three unreadable snapshots, the newest", async () => {
+  it("keeps at most three unreadable snapshots: the first, pinned, and the newest after it", async () => {
     const { keys } = await setup();
     for (let i = 1; i <= QUARANTINE_KEEP + 2; i++) await keys.quarantineSnapshot(new Uint8Array([i]));
-    expect((await keys.loadQuarantine()).map((b) => b[0])).toEqual([3, 4, 5]);
+    expect((await keys.loadQuarantine()).map((b) => b[0])).toEqual([1, 4, 5]);
+    await keys.quarantineSnapshot(new Uint8Array([5])); // the same again adds nothing
+    expect((await keys.loadQuarantine()).map((b) => b[0])).toEqual([1, 4, 5]);
   });
 
-  it("state made for another account or device is not used, and is not reported as unreadable", async () => {
+  it("state made for another account or device is not used, but it is quarantined, not dropped", async () => {
     const { keys, host, own } = await withTrusted();
+    const made = (await keys.loadSnapshot())!;
     for (const other of [{ accountId: "00000000-0000-4000-8000-0000000000ff", deviceId: ME }, { accountId: session.accountId, deviceId: "00000000-0000-4000-8000-0000000000fe" }]) {
       await keys.saveIdentity(other);
       const h = host();
       expect(await h.run(session, (e) => e.verifyDevices(list([own, device(B)])))).toEqual([ME]);
-      expect(h.notice.get()).toBeNull();
+      expect(h.notice.get()).toBe(SNAPSHOT_UNREADABLE);
       expect(await keys.loadIdentity()).toEqual({ accountId: session.accountId, deviceId: session.deviceId });
       await h.run(session, (e) => e.verifyDevices(list([own, device(B, { approved_by: ME, approval_signature: "s" })]))); // trusts B again
     }
+    expect((await keys.loadQuarantine())[0]).toEqual(made); // the original is what was pinned first
+  });
+
+  it("the notice shows whenever something is quarantined: after a reload, and in other tabs; dismissing hides it for the page", async () => {
+    const { keys, host } = await setup();
+    await keys.quarantineSnapshot(new Uint8Array([4, 4, 4]));
+    const reloaded = host(); // a new page over the same store
+    await reloaded.notice.refresh();
+    expect(reloaded.notice.get()).toBe(SNAPSHOT_UNREADABLE);
+    reloaded.notice.clear();
+    expect(reloaded.notice.get()).toBeNull();
+    // Another tab quarantines something: it tells this one.
+    const other = host();
+    await keys.saveSnapshot(fakeSeal(new Uint8Array(32).fill(9), "snapshot", new TextEncoder().encode("{}")));
+    await other.run(session, () => 1);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(reloaded.notice.get()).toBe(SNAPSHOT_UNREADABLE);
   });
 
   it("a failed save fails the action, so nothing that depended on it is sent", async () => {

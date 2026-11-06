@@ -60,7 +60,7 @@ export async function signUp(services: AuthServices, input: { name: string; emai
     } finally {
       wrap.fill(0);
     }
-    await services.keys.saveIdentity({ accountId: created.account_id, deviceId: created.device_id });
+    await services.keys.saveIdentity({ accountId: created.account_id, deviceId: created.device_id, email });
     const session = toStored(created, email, input.name.trim());
     await services.tokens.set(session);
     return session;
@@ -78,7 +78,14 @@ export async function signIn(services: AuthServices, input: { email: string; pas
   try {
     const email = emailOrFail(crypto, input.email);
     const password = utf8(input.password);
-    const saved = await services.keys.loadKeys();
+    let saved = await services.keys.loadKeys();
+    // Keys belong to one account. For any other email (or keys with no email recorded) they are
+    // forgotten before anything is sent, so the old key never signs a proof for, or registers with,
+    // another account: that would let the server link the two.
+    if (saved && (await services.keys.loadIdentity())?.email !== email) {
+      await services.engine.forget();
+      saved = null;
+    }
     let known = null as ReturnType<typeof crypto.deviceKeys.import> | null;
     if (saved) {
       const wrap = await services.wrapSecret();
@@ -110,7 +117,7 @@ export async function signIn(services: AuthServices, input: { email: string; pas
       device: describeDevice(keys),
       device_signature: encodeBytes(keys.signLogin(started.login_id)),
     });
-    await bindKeys(services, keys, known !== null, created);
+    await bindKeys(services, keys, known !== null, created, email);
     const session = toStored(created, email, input.name ?? "");
     await services.tokens.set(session);
     return session;
@@ -124,26 +131,29 @@ export async function signIn(services: AuthServices, input: { email: string; pas
  * keys are stored. Keys made for another account are replaced, with the old state wiped; the same
  * account under a new device id means the old row was removed, so the saved trust state is wiped.
  */
-async function bindKeys(services: AuthServices, keys: DeviceKeys, existing: boolean, created: SessionCreated): Promise<void> {
-  const identity = await services.keys.loadIdentity();
-  const seal = async () => {
-    const wrap = await services.wrapSecret();
-    try {
-      await services.keys.saveKeys(keys.export(wrap));
-    } finally {
-      wrap.fill(0);
+async function bindKeys(services: AuthServices, keys: DeviceKeys, existing: boolean, created: SessionCreated, email: string): Promise<void> {
+  // Under the engine's lock, so no action in another tab is half-way through saving into what is wiped here.
+  await services.engine.exclusive(async () => {
+    const identity = await services.keys.loadIdentity();
+    const seal = async () => {
+      const wrap = await services.wrapSecret();
+      try {
+        await services.keys.saveKeys(keys.export(wrap));
+      } finally {
+        wrap.fill(0);
+      }
+    };
+    if (!existing) {
+      await services.keys.clearSnapshot(); // no keys were here: whatever snapshot there is is not theirs
+      await seal();
+    } else if (identity && identity.accountId !== created.account_id) {
+      await services.keys.clearDevice();
+      await seal();
+    } else if (!identity || identity.deviceId !== created.device_id) {
+      await services.keys.clearSnapshot();
     }
-  };
-  if (!existing) {
-    await services.keys.clearSnapshot(); // no keys were here: whatever snapshot there is is not theirs
-    await seal();
-  } else if (identity && identity.accountId !== created.account_id) {
-    await services.keys.clearDevice();
-    await seal();
-  } else if (!identity || identity.deviceId !== created.device_id) {
-    await services.keys.clearSnapshot();
-  }
-  await services.keys.saveIdentity({ accountId: created.account_id, deviceId: created.device_id });
+    await services.keys.saveIdentity({ accountId: created.account_id, deviceId: created.device_id, email });
+  });
 }
 
 /**
