@@ -25,8 +25,9 @@ export function SettingsPage() {
         ))}
       </div>
       <div className="r">
+        <h1 className="sr-only">Settings</h1>
         <div className="ph">
-          <h1>{category}</h1>
+          <h2>{category}</h2>
         </div>
         <div className="pad">
           {category === "Planning" ? (

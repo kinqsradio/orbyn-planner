@@ -14,7 +14,7 @@ npm run dev        # http://localhost:5173
 | `check` | Type-check and lint |
 | `test` | Vitest |
 | `generate` | Copy engine wire types into `src/generated/` (needs `ORBYN_ENGINE_DIR`) |
-| `generate:check` | Fail if `src/generated/` differs from the engine's bindings (not in CI yet) |
+| `generate:check` | Fail if `src/generated/` differs from the engine's bindings; CI runs it against orbyn-engine's main |
 
 - `VITE_ENGINE_URL`: engine base URL, default `http://localhost:8080`.
 - `ORBYN_ENGINE_DIR`: orbyn-engine checkout for `generate` and `generate:check`; required, with no default. It reads `crates/orbyn-contracts/bindings/*.ts`.
