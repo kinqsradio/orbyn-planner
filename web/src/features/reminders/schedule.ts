@@ -15,6 +15,12 @@ export function reminderTime(task: Task): Date | null {
   if (task.reminder === null || task.reminder === undefined || task.due === null || task.done || task.deletedAt !== null) return null;
   const { date, hasTime } = parseDue(task.due);
   const base = hasTime ? date : new Date(date.getFullYear(), date.getMonth(), date.getDate(), DATE_ONLY_HOUR);
+  // Whole days back are calendar days, so "1 day before" stays at the same hour across a clock change.
+  if (task.reminder > 0 && task.reminder % 1440 === 0) {
+    const at = new Date(base);
+    at.setDate(at.getDate() - task.reminder / 1440);
+    return at;
+  }
   return new Date(base.getTime() - task.reminder * 60_000);
 }
 

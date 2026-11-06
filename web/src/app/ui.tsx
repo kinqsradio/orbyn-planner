@@ -10,6 +10,14 @@ export interface ToastState {
   focusUndo?: boolean;
   /** After Undo, move focus to the row with this id (see lib/focus.ts). */
   focusRowOnUndo?: string;
+  /** A second action beside Undo. */
+  secondary?: { label: string; run: () => void };
+}
+
+export interface ToastOptions {
+  focusUndo?: boolean;
+  focusRowOnUndo?: string;
+  secondary?: { label: string; run: () => void };
 }
 
 export interface EventKey {
@@ -45,7 +53,7 @@ interface Ui {
   openSearch: () => void;
   closeSearch: () => void;
   toast: ToastState | null;
-  showToast: (message: string, undo?: () => void, options?: { focusUndo?: boolean; focusRowOnUndo?: string }) => void;
+  showToast: (message: string, undo?: () => void, options?: ToastOptions) => void;
   dismissToast: () => void;
 }
 
@@ -64,8 +72,8 @@ export function UiProvider({ children }: { children: ReactNode }) {
   const [newTaskDefaults, setNewTaskDefaults] = useState<{ projectId?: string | null; sectionId?: string | null }>({});
   const [toast, setToast] = useState<ToastState | null>(null);
 
-  const showToast = useCallback((message: string, undo?: () => void, options?: { focusUndo?: boolean; focusRowOnUndo?: string }) => {
-    setToast({ id: ++toastCounter, message, undo, focusUndo: options?.focusUndo, focusRowOnUndo: options?.focusRowOnUndo });
+  const showToast = useCallback((message: string, undo?: () => void, options?: ToastOptions) => {
+    setToast({ id: ++toastCounter, message, undo, focusUndo: options?.focusUndo, focusRowOnUndo: options?.focusRowOnUndo, secondary: options?.secondary });
   }, []);
   const dismissToast = useCallback(() => setToast(null), []);
 

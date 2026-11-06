@@ -152,11 +152,26 @@ describe("editing a repeating task's due or repeat", () => {
   }
   const today = "2026-11-07";
 
-  it("This task moves only this occurrence", async () => {
+  it("This task skips this date and makes a one-off copy linked to it", async () => {
     const { store, id } = await weekly();
     editTaskRepeat(store, task(store, id), { due: "2026-11-18" }, "this", today);
-    expect(task(store, id)).toMatchObject({ due: "2026-11-18" });
-    expect(task(store, id).repeat).toMatchObject({ start: "2026-11-09" });
+    expect(task(store, id).repeat).toMatchObject({ start: "2026-11-09", skipped: ["2026-11-16"] });
+    expect(task(store, id).due).toBe("2026-11-23");
+    const copy = store.getState().tasks.find((t) => t.overrideOf?.id === id)!;
+    expect(copy).toMatchObject({ due: "2026-11-18", repeat: null, overrideOf: { id, date: "2026-11-16" } });
+  });
+
+  it("All moves the series by the same days, weekdays included, and keeps the whole count", async () => {
+    const store = await setup();
+    const t = store.addTask({ title: "Gym", due: "2026-11-09", repeat: { ...repeatEvery("weekly"), weekdays: ["mon", "wed"], end: { type: "count", value: 6 } } });
+    editTaskRepeat(store, task(store, t.id), { due: "2026-11-10" }, "all", today);
+    expect(task(store, t.id).repeat).toMatchObject({ start: "2026-11-10", repeat: { weekdays: ["tue", "thu"], end: { type: "count", value: 6 } } });
+  });
+
+  it("refuses a move that would split an every-other-week cycle", async () => {
+    const store = await setup();
+    const t = store.addTask({ title: "Gym", due: "2026-11-14", repeat: { ...repeatEvery("weekly"), interval: 2, weekdays: ["sat", "sun"] } });
+    expect(() => editTaskRepeat(store, task(store, t.id), { due: "2026-11-15" }, "all", today)).toThrow();
   });
 
   it("This and following starts the rule at the new date with the rest of the count", async () => {
@@ -164,12 +179,6 @@ describe("editing a repeating task's due or repeat", () => {
     editTaskRepeat(store, task(store, id), { due: "2026-11-18" }, "following", today);
     expect(task(store, id).due).toBe("2026-11-18");
     expect(task(store, id).repeat).toMatchObject({ start: "2026-11-18", repeat: { end: { type: "count", value: 4 } } });
-  });
-
-  it("All restarts the whole series, count and all", async () => {
-    const { store, id } = await weekly();
-    editTaskRepeat(store, task(store, id), { due: "2026-11-18" }, "all", today);
-    expect(task(store, id).repeat).toMatchObject({ start: "2026-11-18", repeat: { end: { type: "count", value: 5 } } });
   });
 
   it("a new rule replaces the old one for This and following and All, and not for This task", async () => {
@@ -198,5 +207,41 @@ describe("editing a repeating task's due or repeat", () => {
     editTaskRepeat(store, task(store, noDue.id), { repeat: repeatEvery("daily") }, "all", today);
     expect(task(store, noDue.id)).toMatchObject({ due: today, repeat: { start: today } });
     expect(newSeries(today, repeatEvery("daily")).start).toBe(today);
+  });
+});
+
+describe("review fixes", () => {
+  it("sections are stored one field each, so edits to different sections both survive", async () => {
+    const store = await setup();
+    const p = store.addProject({ name: "Home", colour: "c3" });
+    const a = store.addSection(p.id, "Kitchen");
+    const b = store.addSection(p.id, "Garden");
+    await store.flush();
+    store.renameSection(p.id, a.id, "Galley");
+    store.deleteSection(p.id, b.id);
+    const entry = store.getState().outbox.find((e) => e.id === p.id)!;
+    const fields = JSON.stringify(entry);
+    expect(fields).toContain(`section.${a.id}.name`);
+    expect(fields).toContain(`section.${b.id}.removed`);
+    expect(store.getState().projects[0]!.sections.map((x) => x.name)).toEqual(["Galley"]);
+  });
+
+  it("restoring a task whose section was deleted puts it at the project's top", async () => {
+    const store = await setup();
+    const p = store.addProject({ name: "Home", colour: "c3" });
+    const k = store.addSection(p.id, "Kitchen");
+    const t = store.addTask({ title: "tiles", projectId: p.id, sectionId: k.id });
+    store.deleteTask(t.id);
+    store.deleteSection(p.id, k.id);
+    store.restoreTask(t.id);
+    expect(task(store, t.id)).toMatchObject({ deletedAt: null, projectId: p.id, sectionId: null });
+  });
+
+  it("completing a repeating task unticks its steps for the next time", async () => {
+    const store = await setup();
+    const t = store.addTask({ title: "Clean", due: "2026-11-09", repeat: repeatEvery("weekly"), checklist: [{ id: "s1", title: "Sink", done: true, order: "a" }] });
+    store.setDone(t.id, true);
+    expect(task(store, t.id).checklist[0]!.done).toBe(false);
+    expect(task(store, t.id).due).toBe("2026-11-16");
   });
 });

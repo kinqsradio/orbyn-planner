@@ -37,6 +37,8 @@ export interface Task {
   reminder: number | null;
   /** When a repeating task was completed, most recent last. Feeds "Done this week". */
   completions: string[];
+  /** Set on the one-off copy made by "This task" on a repeating task: which date of which task it replaces. */
+  overrideOf: { id: string; date: string } | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -170,6 +172,7 @@ export interface NewTask {
   /** A rule; the series starts on the due date (today when there is none). */
   repeat?: Repeat | null;
   reminder?: number | null;
+  overrideOf?: { id: string; date: string } | null;
 }
 
 export interface NewEvent {
