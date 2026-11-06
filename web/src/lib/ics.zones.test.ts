@@ -119,6 +119,56 @@ describe("a repeat in a source zone, shown in the viewer's", () => {
   });
 });
 
+describe("UTC moments in a zoned series", () => {
+  const dates = (e: { start: string; zone?: string | null; series?: unknown }, from: string, to: string) => {
+    const ev = { ...e, id: "x", deletedAt: null, repeat: e.series, allDay: false, end: e.start } as never;
+    return expandEvents([ev], from, to).map((o) => o.date);
+  };
+  it("UNTIL in UTC is the date in the series' zone: Tokyo 08:00 weekly gives 2", () => {
+    const e = parse("DTSTART;TZID=Asia/Tokyo:20261102T080000", "RRULE:FREQ=WEEKLY;UNTIL=20261109T230000Z");
+    expect(e.series!.repeat.end).toEqual({ type: "until", value: "2026-11-10" });
+    expect(dates(e, "2026-10-25", "2026-12-31")).toHaveLength(2);
+  });
+  it("EXDATE in UTC hides the right date: LA 18:00 weekly, 11-10 02:00Z is 11-09", () => {
+    const e = parse("DTSTART;TZID=America/Los_Angeles:20261102T180000", "RRULE:FREQ=WEEKLY", "EXDATE:20261110T020000Z");
+    expect(e.series!.skipped).toEqual(["2026-11-09"]);
+  });
+  it("RECURRENCE-ID in UTC replaces that occurrence instead of adding one", () => {
+    const all = parseIcs(
+      [
+        "BEGIN:VCALENDAR",
+        "BEGIN:VEVENT", "UID:a", "DTSTART;TZID=America/Los_Angeles:20261102T180000", "RRULE:FREQ=WEEKLY", "SUMMARY:m", "END:VEVENT",
+        "BEGIN:VEVENT", "UID:a", "RECURRENCE-ID:20261110T020000Z", "DTSTART;TZID=America/Los_Angeles:20261109T190000", "SUMMARY:moved", "END:VEVENT",
+        "END:VCALENDAR",
+      ].join("\r\n"),
+    );
+    expect(all.find((x) => x.series)!.series!.skipped).toEqual(["2026-11-09"]);
+  });
+});
+
+describe("source-zone clock changes and speed", () => {
+  it("a start in a skipped hour moves forward by the gap, and keeps the written length", () => {
+    // London springs forward on 29 March 2026: 01:30 does not exist, 01:30-02:15 is 45 minutes.
+    const e = parse("DTSTART;TZID=Europe/London:20260329T013000", "DTEND;TZID=Europe/London:20260329T021500");
+    const ev = { ...e, id: "x", deletedAt: null, repeat: null, allDay: false } as never;
+    const [o] = expandEvents([ev], "2026-03-28", "2026-03-30");
+    // 02:30 BST is 01:30 UTC, 21:30 the evening before in New York.
+    expect(o!.start).toBe("2026-03-28T21:30");
+    expect(o!.end).toBe("2026-03-28T22:15");
+  });
+
+  it("500 daily London events over a 42-day grid are quick once expanded", () => {
+    const events = Array.from({ length: 500 }, (_, i) => {
+      const e = parse("DTSTART;TZID=Europe/London:20261101T090000", "DTEND;TZID=Europe/London:20261101T100000", "RRULE:FREQ=DAILY");
+      return { ...e, id: String(i), deletedAt: null, repeat: e.series, allDay: false } as never;
+    });
+    expandEvents(events, "2026-11-01", "2026-12-12");
+    const t = performance.now();
+    expect(expandEvents(events, "2026-11-01", "2026-12-12")).toHaveLength(500 * 42);
+    expect(performance.now() - t).toBeLessThan(250);
+  });
+});
+
 describe("zones", () => {
   it("resolves IANA and Windows names and rejects others", () => {
     expect(resolveZone("Europe/London")).toBe("Europe/London");

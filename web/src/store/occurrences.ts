@@ -1,4 +1,4 @@
-import { addWall, daysBetween, lastDayOf } from "../lib/wall";
+import { addWall, daysBetween, lastDayOf, wallMinutes } from "../lib/wall";
 import { wallToLocal } from "../lib/zones";
 import { occurrences as seriesOccurrences } from "./repeat";
 import type { CalendarEvent } from "./types";
@@ -48,14 +48,34 @@ function repeating(event: CalendarEvent, from: string, to: string): Occurrence[]
  * change of daylight saving in either place moves it correctly.
  */
 function zoned(event: CalendarEvent, from: string, to: string): Occurrence[] {
+  let ranges = zonedCache.get(event);
+  if (!ranges) zonedCache.set(event, (ranges = new Map()));
+  const key = `${from}|${to}`;
+  const hit = ranges.get(key);
+  if (hit) return hit;
+  const out = zonedUncached(event, from, to);
+  if (ranges.size > 50) ranges.clear();
+  ranges.set(key, out);
+  return out;
+}
+
+const zonedCache = new WeakMap<CalendarEvent, Map<string, Occurrence[]>>();
+
+/** The length of an event as written, in minutes of its own wall clock. */
+const lengthMinutes = (start: string, end: string) => daysBetween(start, end) * 1440 + wallMinutes(end) - wallMinutes(start);
+
+function zonedUncached(event: CalendarEvent, from: string, to: string): Occurrence[] {
   const zone = event.zone!;
   const out: Occurrence[] = [];
+  const length = Math.max(lengthMinutes(event.start, event.end), 0);
   const base = event.repeat
     ? seriesOccurrences(event.repeat, addWall(from, -2), addWall(to, 2)).map((date) => shiftTo(event, date))
     : [{ start: event.start, end: event.end }];
   for (const w of base) {
     const start = wallToLocal(zone, w.start) ?? w.start;
-    const end = wallToLocal(zone, w.end) ?? w.end;
+    let end = wallToLocal(zone, w.end) ?? w.end;
+    // A start inside a skipped hour moves forward by the gap; an end that then lands before it keeps the written length.
+    if (end < start) end = addWall(start, 0, length);
     if (start.slice(0, 10) <= to && lastDayOf(start, end, false) >= from) out.push({ event, date: start.slice(0, 10), start, end, allDay: false });
   }
   return out;

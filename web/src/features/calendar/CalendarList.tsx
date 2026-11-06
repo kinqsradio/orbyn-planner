@@ -3,7 +3,8 @@ import { formatTime } from "../../lib/dates";
 import { usePlanner, useStore } from "../../store/context";
 import { LIST_COLOURS, type ListColour, type PlannerCalendar } from "../../store/types";
 import { Swatch } from "../tasks/TaskRow";
-import { FeedError, feedAddress, refreshCalendar } from "./subscriptions";
+import { NEEDS_ENGINE } from "../../api/feeds";
+import { FeedError, feedAddress, refreshCalendar, subscriptionsAvailable } from "./subscriptions";
 
 const COLOUR_NAMES: Record<ListColour, string> = { c1: "Blue", c2: "Green", c3: "Purple", c4: "Orange" };
 
@@ -114,7 +115,8 @@ export function CalendarForms({ onDone }: { onDone?: () => void }) {
     <>
       {mode === null ? (
         <div className="dialog-actions">
-          <button type="button" className="ghost" onClick={() => setMode("subscribe")}>Subscribe to a calendar</button>
+          <button type="button" className="ghost" disabled={!subscriptionsAvailable()} onClick={() => setMode("subscribe")}>Subscribe to a calendar</button>
+          {!subscriptionsAvailable() && <p className="t3" role="note">{NEEDS_ENGINE}.</p>}
           <button type="button" className="btn" onClick={() => setMode("new")}>New calendar</button>
           {onDone && <button type="button" className="ghost" onClick={onDone}>Done</button>}
         </div>

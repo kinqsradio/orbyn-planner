@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { IcsError, MAX_EVENTS, parseIcs } from "./ics";
+import { IcsError, MAX_EVENTS, NOT_SUPPORTED, parseIcs } from "./ics";
 import { wallToLocal } from "./zones";
 
 const wrap = (...events: string[]) => ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Test//EN", ...events, "END:VCALENDAR"].join("\r\n");
@@ -112,18 +112,11 @@ describe("parseIcs", () => {
     expect(events[0]!.series!.skipped).toEqual(["2026-11-09"]);
   });
 
-  it("a rule it cannot repeat is shown once on its next date, stepped by FREQ and INTERVAL alone, with a note", () => {
-    const text = wrap(vevent("DTSTART:20261102T090000", "DTEND:20261102T100000", "RRULE:FREQ=MONTHLY;BYDAY=1MO", "SUMMARY:First Monday", "DESCRIPTION:Bring the plan"));
-    const [e] = parseIcs(text, new Date(2026, 10, 7));
-    expect(e).toMatchObject({ series: null, start: "2026-12-02T09:00", end: "2026-12-02T10:00" });
-    expect(e!.notes).toBe("Bring the plan\n\nRepeat not supported: this event is shown once, on its next date.");
-    // Still ahead of today: it stays where it is.
-    expect(parseIcs(text, new Date(2026, 9, 1))[0]!.start).toBe("2026-11-02T09:00");
-    // Every second week, ignoring the days it also names.
-    const biweekly = wrap(vevent("DTSTART:20261102T090000", "RRULE:FREQ=WEEKLY;INTERVAL=2;BYSETPOS=1;BYDAY=MO,TU", "SUMMARY:x"));
-    expect(parseIcs(biweekly, new Date(2026, 10, 7))[0]!.start).toBe("2026-11-16T09:00");
-    // No FREQ to step by: the first date.
-    expect(parseIcs(wrap(vevent("DTSTART:20261102T090000", "RRULE:BYDAY=MO", "SUMMARY:x")), new Date(2026, 10, 7))[0]!.start).toBe("2026-11-02T09:00");
+  it("a rule it cannot repeat shows only its first date, with a note, and invents no others", () => {
+    const text = wrap(vevent("DTSTART:20261102T090000", "DTEND:20261102T100000", "RRULE:FREQ=MONTHLY;BYDAY=2TU", "SUMMARY:Second Tuesday", "DESCRIPTION:Bring the plan"));
+    const [e] = parseIcs(text);
+    expect(e).toMatchObject({ series: null, start: "2026-11-02T09:00", end: "2026-11-02T10:00" });
+    expect(e!.notes).toBe(`Bring the plan\n\n${NOT_SUPPORTED}`);
   });
 
   it("COUNT and INTERVAL must be whole numbers in range, or the rule is not supported", () => {
