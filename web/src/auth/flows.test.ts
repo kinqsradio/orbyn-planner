@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createMemoryKeyStore } from "../api/keyStore";
+import { createMemoryKeyStore, emptySyncState } from "../api/keyStore";
 import { FakeAuthCrypto } from "../api/testing/FakeAuthCrypto";
 import { createMockEngine } from "../api/testing/MockEngine";
 import { KeysForAnotherAccount, signIn, signUp } from "./flows";
@@ -41,8 +41,12 @@ describe("signing in binds the stored state to the account and device", () => {
   it("a different device id means the old row was removed: the saved trust state is wiped, the keys stay", async () => {
     const { keys, services, first } = await signedUpAndOut();
     await keys.saveIdentity({ accountId: first.accountId, deviceId: "00000000-0000-4000-8000-0000000000ee", email: SAM.email });
+    // An edit was staged in the engine that is about to be dropped: it must be staged again, not cleared as sent.
+    await keys.saveSyncState({ ...emptySyncState(), zones: ["list:inbox"], staged: { "task:t1": "k1" }, stagedZone: { "task:t1": "list:inbox" }, keysSent: { "list:inbox": "a" }, made: { "list:inbox": true } });
     const next = await signIn(services, SAM);
     expect(await keys.loadSnapshot()).toBeNull();
+    const state = (await keys.loadSyncState())!;
+    expect([state.staged, state.stagedZone, state.keysSent, state.made]).toEqual([{}, {}, {}, {}]);
     expect(await keys.loadKeys()).not.toBeNull();
     expect(await keys.loadIdentity()).toEqual({ accountId: next.accountId, deviceId: next.deviceId, email: SAM.email });
   });

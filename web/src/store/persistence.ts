@@ -17,6 +17,13 @@ export interface ApplyResult {
   outbox: { type: RecordType; id: string; entry: OutboxEntry | null }[];
 }
 
+/** An outbox entry that reached the server: cleared only if it is still the version that was sent. */
+export interface Acknowledged {
+  type: RecordType;
+  id: string;
+  idempotencyKey: string;
+}
+
 export interface PersistenceHandlers {
   /** Another tab wants to upgrade the database; this connection has been closed. */
   onVersionChange?: () => void;
@@ -35,7 +42,14 @@ export interface Persistence {
   apply(batch: PatchBatch): Promise<ApplyResult>;
   /** The current state of some records, after another tab changed them. */
   read(refs: Ref[]): Promise<ApplyResult>;
+  /**
+   * Clears outbox entries the server has acknowledged. An entry edited since it was sent has a new
+   * idempotency key and stays, so a change made while an upload was out is never lost.
+   */
+  acknowledge(sent: Acknowledged[]): Promise<ApplyResult>;
   setHandlers(handlers: PersistenceHandlers): void;
+  /** Lets go of the storage connection (none to let go of in memory). */
+  close?(): void;
 }
 
 const STORE_OF: Record<RecordType, "tasks" | "lists" | "events" | "calendars" | "projects"> = { task: "tasks", list: "lists", event: "events", calendar: "calendars", project: "projects" };
@@ -104,6 +118,17 @@ export class MemoryPersistence implements Persistence {
     return result;
   }
 
+  async acknowledge(sent: Acknowledged[]): Promise<ApplyResult> {
+    const result: ApplyResult = { records: [], outbox: [] };
+    for (const a of sent) {
+      const key = refKey(a);
+      const existing = this.outbox.get(key);
+      if (existing && existing.idempotencyKey === a.idempotencyKey) this.outbox.delete(key);
+      result.outbox.push({ type: a.type, id: a.id, entry: this.outbox.get(key) ?? null });
+    }
+    return result;
+  }
+
   async read(refs: Ref[]): Promise<ApplyResult> {
     return {
       records: refs.map((r) => ({ ...r, record: this.records.get(refKey(r)) ?? null })),
@@ -112,7 +137,8 @@ export class MemoryPersistence implements Persistence {
   }
 }
 
-const DB_NAME = "orbyn-planner";
+/** The planner kept on this device alone; each account has a database of its own (see `planners.ts`). */
+export const DEVICE_DB = "orbyn-planner";
 const DB_VERSION = 4;
 
 type Rec = AnyRecord & Record<string, unknown>;
@@ -121,6 +147,9 @@ const ALL_STORES = ["tasks", "lists", "events", "calendars", "projects", "outbox
 /** One IndexedDB object store per record type, and an outbox keyed by an auto-incrementing number. */
 export class IdbPersistence implements Persistence {
   readonly durable = true;
+
+  constructor(private readonly dbName: string = DEVICE_DB) {}
+
   private db: Promise<IDBDatabase> | null = null;
   private handlers: PersistenceHandlers = {};
 
@@ -128,9 +157,16 @@ export class IdbPersistence implements Persistence {
     this.handlers = handlers;
   }
 
+  /** Lets go of the connection, so the database can be deleted. */
+  close(): void {
+    const pending = this.db;
+    this.db = null;
+    void pending?.then((db) => db.close(), () => undefined);
+  }
+
   private open(): Promise<IDBDatabase> {
     this.db ??= new Promise((resolve, reject) => {
-      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      const req = indexedDB.open(this.dbName, DB_VERSION);
       req.onupgradeneeded = (event) => {
         const db = req.result;
         for (const name of ["tasks", "lists", "events", "calendars", "projects"]) {
@@ -247,6 +283,28 @@ export class IdbPersistence implements Persistence {
     });
   }
 
+  async acknowledge(sent: Acknowledged[]): Promise<ApplyResult> {
+    const db = await this.open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction("outbox", "readwrite");
+      const result: ApplyResult = { records: [], outbox: [] };
+      const outbox = tx.objectStore("outbox");
+      for (const a of sent) {
+        outbox.index("record").get([a.type, a.id]).onsuccess = (e) => {
+          const existing = (e.target as IDBRequest<OutboxEntry | undefined>).result;
+          if (existing && existing.idempotencyKey === a.idempotencyKey) {
+            outbox.delete(existing.seq);
+            result.outbox.push({ type: a.type, id: a.id, entry: null });
+          } else {
+            result.outbox.push({ type: a.type, id: a.id, entry: existing ?? null });
+          }
+        };
+      }
+      tx.oncomplete = () => resolve(result);
+      tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("The write was aborted"));
+    });
+  }
+
   async read(refs: Ref[]): Promise<ApplyResult> {
     const db = await this.open();
     return new Promise((resolve, reject) => {
@@ -265,6 +323,6 @@ export class IdbPersistence implements Persistence {
 }
 
 /** IndexedDB where it exists, else memory that says so. */
-export function defaultPersistence(): Persistence {
-  return typeof indexedDB === "undefined" ? new MemoryPersistence({ volatile: true }) : new IdbPersistence();
+export function defaultPersistence(dbName: string = DEVICE_DB): Persistence {
+  return typeof indexedDB === "undefined" ? new MemoryPersistence({ volatile: true }) : new IdbPersistence(dbName);
 }

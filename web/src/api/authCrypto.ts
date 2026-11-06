@@ -75,8 +75,49 @@ export interface DevicePairing {
   sas(view: PendingApproval): string;
 }
 
+/**
+ * The record side of the sync engine (orbyn-wasm's `SyncEngine`), with the module's own JSON strings in and
+ * out: the planner's sync layer parses them where it uses them. The stand-in crypto doesn't have it; tests
+ * of sync run the real module.
+ */
+export interface SyncApi {
+  /** A `Stamp` for an edit at `now` (milliseconds). */
+  tick(now: number): string;
+  /** Stages already stamped `Fields` for a record. Throws `no_zone_key` while the zone has no key here. */
+  stage(zone: string, recordType: string, recordId: string, fieldsJson: string): void;
+  /** A signed delete of a record. */
+  delete(zone: string, recordId: string): void;
+  /** The next `UploadChanges`, or undefined when nothing is dirty. The same batch until its answer is applied. */
+  buildUpload(zone: string): string | undefined;
+  uploadSucceeded(zone: string, resultJson: string): void;
+  /** Applies a 409 `RecordChanged`; returns `Applied`. */
+  uploadConflicted(zone: string, conflictJson: string, now: number): string;
+  abandonUpload(zone: string): void;
+  /** Applies one `ZoneChanges` page; returns `Applied`. */
+  applyChanges(zone: string, pageJson: string, now: number): string;
+  /** The zone's change token for `?since=`. */
+  token(zone: string): string | undefined;
+  /** A live record's `Fields`. */
+  record(zone: string, recordId: string): string | undefined;
+  /** Compares one `ZoneList` page; returns `{stale, next}`. */
+  checkZones(zonesJson: string): string;
+  createZoneKey(zone: string): string;
+  /** A `PutKeyEnvelopes` for every device of the `DeviceList` this device verifies. */
+  envelopesFor(zone: string, devicesJson: string): string;
+  /** Opens a `KeyEnvelopeList` from verified devices; returns `{zones, refused}`. */
+  acceptEnvelopes(envelopesJson: string, devicesJson: string): string;
+  retryQuarantined(zone: string, now: number): string;
+  trash(zone: string): string;
+  takeFromTrash(zone: string, recordId: string): string | undefined;
+  deleteZoneProof(zone: string): string;
+  /** Trusts a device the person checked another way (keys base64url). */
+  pinDevice(deviceId: string, signingKey: string, agreementKey: string): void;
+}
+
 /** The approval functions of the sync engine for one device (orbyn-wasm's `SyncEngine`). */
 export interface ApprovalEngine {
+  /** The record side; present with the real module. */
+  readonly sync?: SyncApi;
   /** Releases the module's memory for this engine. Its state must have been saved first. */
   free(): void;
   /** The engine's state sealed under the wrapping secret, for the key store. It holds who this device trusts and the removal sequence. */

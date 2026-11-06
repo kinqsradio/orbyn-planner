@@ -12,6 +12,42 @@ export interface StoredSession {
   name: string;
 }
 
+/**
+ * What the sync layer keeps beside the engine's snapshot (which holds the zone keys, sealed). Plain data
+ * with no secrets: names and ids the server sees anyway. Cleared with the device.
+ */
+export interface SyncState {
+  /** Zones this device writes to or reads, by name. */
+  zones: string[];
+  /** The zone each record was last synced to, by "type:id", so a record that moves lists is moved in the store. */
+  zoneOf: Record<string, string>;
+  /** Outbox entries already staged in the engine, by "type:id" -> idempotency key, so an entry is never staged twice. */
+  staged: Record<string, string>;
+  /** The zone each staged entry was staged into, so the entry is cleared when that zone has nothing left to send. */
+  stagedZone: Record<string, string>;
+  /** Per zone, the set of trusted devices (sorted ids joined) its keys were last sent to and the server confirmed. A zone is not uploaded to until this matches the current set. */
+  keysSent: Record<string, string>;
+  /** Zones this device made (or chose to make) the key for, so a crash between making a zone and its key can't strand it. */
+  made: Record<string, true>;
+  /** Per other trusted device, the approval it was last seen with (its `approval_id`): a change means it was approved again, and every zone key is sent to it again. */
+  approvals: Record<string, string>;
+  /** Records that can't be sent, by "type:id", with why (too large, say): left out of uploads and shown. */
+  failed: Record<string, string>;
+  /** Zones skipped for a while after a refusal: the time they may be tried again (ms) and the next wait. */
+  backoff: Record<string, { until: number; step: number }>;
+  /** Ids of the records the engine could not open yet, by zone, for Settings. */
+  quarantined: Record<string, string[]>;
+  /** ISO time of the last complete sync. */
+  lastSyncedAt: string | null;
+}
+
+/** What only the engine's snapshot can vouch for. Dropping or replacing the snapshot makes it untrue. */
+export function withoutEngineSide(state: SyncState): SyncState {
+  return { ...state, staged: {}, stagedZone: {}, keysSent: {}, made: {}, quarantined: {} };
+}
+
+export const emptySyncState = (): SyncState => ({ zones: [], zoneOf: {}, staged: {}, stagedZone: {}, keysSent: {}, made: {}, approvals: {}, failed: {}, backoff: {}, quarantined: {}, lastSyncedAt: null });
+
 /** The account and device the stored keys belong to. */
 export interface DeviceIdentity {
   accountId: string;
@@ -35,10 +71,18 @@ export interface KeyStore {
   /** The sync engine's state, sealed by the module under the wrapping secret. Never stored unsealed. */
   loadSnapshot(): Promise<Uint8Array | null>;
   saveSnapshot(sealed: Uint8Array): Promise<void>;
+  /**
+   * Drops the snapshot. The sync state's engine-side parts (what was staged, which keys were sent or made) are reset in the
+   * same step, since the engine that knew them is gone: every outbox entry is then staged again from the outbox.
+   */
   clearSnapshot(): Promise<void>;
+  /** Resets the sync state's engine-side parts without touching the snapshot, for a snapshot that is about to be replaced. */
+  resetEngineSide(): Promise<void>;
   /** Which account and device the keys and the snapshot were made for. A session for another one finds them stale. */
   loadIdentity(): Promise<DeviceIdentity | null>;
   saveIdentity(identity: DeviceIdentity): Promise<void>;
+  loadSyncState(): Promise<SyncState | null>;
+  saveSyncState(state: SyncState): Promise<void>;
   /**
    * Keeps a snapshot that could not be read, sealed as it was, so it isn't lost. The first one kept
    * is pinned (it is the original, with the zone keys) and never pushed out; an identical blob is
@@ -79,9 +123,9 @@ export function createIdbKeyStore(factory: IDBFactory = indexedDB): KeyStore {
   let db: Promise<IDBDatabase> | null = null;
   const open = () =>
     (db ??= new Promise<IDBDatabase>((resolve, reject) => {
-      const req = factory.open(KEY_DB_NAME, 3);
+      const req = factory.open(KEY_DB_NAME, 4);
       req.onupgradeneeded = () => {
-        for (const name of ["device", "session", "snapshot", "wrap", "identity", "quarantine"]) {
+        for (const name of ["device", "session", "snapshot", "wrap", "identity", "quarantine", "sync"]) {
           if (!req.result.objectStoreNames.contains(name)) req.result.createObjectStore(name);
         }
       };
@@ -138,15 +182,35 @@ export function createIdbKeyStore(factory: IDBFactory = indexedDB): KeyStore {
     });
   }
 
+  /** In one transaction: the snapshot (optionally) and the sync state's engine-side parts. */
+  async function resetAnd(dropSnapshot: boolean): Promise<void> {
+    const database = await open();
+    const tx = database.transaction(["snapshot", "sync"], "readwrite");
+    const done = new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("The write was aborted"));
+    });
+    const sync = tx.objectStore("sync");
+    const read = sync.get("current") as IDBRequest<SyncState | undefined>;
+    read.onsuccess = () => {
+      if (read.result) sync.put(withoutEngineSide(read.result), "current");
+    };
+    if (dropSnapshot) tx.objectStore("snapshot").delete("current");
+    await done;
+  }
+
   return {
     loadKeys: () => get<Uint8Array>("device"),
     saveKeys: (bytes) => put("device", bytes),
     clearKeys: () => remove("device"),
     loadSnapshot: () => get<Uint8Array>("snapshot"),
     saveSnapshot: (b) => put("snapshot", b),
-    clearSnapshot: () => remove("snapshot"),
+    clearSnapshot: () => resetAnd(true),
+    resetEngineSide: () => resetAnd(false),
     loadWrapKey: () => get<CryptoKey>("wrap"),
     saveWrapKey: (k) => put("wrap", k),
+    loadSyncState: () => get<SyncState>("sync"),
+    saveSyncState: (st) => put("sync", st),
     loadIdentity: () => get<DeviceIdentity>("identity"),
     saveIdentity: (i) => put("identity", i),
     quarantineSnapshot: quarantine,
@@ -179,6 +243,7 @@ export function createIdbKeyStore(factory: IDBFactory = indexedDB): KeyStore {
       await remove("snapshot");
       await remove("wrap");
       await remove("identity");
+      await remove("sync");
       // The quarantine is sealed under the wrapping key just removed: nothing could open it again.
       const database = await open();
       const tx = database.transaction("quarantine", "readwrite");
@@ -200,6 +265,7 @@ export function createMemoryKeyStore(): KeyStore {
   let snapshot: Uint8Array | null = null;
   let wrap: CryptoKey | null = null;
   let identity: DeviceIdentity | null = null;
+  let sync: SyncState | null = null;
   const quarantined: Uint8Array[] = [];
   let session: StoredSession | null = null;
   return {
@@ -208,9 +274,17 @@ export function createMemoryKeyStore(): KeyStore {
     clearKeys: async () => void (keys = null),
     loadSnapshot: async () => snapshot,
     saveSnapshot: async (b) => void (snapshot = b),
-    clearSnapshot: async () => void (snapshot = null),
+    clearSnapshot: async () => {
+      snapshot = null;
+      if (sync) sync = withoutEngineSide(sync);
+    },
+    resetEngineSide: async () => {
+      if (sync) sync = withoutEngineSide(sync);
+    },
     loadWrapKey: async () => wrap,
     saveWrapKey: async (k) => void (wrap = k),
+    loadSyncState: async () => sync,
+    saveSyncState: async (st) => void (sync = st),
     loadIdentity: async () => identity,
     saveIdentity: async (i) => void (identity = i),
     quarantineSnapshot: async (b) => {
@@ -224,6 +298,7 @@ export function createMemoryKeyStore(): KeyStore {
       snapshot = null;
       wrap = next.wrapKey;
       identity = next.identity;
+      sync = null;
       quarantined.length = 0;
     },
     clearDevice: async () => {
@@ -231,6 +306,7 @@ export function createMemoryKeyStore(): KeyStore {
       snapshot = null;
       wrap = null;
       identity = null;
+      sync = null;
       quarantined.length = 0;
     },
     loadSession: async () => session,

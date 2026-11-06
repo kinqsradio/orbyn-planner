@@ -5,6 +5,7 @@ import { useUi } from "../../app/ui";
 import { EmptyState } from "../../components/EmptyState";
 import { Icon } from "../../components/Icon";
 import { usePlanner, useStore } from "../../store/context";
+import { StrandedZones } from "../sync/StrandedZones";
 import { LIST_COLOURS, type ListColour, type TaskList } from "../../store/types";
 import { activeTasks, openCount, sortByDue } from "../tasks/selectors";
 import { Swatch, TaskRow } from "../tasks/TaskRow";
@@ -123,6 +124,7 @@ export function ListsPage() {
             New list
           </button>
         )}
+        <StrandedZones only="list" />
       </nav>
 
       <div className="r" aria-label={selected?.name ?? "List"} role="region">

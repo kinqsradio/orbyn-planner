@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { StoredSession } from "../api/keyStore";
 import { setSessionToken } from "../api/session";
+import { closePlanner, removeAccountPlanner } from "../store/planners";
 import { signOut as signOutFlow } from "./flows";
 import type { AuthServices } from "./services";
 
@@ -27,7 +28,8 @@ interface AuthApiValue {
   closeAuth: () => void;
   /** "Use without an account": everything stays on this device. */
   useWithoutAccount: () => void;
-  signOut: () => Promise<void>;
+  /** `removePlanner`: also delete this account's planner from this browser (otherwise it stays, and opens only when this account signs in again). */
+  signOut: (options?: { removePlanner?: boolean }) => Promise<void>;
   /** Something that went wrong while signing out, to show. */
   problem: string | null;
 }
@@ -111,12 +113,18 @@ export function AuthProvider({ services, children }: { services: AuthServices | 
       closeAuth: () => setOverlay(null),
       useWithoutAccount,
       problem,
-      signOut: async () => {
+      signOut: async (options) => {
         setProblem(null);
+        const accountId = session?.accountId;
         try {
           await signOutFlow(services);
         } catch (e) {
           setProblem(e instanceof Error ? e.message : "Signing out didn’t finish.");
+        }
+        // The app is on the device-only planner now. This account's stays on disk or goes, as the person chose.
+        if (accountId) {
+          if (options?.removePlanner) await removeAccountPlanner(accountId).catch(() => setProblem("Signed out, but this account’s planner couldn’t be removed from this browser."));
+          else closePlanner(accountId);
         }
         setOverlay(null);
       },

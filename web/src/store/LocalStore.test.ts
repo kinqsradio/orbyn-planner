@@ -136,7 +136,7 @@ describe("LocalStore", () => {
 describe("when storage fails", () => {
   const failing = (over: Partial<Persistence>): Persistence => {
     const memory = new MemoryPersistence();
-    return { durable: true, setHandlers: () => undefined, load: () => memory.load(), read: (r) => memory.read(r), apply: (b) => memory.apply(b), ...over };
+    return { durable: true, setHandlers: () => undefined, load: () => memory.load(), read: (r) => memory.read(r), acknowledge: (s) => memory.acknowledge(s), apply: (b) => memory.apply(b), ...over };
   };
 
   it("reports a write that hits the storage quota, and keeps the change on screen", async () => {
@@ -148,6 +148,7 @@ describe("when storage fails", () => {
       setHandlers: () => undefined,
       load: () => memory.load(),
       read: (r) => memory.read(r),
+      acknowledge: (s) => memory.acknowledge(s),
       apply: (b) => (failWrites ? Promise.reject(quota) : memory.apply(b)),
     };
     const store = new LocalStore({ persistence, broadcast: false });

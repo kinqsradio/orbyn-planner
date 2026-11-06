@@ -36,6 +36,15 @@ export interface Notice {
   refresh(): Promise<void>;
 }
 
+export interface RunOptions {
+  /**
+   * The wall time the restored engine's clock starts from. The engine's clock never goes behind this or
+   * behind any stamp in its cache, so stamping an old edit needs a restore at (about) the edit's time:
+   * restored at "now", every stamp is "now" or later, and whoever syncs last would win every conflict.
+   */
+  restoreAtMs?: number;
+}
+
 export interface EngineHost {
   /**
    * Runs one action on this device's engine. Under the lock it reads the sealed snapshot from the
@@ -44,7 +53,7 @@ export interface EngineHost {
    * If the save fails, `run` fails, so a step that needs the new state (a signed removal, a
    * confirmation) is never sent. Do not call `run` from inside `fn`.
    */
-  run<T>(session: StoredSession, fn: (engine: ApprovalEngine) => T | Promise<T>): Promise<T>;
+  run<T>(session: StoredSession, fn: (engine: ApprovalEngine) => T | Promise<T>, options?: RunOptions): Promise<T>;
   /** Forgets this device (keys, snapshot, wrapping key), under the same lock so no action is half-saved. Rejects if it could not. */
   forget(): Promise<void>;
   /** Runs `fn` under the engine's lock, for changes to the stored state that must not interleave with an action. Do not call `run` or `forget` from inside. */
@@ -123,7 +132,7 @@ export function createEngineHost(deps: {
     notice,
     forget: () => lock(() => deps.keys.clearDevice()),
     exclusive: (fn) => lock(fn),
-    run: (session, fn) =>
+    run: (session, fn, options = {}) =>
       lock(async () => {
         const crypto = deps.crypto();
         // The keys come first: a device that has been signed out has none, and must not get a new wrapping key here.
@@ -146,11 +155,14 @@ export function createEngineHost(deps: {
           }
           if (snapshot) {
             try {
-              engine = crypto.engine.restore(keys, snapshot, wrap, deps.now());
+              engine = crypto.engine.restore(keys, snapshot, wrap, options.restoreAtMs ?? deps.now());
             } catch (e) {
               // Keep what couldn't be read. Only a genuine open failure (these keys do not open it) drops the live copy.
               await deps.keys.quarantineSnapshot(snapshot);
+              // Either way the engine that knew what was staged and which keys were sent is gone (a fresh one replaces it
+              // below), so those records of it are reset with it and the outbox is staged again.
               if (e instanceof Error && /^open_failed\b/.test(e.message)) await deps.keys.clearSnapshot();
+              else await deps.keys.resetEngineSide();
               await notice.announce();
             }
           }

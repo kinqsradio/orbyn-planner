@@ -22,6 +22,25 @@ export interface WasmDeviceSession {
 /** `SyncEngine` in orbyn-wasm, as far as approving a device needs it. Data goes in and out as JSON. */
 export interface WasmSyncEngine {
   free(): void;
+  tick(now: number): string;
+  stage(zone: string, recordType: string, recordId: string, fieldsJson: string): void;
+  delete(zone: string, recordId: string): void;
+  buildUpload(zone: string): string | undefined;
+  uploadSucceeded(zone: string, resultJson: string): void;
+  uploadConflicted(zone: string, conflictJson: string, now: number): string;
+  abandonUpload(zone: string): void;
+  applyChanges(zone: string, pageJson: string, now: number): string;
+  token(zone: string): string | undefined;
+  record(zone: string, recordId: string): string | undefined;
+  checkZones(zonesJson: string): string;
+  createZoneKey(zone: string): string;
+  envelopesFor(zone: string, devicesJson: string): string;
+  acceptEnvelopes(envelopesJson: string, devicesJson: string): string;
+  retryQuarantined(zone: string, now: number): string;
+  trash(zone: string): string;
+  takeFromTrash(zone: string, recordId: string): string | undefined;
+  deleteZoneProof(zone: string): string;
+  pinDevice(deviceId: string, signingKey: string, agreementKey: string): void;
   verifyDevices(devicesJson: string): string;
   signRemoval(deviceJson: string): string;
   snapshot(wrapSecret: Uint8Array): Uint8Array;
@@ -64,6 +83,27 @@ function wasmApprovals(engine: WasmSyncEngine): ApprovalEngine {
   const approver = (s: ApproverPairing) => sessions.get(s) as WasmApproverSession;
   const device = (s: DevicePairing) => sessions.get(s) as WasmDeviceSession;
   return {
+    sync: {
+      tick: (now) => engine.tick(now),
+      stage: (zone, type, id, fields) => engine.stage(zone, type, id, fields),
+      delete: (zone, id) => engine.delete(zone, id),
+      buildUpload: (zone) => engine.buildUpload(zone) ?? undefined,
+      uploadSucceeded: (zone, result) => engine.uploadSucceeded(zone, result),
+      uploadConflicted: (zone, conflict, now) => engine.uploadConflicted(zone, conflict, now),
+      abandonUpload: (zone) => engine.abandonUpload(zone),
+      applyChanges: (zone, page, now) => engine.applyChanges(zone, page, now),
+      token: (zone) => engine.token(zone) ?? undefined,
+      record: (zone, id) => engine.record(zone, id) ?? undefined,
+      checkZones: (zones) => engine.checkZones(zones),
+      createZoneKey: (zone) => engine.createZoneKey(zone),
+      envelopesFor: (zone, devices) => engine.envelopesFor(zone, devices),
+      acceptEnvelopes: (envelopes, devices) => engine.acceptEnvelopes(envelopes, devices),
+      retryQuarantined: (zone, now) => engine.retryQuarantined(zone, now),
+      trash: (zone) => engine.trash(zone),
+      takeFromTrash: (zone, id) => engine.takeFromTrash(zone, id) ?? undefined,
+      deleteZoneProof: (zone) => engine.deleteZoneProof(zone),
+      pinDevice: (id, signing, agreement) => engine.pinDevice(id, signing, agreement),
+    },
     free: () => engine.free(),
     snapshot: (wrapSecret) => engine.snapshot(wrapSecret),
     verifyDevices: (devices) => JSON.parse(engine.verifyDevices(JSON.stringify(devices))) as string[],

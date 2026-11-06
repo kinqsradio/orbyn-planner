@@ -18,6 +18,7 @@ import {
   trustedStartMessage,
 } from "./authMessages";
 import { fakeVerify } from "./FakeAuthCrypto";
+import { newMockRecords, recordStoreRoute, type MockRecords } from "./MockRecordStore";
 import { fakeCommitment, fakeSas, pairingBytes, partsOfView } from "./fakePairing";
 
 /** A recorded request, for tests to look at. */
@@ -34,6 +35,7 @@ interface Account {
   verifier: Uint8Array;
   devices: Device[];
   removals?: Removal[];
+  records?: MockRecords;
 }
 interface Removal {
   device_id: string;
@@ -73,6 +75,7 @@ export function createMockEngine(now: () => number = () => Date.now()) {
   const approvals = new Map<string, Approval>();
   const logins = new Map<string, { email: string }>();
   const calls: Call[] = [];
+  const subscribers = new Set<(accountId: string, zone: string, token: string, author: string) => void>();
   /** Refuse the next calls to a path (or a path prefix) with this error: `refuseNext("/v1/sessions/login/start", 429, "too_many_attempts")`. */
   const refusals: { path: string; status: number; code: string; message: string; times: number }[] = [];
   const state = { attemptsPerEmail: new Map<string, number>(), trustedProofs: 0 };
@@ -305,10 +308,24 @@ export function createMockEngine(now: () => number = () => Date.now()) {
       for (const [t, s] of sessions) if (s.deviceId === target.id) sessions.delete(t);
       return json(204, null);
     }
+    // The record store: zones, changes and key envelopes.
+    account.records ??= newMockRecords();
+    const stored = recordStoreRoute(
+      { records: account.records, trustedDevices: account.devices.filter((d) => d.state === "trusted").map((d) => d.id), deviceId: device.id, now, notify: (zone, token, author) => subscribers.forEach((fn) => fn(account.id, zone, token, author)) },
+      method,
+      path,
+      body,
+    );
+    if (stored) return stored;
     return fail(404, "not_found", "Not found.");
   }
 
   return {
+    /** Called for every committed upload: the server's live notice, which the socket mock forwards. */
+    subscribe: (fn: (accountId: string, zone: string, token: string, author: string) => void) => {
+      subscribers.add(fn);
+      return () => subscribers.delete(fn);
+    },
     fetch: handle as unknown as typeof fetch,
     calls,
     accounts,

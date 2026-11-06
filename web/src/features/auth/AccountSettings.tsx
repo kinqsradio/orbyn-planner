@@ -1,8 +1,10 @@
+import { useSyncState } from "../../sync/SyncProvider";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ApiFailure } from "../../api/auth";
 import { authCryptoAvailable, SIGN_IN_UNAVAILABLE } from "../../api/authCrypto";
 import { cryptoLoad } from "../../api/realCrypto";
 import { CryptoProblem } from "./CryptoProblem";
+import { SyncSettings } from "../settings/SyncSettings";
 import { Icon } from "../../components/Icon";
 import { Portal } from "../../components/Portal";
 import { useDialog } from "../../components/useDialog";
@@ -22,7 +24,7 @@ function when(iso: string): string {
 /** "418207" as "418 207", the way it is read out. */
 export const groupCode = (code: string) => (code.length === 6 ? `${code.slice(0, 3)} ${code.slice(3)}` : code);
 
-function Modal({ label, onClose, children }: { label: string; onClose: () => void; children: React.ReactNode }) {
+export function Modal({ label, onClose, children }: { label: string; onClose: () => void; children: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   useDialog(ref, onClose);
   return (
@@ -114,6 +116,35 @@ function ApproveDialog({ device, onClose, onDone }: { device: Device; onClose: (
   );
 }
 
+/** Known from the last pass: with one trusted device, nothing else holds the keys of what only it can open. */
+export function OnlyDeviceNote() {
+  const sync = useSyncState();
+  if (!sync || sync.phase === "off" || sync.devices > 1) return null;
+  return <p className="err" role="alert">This is your only trusted device. Removing its planner here can’t be undone: lists only this device can open will be lost.</p>;
+}
+
+/** Signing out asks what to do with this account's planner on this browser. Remove is the default. */
+function SignOutDialog({ onClose }: { onClose: () => void }) {
+  const auth = useAuth()!;
+  const go = (removePlanner: boolean) => {
+    onClose();
+    void auth.signOut({ removePlanner });
+  };
+  return (
+    <Modal label="Sign out" onClose={onClose}>
+      <b className="card-title">Sign out</b>
+      <p>Remove this account’s planner from this browser?</p>
+      <p className="t3 small">Remove deletes its lists, tasks and any changes not yet sent from this browser; your other devices keep theirs. Keep leaves them here, and they open again only when this same account signs in. It stays on this browser unencrypted.</p>
+      <OnlyDeviceNote />
+      <div className="dialog-actions">
+        <button type="button" className="ghost" onClick={onClose}>Cancel</button>
+        <button type="button" className="ghost" onClick={() => go(false)}>Keep on this browser</button>
+        <button type="button" className="btn" data-autofocus onClick={() => go(true)}>Remove</button>
+      </div>
+    </Modal>
+  );
+}
+
 function RemoveDialog({ device, onClose, onDone }: { device: Device; onClose: () => void; onDone: () => void }) {
   const auth = useAuth()!;
   const [error, setError] = useState<string | null>(null);
@@ -186,6 +217,7 @@ function SignedInAccount() {
   const [approving, setApproving] = useState<Device | null>(null);
   const [removing, setRemoving] = useState<Device | null>(null);
   const [adding, setAdding] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   const load = useCallback(
     () =>
@@ -248,8 +280,9 @@ function SignedInAccount() {
           </li>
         ))}
       </ul>
+      <SyncSettings />
       <div className="account-actions">
-        <button type="button" className="ghost" onClick={() => void auth.signOut()}>Sign out</button>
+        <button type="button" className="ghost" onClick={() => setSigningOut(true)}>Sign out</button>
         <button type="button" className="ghost" onClick={() => void load()}>Refresh</button>
         <button type="button" className="ghost" onClick={() => setAdding(true)}>
           <Icon name="plus" small />
@@ -257,6 +290,7 @@ function SignedInAccount() {
         </button>
       </div>
 
+      {signingOut && <SignOutDialog onClose={() => setSigningOut(false)} />}
       {approving && (
         <ApproveDialog
           device={approving}

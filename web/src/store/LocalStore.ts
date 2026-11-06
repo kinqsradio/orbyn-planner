@@ -1,7 +1,7 @@
 import { repeatFields } from "./eventRecord";
 import { applyFields, sectionFields, storedOf, viewOf } from "./records";
 import { coalesce, refKey, type AnyRecord, type Patch, type Ref } from "./outbox";
-import { defaultPersistence, type ApplyResult, type Persistence } from "./persistence";
+import { DEVICE_DB, defaultPersistence, type Acknowledged, type ApplyResult, type Persistence } from "./persistence";
 import { inOrder, keyBetween } from "./order";
 import { newSeries, validate } from "./repeat";
 import { completeRepeating } from "./taskRepeat";
@@ -25,6 +25,7 @@ import {
   type PlannerState,
   type PlannerStore,
   type RecordType,
+  type RemoteChange,
   type Task,
   type TaskList,
   type TaskPatch,
@@ -42,6 +43,8 @@ const KEY_OF = { task: "tasks", list: "lists", event: "events", calendar: "calen
 
 export interface LocalStoreOptions {
   persistence?: Persistence;
+  /** The IndexedDB database to open when no `persistence` is given: the device-only planner by default, an account's own otherwise. */
+  dbName?: string;
   now?: () => Date;
   newId?: () => string;
   /** Called when another tab upgrades the database and this one must start over. Defaults to a page reload. */
@@ -74,7 +77,7 @@ export class LocalStore implements PlannerStore {
   private readonly newId: () => string;
 
   constructor(options: LocalStoreOptions = {}) {
-    this.persistence = options.persistence ?? defaultPersistence();
+    this.persistence = options.persistence ?? defaultPersistence(options.dbName);
     this.now = options.now ?? (() => new Date());
     this.newId = options.newId ?? (() => crypto.randomUUID());
     this.state = { ...this.state, persistence: this.persistence.durable ? { status: "ok" } : { status: "memory" } };
@@ -88,7 +91,8 @@ export class LocalStore implements PlannerStore {
       onBlocked: () => this.setPersistence({ status: "failed", reason: "Close the other Orbyn Planner tabs to finish updating." }),
     });
     if ((options.broadcast ?? true) && typeof BroadcastChannel !== "undefined") {
-      this.channel = new BroadcastChannel(CHANNEL_NAME);
+      // Tabs on the same database talk; tabs on another account's database never hear this one.
+      this.channel = new BroadcastChannel(options.dbName && options.dbName !== DEVICE_DB ? `${CHANNEL_NAME}:${options.dbName}` : CHANNEL_NAME);
       this.channel.onmessage = (event: MessageEvent<{ tab: string; refs: Ref[] }>) => {
         if (event.data.tab !== this.tab) void this.refresh(event.data.refs);
       };
@@ -108,14 +112,62 @@ export class LocalStore implements PlannerStore {
     return this.writes;
   }
 
+  /**
+   * Takes in records from another planner (the one kept on this device alone) as new local edits: they go
+   * through the outbox like anything typed here, and upload with the normal keys. A record whose id is
+   * already here (the Inbox, the Personal calendar, or something taken in earlier) is left as it is, so
+   * taking in the same planner twice adds nothing. Returns how many records were added.
+   */
+  adopt(from: PlannerState): number {
+    this.assertReady();
+    const inputs: PatchInput[] = [];
+    const add = <T extends { id: string }>(type: RecordType, records: readonly T[]) => {
+      for (const record of records) if (!this.current(type, record.id)) inputs.push({ type, id: record.id, op: "create", record } as unknown as PatchInput);
+    };
+    // Whatever a record belongs to goes first.
+    add("list", from.lists);
+    add("calendar", from.calendars);
+    add("project", from.projects);
+    add("task", from.tasks);
+    add("event", from.events);
+    if (inputs.length > 0) this.commit(inputs);
+    return inputs.length;
+  }
+
   /** Stops listening to other tabs. */
   close(): void {
     this.channel?.close();
     this.channel = null;
+    this.persistence.close?.();
   }
 
   nowIso(): string {
     return this.now().toISOString();
+  }
+
+  async acknowledge(sent: Acknowledged[]): Promise<void> {
+    if (sent.length === 0) return;
+    await this.flush(); // writes made so far are in storage, so the comparison below sees them
+    const result = await this.persistence.acknowledge(sent);
+    this.reconcile(result);
+    this.channel?.postMessage({ tab: this.tab, refs: sent.map((s) => ({ type: s.type, id: s.id })) });
+  }
+
+  async applyRemote(changes: RemoteChange[]): Promise<void> {
+    this.assertReady();
+    const inputs: PatchInput[] = [];
+    for (const c of changes) {
+      const here = this.current(c.type, c.id);
+      if (c.fields === null) {
+        if (here) inputs.push({ type: c.type, id: c.id, op: "purge", local: true });
+      } else if (here) {
+        inputs.push({ type: c.type, id: c.id, op: "update", fields: c.fields, local: true });
+      } else {
+        inputs.push({ type: c.type, id: c.id, op: "create", record: viewOf(c.type, { id: c.id, ...c.fields } as unknown as AnyRecord), local: true });
+      }
+    }
+    if (inputs.length > 0) this.commit(inputs);
+    await this.flush();
   }
 
   pendingChanges(): number {

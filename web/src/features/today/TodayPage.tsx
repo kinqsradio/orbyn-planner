@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useNow } from "../../app/clock";
 import { useUi } from "../../app/ui";
 import { PageHeader } from "../../components/EmptyState";
@@ -12,6 +12,7 @@ import { groupToday } from "../tasks/selectors";
 import type { Task } from "../../store/types";
 import { TodayRow } from "../tasks/TaskRow";
 import { SyncLine, useSyncStatus, withPersistence } from "../sync/SyncLine";
+import { useSyncController, useSyncState } from "../../sync/SyncProvider";
 
 function greeting(now: Date): string {
   const h = now.getHours();
@@ -60,7 +61,10 @@ export function TodayPage() {
       return task ? [{ id, label: task.title, at }] : [];
     });
   }, [outbox, tasks]);
-  const { status: health, retry } = useSyncStatus(outbox.length);
+  const sync = useSyncState();
+  const controller = useSyncController();
+  const syncNow = useCallback(() => controller?.syncNow(), [controller]);
+  const { status: health, retry } = useSyncStatus(outbox.length, sync, syncNow);
   const status = withPersistence(health, persistence);
   const g = useMemo(() => groupToday(tasks, now), [tasks, now]);
 

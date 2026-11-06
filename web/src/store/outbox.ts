@@ -37,12 +37,14 @@ export interface OutboxChange {
  *   entry and sends nothing; otherwise it leaves one delete entry.
  */
 export function coalesce(existing: OutboxEntry | undefined, patch: Patch, at: string): OutboxChange {
+  const timesOf = (fields: Record<string, unknown>) => Object.fromEntries(Object.keys(fields).map((name) => [name, at]));
   const fresh = (op: OutboxEntry["op"], changedFields: Record<string, unknown>): OutboxEntry => ({
     seq: 0,
     type: patch.type,
     id: patch.id,
     op,
     changedFields,
+    fieldTimes: timesOf(changedFields),
     idempotencyKey: patch.key,
     createdAt: at,
     updatedAt: at,
@@ -53,7 +55,7 @@ export function coalesce(existing: OutboxEntry | undefined, patch: Patch, at: st
   }
   if (patch.op === "purge") {
     if (existing?.op === "create") return { remove: existing.seq };
-    if (existing?.op === "delete") return { write: { ...existing, changedFields: {}, idempotencyKey: patch.key, updatedAt: at } };
+    if (existing?.op === "delete") return { write: { ...existing, changedFields: {}, fieldTimes: {}, idempotencyKey: patch.key, updatedAt: at } };
     return { remove: existing?.seq, write: fresh("delete", {}) };
   }
   if (!existing) return { write: fresh(patch.op, { ...patch.fields }) };
@@ -62,6 +64,8 @@ export function coalesce(existing: OutboxEntry | undefined, patch: Patch, at: st
       ...existing,
       op: existing.op === "create" ? "create" : patch.op,
       changedFields: { ...existing.changedFields, ...patch.fields },
+      // Each field keeps the time of its own last edit; fields of an older entry take its updatedAt.
+      fieldTimes: { ...Object.fromEntries(Object.keys(existing.changedFields).map((name) => [name, existing.updatedAt])), ...existing.fieldTimes, ...timesOf(patch.fields) },
       idempotencyKey: patch.key,
       updatedAt: at,
     },

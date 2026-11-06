@@ -1,4 +1,5 @@
 import { ApiFailure } from "../api/auth";
+import { resendKeysAfterApproval } from "./resendKeys";
 import type { ApproverPairing, DevicePairing } from "../api/authCrypto";
 import type { StoredSession } from "../api/keyStore";
 import type { Device } from "../generated/Device";
@@ -208,7 +209,10 @@ export class ApproverController extends Controller<ApproverState> {
         await this.services.api.approval(id); // a closed approval answers 410
         return undefined;
       });
-      if (done) this.set({ phase: "done" });
+      if (done) {
+        await resendKeysAfterApproval(this.services);
+        this.set({ phase: "done" });
+      }
     } catch (e) {
       await this.fail(e, true); // after "They match"
     }
@@ -371,6 +375,8 @@ export class DeviceController extends Controller<DeviceState> {
         if (this.disposed || this.ended) {
           // Gone while the nonce was in flight: freed, not assigned (a released controller never takes a session back).
           pairing.free();
+          // The nonce is posted, so the approval would stay open until it expires. An ended attempt has already cancelled it; one that was only disposed has not.
+          if (!this.ended) void this.services.api.cancelApproval(view.id).catch(() => undefined);
           return true;
         }
         this.pairing = pairing;
@@ -390,6 +396,7 @@ export class DeviceController extends Controller<DeviceState> {
         });
         this.finished = true;
         await this.services.api.submitCode(view.id, { code });
+        await resendKeysAfterApproval(this.services);
         // The planner opens on "Continue", so the person sees that this device is trusted.
         this.set({ phase: "trusted" });
         return true;

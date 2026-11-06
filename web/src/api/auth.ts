@@ -1,4 +1,13 @@
 import type { ApiError } from "../generated/ApiError";
+import type { DeleteZone } from "../generated/DeleteZone";
+import type { KeyEnvelopeList } from "../generated/KeyEnvelopeList";
+import type { PutKeyEnvelopes } from "../generated/PutKeyEnvelopes";
+import type { UploadChanges } from "../generated/UploadChanges";
+import type { UploadResult } from "../generated/UploadResult";
+import type { Zone } from "../generated/Zone";
+import type { ZoneChanges } from "../generated/ZoneChanges";
+import type { ZoneDeleted } from "../generated/ZoneDeleted";
+import type { ZoneList } from "../generated/ZoneList";
 import type { ApprovalCode } from "../generated/ApprovalCode";
 import type { ApprovalNonce } from "../generated/ApprovalNonce";
 import type { ConfirmApproval } from "../generated/ConfirmApproval";
@@ -21,6 +30,9 @@ import { engineUrl } from "./engine";
 /** What went wrong, in words a person can use. */
 const MESSAGES: Record<string, string> = {
   too_many_attempts: "Too many attempts. Wait a little while, then try again.",
+  too_many_uploads: "Syncing too fast. It will resume in a moment.",
+  zone_not_found: "That list or calendar isn’t there any more.",
+  zone_deleted: "That list or calendar was deleted on another device.",
   email_unavailable: "That email can’t be used for a new account. If it’s yours, sign in instead.",
   login_failed: "That email and password don’t match.",
   device_not_trusted: "This device hasn’t been approved yet. Approve it from a device you already trust.",
@@ -50,6 +62,10 @@ export class ApiFailure extends Error {
     message: string,
     /** The server's own message, kept for codes that carry detail, such as the attempts left. */
     readonly serverMessage: string = "",
+    /** The whole error body, for answers that carry more than a code (a `record_changed` has the conflicts). */
+    readonly body: unknown = null,
+    /** Seconds the server asked to wait (`Retry-After`), if it did. */
+    readonly retryAfter: number | null = null,
   ) {
     super(message);
     this.name = "ApiFailure";
@@ -101,7 +117,8 @@ export function createAuthApi(options: AuthApiOptions) {
     const code = typeof error.code === "string" ? error.code : response.status === 401 ? "unauthorized" : response.status >= 500 ? "internal" : "invalid_request";
     // A 401 on a signed-in call ends the session, whatever the code.
     if (authed && response.status === 401) options.onUnauthorized();
-    throw new ApiFailure(code, response.status, plainMessage(code), error.message ?? "");
+    const retry = Number(response.headers.get("retry-after"));
+    throw new ApiFailure(code, response.status, plainMessage(code), error.message ?? "", error, Number.isFinite(retry) && retry > 0 ? retry : null);
   }
 
   return {
@@ -130,6 +147,19 @@ export function createAuthApi(options: AuthApiOptions) {
     submitCode: (approvalId: string, body: ApprovalCode) =>
       call<Device>("POST", `/v1/devices/approvals/${encodeURIComponent(approvalId)}/code`, body, true),
     /** The body is the remover's sequence and signature, made by `signRemoval`. */
+    // The record store ---------------------------------------------------------------------------
+    /** One page of the account's zones, deleted ones included; `after` is the previous page's `next`. */
+    zones: (after?: string) => call<ZoneList>("GET", `/v1/zones${after ? `?after=${encodeURIComponent(after)}` : ""}`, undefined, true),
+    /** Creates a zone (or brings a deleted one back, empty). */
+    createZone: (zone: string) => call<Zone>("PUT", `/v1/zones/${encodeURIComponent(zone)}`, undefined, true),
+    deleteZone: (zone: string, body: DeleteZone) => call<ZoneDeleted>("DELETE", `/v1/zones/${encodeURIComponent(zone)}`, body, true),
+    /** Changes after `since` (a token, or none to start from the beginning). */
+    changes: (zone: string, since?: string, limit = 200) =>
+      call<ZoneChanges>("GET", `/v1/zones/${encodeURIComponent(zone)}/changes?limit=${limit}${since ? `&since=${encodeURIComponent(since)}` : ""}`, undefined, true),
+    /** Uploads a batch; a 409 `record_changed` comes back as an ApiFailure whose `body` has the conflicts. */
+    upload: (zone: string, body: UploadChanges) => call<UploadResult>("POST", `/v1/zones/${encodeURIComponent(zone)}/changes`, body, true),
+    keyEnvelopes: () => call<KeyEnvelopeList>("GET", "/v1/keychain/envelopes", undefined, true),
+    putKeyEnvelopes: (body: PutKeyEnvelopes) => call<void>("POST", "/v1/keychain/envelopes", body, true),
     removeDevice: (id: string, body: RemoveDevice) => call<void>("DELETE", `/v1/devices/${encodeURIComponent(id)}`, body, true),
   };
 }

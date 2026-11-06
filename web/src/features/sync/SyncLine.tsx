@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { getHealth } from "../../api/engine";
 import { Icon } from "../../components/Icon";
 import { formatTime } from "../../lib/dates";
+import type { SyncState } from "../../sync/controller";
 
 export type SyncStatus =
   | { kind: "synced"; devices: number }
@@ -112,7 +113,7 @@ export function healthDelay(healthy: boolean, streak: number): number {
 }
 
 /** Derives the sync status from the connection, the engine health check and the changes waiting. */
-export function useSyncStatus(pending = 0): { status: SyncStatus; retry: () => void } {
+export function useSyncStatus(pending = 0, sync: SyncState | null = null, syncNow?: () => void): { status: SyncStatus; retry: () => void } {
   const [online, setOnline] = useState(() => navigator.onLine);
   const [attempt, setAttempt] = useState(0);
   const [healthy, setHealthy] = useState<boolean | null>(null);
@@ -128,8 +129,10 @@ export function useSyncStatus(pending = 0): { status: SyncStatus; retry: () => v
     };
   }, []);
 
+  const syncing = sync !== null && sync.phase !== "off";
   useEffect(() => {
-    if (!online) return;
+    // Real sync knows better than a health check does.
+    if (!online || syncing) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     let streak = 0;
@@ -168,15 +171,21 @@ export function useSyncStatus(pending = 0): { status: SyncStatus; retry: () => v
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [online, attempt]);
+  }, [online, attempt, syncing]);
 
   const retry = useCallback(() => {
+    if (syncNow) syncNow();
     setHealthy(null);
     setAttempt((n) => n + 1);
-  }, []);
+  }, [syncNow]);
 
   let status: SyncStatus;
-  if (!online) status = { kind: "offline", waiting: pending };
+  if (syncing && sync) {
+    if (sync.phase === "offline" || !online) status = { kind: "offline", waiting: pending };
+    else if (sync.phase === "error") status = { kind: "error" };
+    else if (sync.phase === "syncing" || sync.lastSyncedAt === null) status = { kind: "syncing" };
+    else status = { kind: "synced", devices: sync.devices };
+  } else if (!online) status = { kind: "offline", waiting: pending };
   else if (healthy === null) status = { kind: "syncing" };
   else if (healthy) status = { kind: "connected" };
   else status = { kind: "error" };
