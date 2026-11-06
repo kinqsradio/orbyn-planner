@@ -132,6 +132,9 @@ export async function runCycle(
     return undefined;
   }
 
+  /** Records a refetch dropped that have unacknowledged local changes: staged again, whole, after the fetch. */
+  const restage = new Set<string>();
+
   function collect(e: Engine, zone: string, applied: Applied, options: { retried?: boolean; types?: Map<string, string> } = {}): RemoteChange[] {
     const out: RemoteChange[] = [];
     const outbox = new Map(store.getState().outbox.map((o) => [refKey(o), o] as const));
@@ -165,6 +168,18 @@ export async function runCycle(
       }
       // A create that was never acknowledged exists nowhere else: it is not a remote delete's to take, it is staged and sent.
       if (outbox.get(refKey({ type, id }))?.op === "create") continue;
+      // A refetch that took a record for deleted and purged (the full listing no longer has it) puts it in the trash, edits
+      // included. This device's own unacknowledged edits are not for the trash: it is taken back out, and the record is made
+      // whole again from the store and sent (a hard delete of it is what the person asked for, and stands).
+      const waiting = outbox.get(refKey({ type, id }));
+      if (waiting && applied.trashed.includes(id) && !(waiting.op === "delete" && Object.keys(waiting.changedFields).length === 0)) {
+        const trashed = parse<Record<string, { deleted_by?: string }>>(e.sync.trash(zone))[id];
+        if (trashed?.deleted_by === "purge") {
+          e.sync.takeFromTrash(zone, id);
+          restage.add(refKey({ type, id }));
+          continue;
+        }
+      }
       // A record that moved to another list is deleted from the old zone and made in the new one: the delete mustn't win.
       if ((state.zoneOf[refKey({ type, id })] ?? zone) === zone) out.push({ type, id, fields: null });
     }
@@ -204,7 +219,7 @@ export async function runCycle(
     return Object.fromEntries(Object.keys(entry.changedFields).map((name) => [name, entry.fieldTimes?.[name] ?? entry.updatedAt]));
   }
 
-  function stage(e: Engine, entry: OutboxEntry): void {
+  function stage(e: Engine, entry: OutboxEntry, whole = false): void {
     const key = refKey(entry);
     const here = store.getState()[STORE_KEY[entry.type]].find((r) => r.id === entry.id) as { id: string; listId?: string; calendarId?: string } | undefined;
     const previous = state.zoneOf[key];
@@ -222,12 +237,13 @@ export async function runCycle(
     } else {
       let fields = entry.changedFields;
       const times = fieldTimesOf(entry);
-      if (previous && previous !== zone) {
-        // A task moved to another list: it is deleted from the old zone and made whole in the new one.
-        e.sync.delete(previous, entry.id);
-        const whole = storedOf(entry.type, here as never) as unknown as Record<string, unknown>;
-        for (const name of Object.keys(whole)) if (!(name in times)) times[name] = entry.createdAt;
-        fields = { ...whole, ...fields };
+      if ((previous && previous !== zone) || (whole && here)) {
+        // A task moved to another list: it is deleted from the old zone and made whole in the new one. A record the engine
+        // dropped (a refetch took it for deleted and purged) is made whole again too: the edits and the rest of the record go up.
+        if (previous && previous !== zone) e.sync.delete(previous, entry.id);
+        const all = storedOf(entry.type, here as never) as unknown as Record<string, unknown>;
+        for (const name of Object.keys(all)) if (!(name in times)) times[name] = entry.createdAt;
+        fields = { ...all, ...fields };
       }
       // Each field is staged with the time it was edited: fields edited together share a stamp, and an older
       // edit never takes the time of a later edit of another field.
@@ -317,6 +333,18 @@ export async function runCycle(
       await save();
       if (!body.more) break;
     }
+  }
+
+  if (restage.size > 0) {
+    const again = store.getState().outbox.filter((o) => restage.has(refKey(o)));
+    for (const o of again) {
+      delete state.staged[refKey(o)];
+      delete state.stagedZone[refKey(o)];
+    }
+    await withEngine((e) => {
+      for (const o of again) stage(e, o, true);
+    });
+    await save();
   }
 
   // 4. The keys this device owes the others ----------------------------------------------------------------
