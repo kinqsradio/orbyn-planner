@@ -168,7 +168,10 @@ export function createEngineHost(deps: {
           // failed save is an error of its own unless the action already failed.
           try {
             await deps.keys.saveSnapshot(engine.snapshot(wrap));
-            await deps.keys.saveIdentity({ accountId: session.accountId, deviceId: session.deviceId });
+            // Keep the email the keys were made for: without it the next sign-in to this same account
+            // would look like another account's and ask to replace the person's own keys.
+            const email = identity?.accountId === session.accountId ? identity.email : undefined;
+            await deps.keys.saveIdentity({ accountId: session.accountId, deviceId: session.deviceId, ...(email ? { email } : {}) });
           } catch (e) {
             if (!failed) throw e;
           }

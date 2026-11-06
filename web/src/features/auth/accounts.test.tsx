@@ -274,7 +274,7 @@ describe("sign in", () => {
       await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
       await fillSignIn("alex@example.com", "another long password");
       const dialog = await screen.findByRole("alertdialog", { name: "Sign in to a different account" });
-      expect(dialog).toHaveTextContent("s•••@example.com");
+      expect(dialog).toHaveTextContent("s•••@e•••.com");
       expect(dialog).toHaveTextContent("removes them from this browser");
       expect(engine.calls.length).toBe(sent);
       await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));

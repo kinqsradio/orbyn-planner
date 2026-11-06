@@ -21,6 +21,16 @@ async function signedUpAndOut() {
 }
 
 describe("signing in binds the stored state to the account and device", () => {
+  it("an engine action keeps the email, so signing in again to the same account asks nothing", async () => {
+    const { keys, services } = await signedUpAndOut();
+    const session = await signIn(services, SAM);
+    await services.engine.run(session, () => 1);
+    expect((await keys.loadIdentity())?.email).toBe(SAM.email);
+    await keys.clearSession();
+    await services.tokens.clear();
+    await expect(signIn(services, SAM)).resolves.toMatchObject({ accountId: session.accountId });
+  });
+
   it("the same account and device keep the saved state", async () => {
     const { keys, services, first } = await signedUpAndOut();
     await signIn(services, SAM);
@@ -70,7 +80,7 @@ describe("signing in binds the stored state to the account and device", () => {
     const error = await signIn(services, OTHER).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(KeysForAnotherAccount);
     expect((error as KeysForAnotherAccount).message).toBe(
-      "This browser holds the keys for another Orbyn account (s•••@example.com). Signing in to a different account removes them from this browser.",
+      "This browser holds the keys for another Orbyn account (s•••@e•••.com). Signing in to a different account removes them from this browser.",
     );
     expect(engine.calls.length).toBe(calls); // not even a login start
     expect(await keys.loadKeys()).not.toBeNull();

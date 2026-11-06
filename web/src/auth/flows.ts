@@ -84,10 +84,15 @@ export class KeysForAnotherAccount extends Error {
   }
 }
 
-/** "sam@example.com" as "s•••@example.com". */
+/** "sam@example.com" as "s•••@e•••.com": a personal domain would name the owner on a shared browser. */
 export function maskEmail(email: string): string {
   const at = email.indexOf("@");
-  return at < 1 ? "•••" : `${email[0]}•••${email.slice(at)}`;
+  if (at < 1) return "•••";
+  const domain = email.slice(at + 1);
+  const dot = domain.lastIndexOf(".");
+  const host = dot > 0 ? domain.slice(0, dot) : domain;
+  const tld = dot > 0 ? domain.slice(dot) : "";
+  return `${email[0]}•••@${host[0] ?? ""}•••${tld}`;
 }
 
 /**
