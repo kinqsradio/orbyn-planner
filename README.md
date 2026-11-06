@@ -10,6 +10,7 @@ The plan, the feature map and the phases are in the [Orbyn platform plan](https:
 
 - `web/`: the React app (Vite, TypeScript).
 - `web/src/generated/`: wire types generated from orbyn-engine's contracts. Do not edit by hand.
+- `desktop/`: the Tauri 2 desktop shell, a window around the web build. See [desktop/README.md](desktop/README.md).
 - `docs/architecture.md`: the contract for the UI. Its rules change in the same commit as the code.
 
 ## Checks

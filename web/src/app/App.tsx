@@ -19,6 +19,7 @@ import { StoreProvider, usePlanner } from "../store/context";
 import type { PlannerStore } from "../store/types";
 import { Toast } from "../components/Toast";
 import { useNow } from "./clock";
+import { useExternalLinks } from "./links";
 import { UiProvider, useUi } from "./ui";
 import { PrefsProvider } from "./prefs";
 import { CalendarsDialog } from "../features/calendar/CalendarsDialog";
@@ -160,6 +161,7 @@ function Shell() {
 }
 
 export function App({ store }: { store?: PlannerStore }) {
+  useExternalLinks();
   const [own] = useState(() => store ?? new LocalStore());
   return (
     <StoreProvider store={own}>

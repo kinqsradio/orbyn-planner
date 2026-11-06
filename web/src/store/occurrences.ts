@@ -50,7 +50,8 @@ function repeating(event: CalendarEvent, from: string, to: string): Occurrence[]
 function zoned(event: CalendarEvent, from: string, to: string): Occurrence[] {
   let ranges = zonedCache.get(event);
   if (!ranges) zonedCache.set(event, (ranges = new Map()));
-  const key = `${from}|${to}`;
+  // Occurrences are in the viewer's time, so a change of the device's time zone must miss the cache.
+  const key = `${from}|${to}|${viewerZone()}`;
   const hit = ranges.get(key);
   if (hit) return hit;
   const out = zonedUncached(event, from, to);
@@ -60,6 +61,8 @@ function zoned(event: CalendarEvent, from: string, to: string): Occurrence[] {
 }
 
 const zonedCache = new WeakMap<CalendarEvent, Map<string, Occurrence[]>>();
+
+const viewerZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 /** The length of an event as written, in minutes of its own wall clock. */
 const lengthMinutes = (start: string, end: string) => daysBetween(start, end) * 1440 + wallMinutes(end) - wallMinutes(start);

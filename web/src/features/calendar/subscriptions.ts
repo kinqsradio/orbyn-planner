@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
-import { ApiError, NEEDS_ENGINE, configuredEngine, fetchFeedViaEngine, inDesktopApp } from "../../api/feeds";
+import { ApiError, NEEDS_ENGINE, NEEDS_SIGN_IN, configuredEngine, fetchFeedViaEngine, inDesktopApp } from "../../api/feeds";
+import { sessionToken } from "../../api/session";
 import { IcsError, MAX_FEED_BYTES, parseIcs } from "../../lib/ics";
 import { usePlanner, useStore } from "../../store/context";
 import type { FeedEvent, PlannerCalendar, PlannerStore } from "../../store/types";
@@ -62,6 +63,11 @@ const REFUSALS: Record<string, string> = {
   too_large: "That calendar is larger than 5 MiB, which is more than this app reads.",
   timeout: "The calendar’s server took too long to answer.",
   upstream_error: "The calendar’s server didn’t give a calendar.",
+  unauthorized: `${NEEDS_SIGN_IN}.`,
+  device_not_trusted: "Approve this device from one you already use, then try again.",
+  too_many_attempts: "Too many calendar refreshes. Try again later.",
+  feeds_unavailable: "The Orbyn engine can’t read calendars right now. Try again later.",
+  internal: "The Orbyn engine ran into a problem. Try again later.",
 };
 
 /** Whether this build can read subscriptions at all: through the engine, or, on the web, straight from the browser. */
@@ -72,12 +78,20 @@ export const subscriptionsAvailable = (engine: string | null = configuredEngine(
  * the size); otherwise the browser does, which many servers do not allow (no CORS headers; the
  * error says so), and which the desktop app cannot do at all.
  */
-export async function fetchFeed(url: string, fetchFn: typeof fetch = fetch, engine: string | null = configuredEngine()): Promise<FeedEvent[]> {
+export async function fetchFeed(
+  url: string,
+  fetchFn: typeof fetch = fetch,
+  engine: string | null = configuredEngine(),
+  token: string | null = sessionToken(),
+): Promise<FeedEvent[]> {
   const address = feedAddress(url);
-  if (engine !== null) {
+  // The engine fetches only for a signed-in, trusted device. Signed out, the web page reads the feed
+  // itself; the desktop app cannot, so it asks for sign-in.
+  if (engine !== null && token === null && inDesktopApp()) throw new FeedError(`${NEEDS_SIGN_IN}.`);
+  if (engine !== null && token !== null) {
     let text: string;
     try {
-      text = await fetchFeedViaEngine(engine, address, fetchFn);
+      text = await fetchFeedViaEngine(engine, address, token, fetchFn);
     } catch (error) {
       if (error instanceof ApiError) throw new FeedError(REFUSALS[error.code] ?? REFUSALS.upstream_error!);
       throw new FeedError(typeof navigator !== "undefined" && navigator.onLine === false ? "You’re offline." : "Couldn’t reach the Orbyn engine.");
