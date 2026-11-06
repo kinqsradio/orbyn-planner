@@ -33,7 +33,8 @@ function Panel({ occ }: { occ: Occurrence }) {
   const [endTime, setEndTime] = useState(timePart(occ.end) || "10:00");
   const [calendarId, setCalendarId] = useState(event.calendarId);
   const [place, setPlace] = useState(event.place);
-  const [repeat, setRepeat] = useState<RepeatChoice>(choiceOf(event.repeat));
+  const initialRepeat = choiceOf(event.repeat);
+  const [repeat, setRepeat] = useState<RepeatChoice>(initialRepeat);
   const [reminder, setReminder] = useState<number | null>(event.reminder);
   const [people, setPeople] = useState<Person[]>(event.people);
   const [email, setEmail] = useState("");
@@ -56,7 +57,8 @@ function Panel({ occ }: { occ: Occurrence }) {
       notes,
       people,
       reminder,
-      repeat: ruleOf(repeat),
+      // Only a changed repeat is sent; the same one must not reset the dates skipped from it.
+      repeat: repeat === initialRepeat ? undefined : ruleOf(repeat),
     });
     setAsk(null);
     ui.openEvent(created?.id ?? event.id, startDay);

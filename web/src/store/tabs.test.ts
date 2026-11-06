@@ -108,3 +108,27 @@ describe("two tabs on one database", () => {
     expect(a.getState().persistence).toMatchObject({ status: "failed" });
   });
 });
+
+describe("skipped dates from two tabs", () => {
+  it("both skips survive, because each is a field of its own", async () => {
+    const { a, b } = await twoTabs();
+    const event = a.addEvent({
+      title: "Stand-up",
+      start: "2026-11-02T09:00",
+      end: "2026-11-02T09:30",
+      repeat: { frequency: "weekly", interval: 1, weekdays: [], end: { type: "never" } },
+    });
+    await a.flush();
+    await vi.waitFor(() => expect(b.getState().events).toHaveLength(1));
+    // Each tab skips a different date before hearing about the other.
+    a.updateEvent(event.id, { repeat: { ...a.getState().events[0]!.repeat!, skipped: ["2026-11-09"] } });
+    b.updateEvent(event.id, { repeat: { ...b.getState().events[0]!.repeat!, skipped: ["2026-11-16"] } });
+    await Promise.all([a.flush(), b.flush()]);
+    const state = await stored();
+    expect(state.events[0]!.repeat!.skipped).toEqual(["2026-11-09", "2026-11-16"]);
+    await vi.waitFor(() => {
+      expect(a.getState().events[0]!.repeat!.skipped).toEqual(["2026-11-09", "2026-11-16"]);
+      expect(b.getState().events[0]!.repeat!.skipped).toEqual(["2026-11-09", "2026-11-16"]);
+    });
+  });
+});

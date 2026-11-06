@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { LocalStore } from "./LocalStore";
 import { MemoryPersistence } from "./persistence";
+import { toView } from "./eventRecord";
 import { RepeatError, repeatEvery } from "./repeat";
 
 function setup(start = "2026-11-07T10:00:00Z") {
@@ -118,5 +119,64 @@ describe("events and calendars in the store", () => {
     await second.ready;
     expect(second.getState().events.map((e) => e.title)).toEqual(["Team planning"]);
     expect(second.getState().calendars).toHaveLength(1);
+  });
+});
+
+describe("events in storage", () => {
+  it("each skipped date is a field of its own in the outbox, so skips from two devices merge", async () => {
+    const store = await (async () => {
+      const s = new LocalStore({ persistence: new MemoryPersistence(), now: () => new Date("2026-11-07T10:00:00Z"), broadcast: false });
+      await s.ready;
+      return s;
+    })();
+    const e = store.addEvent({ ...meeting, start: "2026-11-02T09:00", end: "2026-11-02T10:00", repeat: repeatEvery("weekly") });
+    store.updateEvent(e.id, { repeat: { ...store.getState().events[0]!.repeat!, skipped: ["2026-11-09"] } });
+    store.updateEvent(e.id, { repeat: { ...store.getState().events[0]!.repeat!, skipped: ["2026-11-09", "2026-11-16"] } });
+    await store.flush();
+    const entry = store.getState().outbox.find((x) => x.id === e.id)!;
+    expect(entry.changedFields).toMatchObject({
+      repeat: { start: "2026-11-02", repeat: { frequency: "weekly" } },
+      "repeat.skip.2026-11-09": true,
+      "repeat.skip.2026-11-16": true,
+    });
+    expect((entry.changedFields.repeat as { skipped?: unknown }).skipped).toBeUndefined();
+    expect(store.getState().events[0]!.repeat!.skipped).toEqual(["2026-11-09", "2026-11-16"]);
+  });
+
+  it("an unskipped date is written as false and comes back as not skipped", async () => {
+    const env = setup();
+    const first = env.make();
+    await first.ready;
+    const e = first.addEvent({ ...meeting, start: "2026-11-02T09:00", end: "2026-11-02T10:00", repeat: repeatEvery("daily") });
+    first.updateEvent(e.id, { repeat: { ...first.getState().events[0]!.repeat!, skipped: ["2026-11-03"] } });
+    first.updateEvent(e.id, { repeat: { ...first.getState().events[0]!.repeat!, skipped: [] } });
+    await first.flush();
+    const second = env.make();
+    await second.ready;
+    expect(second.getState().events[0]!.repeat!.skipped).toEqual([]);
+  });
+
+  it("an event whose first day no longer falls on its rule rolls forward to the next day that does", () => {
+    const stored = {
+      id: "e", title: "Gym", calendarId: "c", allDay: false, start: "2026-11-07T18:00", end: "2026-11-07T19:00", place: "", notes: "",
+      people: [], reminder: null, readOnly: false, deletedAt: null, createdAt: "", updatedAt: "",
+      repeat: { start: "2026-11-02", repeat: { frequency: "weekly", interval: 1, weekdays: ["mon"], end: { type: "never" } } },
+      "repeat.skip.2026-11-09": true,
+    };
+    const view = toView(stored);
+    // Saturday 7 does not fall on "every Monday": it moves to Monday 9 (which is skipped, so the next is 16 only for display of occurrences).
+    expect(view.start).toBe("2026-11-09T18:00");
+    expect(view.end).toBe("2026-11-09T19:00");
+    expect(view.repeat!.start).toBe("2026-11-07");
+    expect(view.repeat!.skipped).toEqual(["2026-11-09"]);
+  });
+
+  it("a series that starts before its event rolls forward to the event", () => {
+    const stored = {
+      id: "e", title: "Gym", calendarId: "c", allDay: false, start: "2026-11-09T18:00", end: "2026-11-09T19:00", place: "", notes: "",
+      people: [], reminder: null, readOnly: false, deletedAt: null, createdAt: "", updatedAt: "",
+      repeat: { start: "2026-11-02", repeat: { frequency: "weekly", interval: 1, weekdays: [], end: { type: "never" } } },
+    };
+    expect(toView(stored).repeat!.start).toBe("2026-11-09");
   });
 });

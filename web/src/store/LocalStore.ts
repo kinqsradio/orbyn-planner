@@ -1,6 +1,7 @@
+import { applyEventFields, repeatFields, toStored, toView } from "./eventRecord";
 import { coalesce, refKey, type AnyRecord, type Patch, type Ref } from "./outbox";
 import { defaultPersistence, type ApplyResult, type Persistence } from "./persistence";
-import { newSeries, validate, type Series } from "./repeat";
+import { newSeries, validate } from "./repeat";
 import {
   RESTORE_DAYS,
   type CalendarEvent,
@@ -132,7 +133,7 @@ export class LocalStore implements PlannerStore {
       this.writable = false;
       persistence = { status: "failed", reason: describe(error, "open") };
     }
-    this.state = { ready: true, ...snapshot, persistence };
+    this.state = { ready: true, ...snapshot, events: snapshot.events.map((e) => toView(e as unknown as Record<string, unknown>)), persistence };
     if (!this.state.lists.some((l) => l.isInbox)) {
       const inbox: TaskList = { id: INBOX_ID, name: "Inbox", colour: "c1", isInbox: true };
       this.commit([{ type: "list", id: inbox.id, op: "create", record: inbox }]);
@@ -171,8 +172,8 @@ export class LocalStore implements PlannerStore {
   }
 
   /** Applies patches to what is on screen, as the write will apply them in storage. */
-  private applyLocal(patches: Patch[], at: string): void {
-    for (const p of patches) {
+  private applyLocal(patches: Patch[], wire: Patch[], at: string): void {
+    for (const [i, p] of patches.entries()) {
       if (p.op === "create") {
         if (this.current(p.type, p.id)) continue;
         this.replaceRecord(p.type, p.id, p.record);
@@ -181,11 +182,15 @@ export class LocalStore implements PlannerStore {
       } else {
         const record = this.current(p.type, p.id);
         if (!record) continue;
-        this.replaceRecord(p.type, p.id, { ...record, ...p.fields } as AnyRecord);
+        this.replaceRecord(
+          p.type,
+          p.id,
+          p.type === "event" ? applyEventFields(record as CalendarEvent, p.fields) : ({ ...record, ...p.fields } as AnyRecord),
+        );
       }
       if (p.local) continue;
       const existing = this.state.outbox.find((e) => e.type === p.type && e.id === p.id);
-      const change = coalesce(existing, p, at);
+      const change = coalesce(existing, wire[i]!, at);
       if (change.write) {
         this.setOutbox(p.type, p.id, { ...change.write, seq: change.write.seq || -++this.provisional });
       } else if (change.remove !== undefined) {
@@ -198,7 +203,7 @@ export class LocalStore implements PlannerStore {
   private reconcile(result: ApplyResult): void {
     for (const r of result.records) {
       if (this.pending.get(refKey(r))) continue;
-      this.replaceRecord(r.type, r.id, r.record);
+      this.replaceRecord(r.type, r.id, r.type === "event" && r.record ? toView(r.record as unknown as Record<string, unknown>) : r.record);
     }
     for (const o of result.outbox) {
       if (this.pending.get(refKey(o))) continue;
@@ -219,13 +224,15 @@ export class LocalStore implements PlannerStore {
   private commit(inputs: PatchInput[]): void {
     const at = this.now().toISOString();
     const patches = inputs.map((p) => ({ ...p, key: this.newId() }) as Patch);
-    this.applyLocal(patches, at);
+    // What is stored and sent is the engine's shape; the app holds events with their skips gathered.
+    const wire = patches.map((p) => (p.op === "create" && p.type === "event" ? { ...p, record: toStored(p.record as CalendarEvent) as unknown as AnyRecord } : p));
+    this.applyLocal(patches, wire, at);
     this.emit();
     if (!this.writable) return;
     for (const p of patches) this.pending.set(refKey(p), (this.pending.get(refKey(p)) ?? 0) + 1);
     this.writes = this.writes.then(async () => {
       try {
-        const result = await this.persistence.apply({ at, patches });
+        const result = await this.persistence.apply({ at, patches: wire });
         for (const p of patches) this.pending.set(refKey(p), (this.pending.get(refKey(p)) ?? 1) - 1);
         this.reconcile(result);
         this.channel?.postMessage({ tab: this.tab, refs: patches.map((p) => ({ type: p.type, id: p.id })) });
@@ -365,6 +372,7 @@ export class LocalStore implements PlannerStore {
       people: input.people ?? [],
       reminder: input.reminder ?? null,
       repeat: input.series ?? (input.repeat ? newSeries(input.start.slice(0, 10), input.repeat) : null),
+      overrideOf: input.overrideOf ?? null,
       readOnly: false,
       deletedAt: null,
       createdAt: stamp,
@@ -377,14 +385,15 @@ export class LocalStore implements PlannerStore {
 
   updateEvent(id: string, patch: EventPatch): void {
     const current = this.event(id);
-    const fields: Record<string, unknown> = { ...patch };
-    // Moving a repeating event moves its series; the rule stays.
-    if (patch.start !== undefined && current.repeat && patch.repeat === undefined) {
-      const series: Series = { ...current.repeat, start: patch.start.slice(0, 10), skipped: [] };
-      validate(series);
-      fields.repeat = series;
+    const { repeat, ...rest } = patch;
+    const fields: Record<string, unknown> = { ...rest };
+    let next = repeat;
+    // Moving a repeating event moves its series; the rule and the skipped dates stay.
+    if (patch.start !== undefined && current.repeat && next === undefined) next = { ...current.repeat, start: patch.start.slice(0, 10) };
+    if (next !== undefined) {
+      if (next) validate(next);
+      Object.assign(fields, repeatFields(current.repeat, next));
     }
-    if (patch.repeat) validate(patch.repeat);
     this.changeEvent(id, "update", fields);
   }
 
@@ -447,6 +456,7 @@ export class LocalStore implements PlannerStore {
       people: [],
       reminder: null,
       repeat: e.series ?? null,
+      overrideOf: null,
       readOnly: true,
       deletedAt: null,
       createdAt: at,
