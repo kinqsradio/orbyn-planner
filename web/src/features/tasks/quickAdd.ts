@@ -1,4 +1,5 @@
 import { MONTHS, addDays, formatDueLong, makeDue, startOfDay, startOfWeek } from "../../lib/dates";
+import { DAYS, type Day, type Frequency, type Repeat } from "../../store/repeat";
 import type { Priority } from "../../store/types";
 
 export interface QuickAddResult {
@@ -8,6 +9,8 @@ export interface QuickAddResult {
   /** The matched list, or null to leave the task in the Inbox. */
   listId: string | null;
   priority: Priority;
+  /** From "every fri", "every day", "every 2 weeks"…; the task then starts on its due date. */
+  repeat: Repeat | null;
 }
 
 // Maps, so a word like "constructor" is only ever a word.
@@ -33,10 +36,36 @@ MONTHS.forEach((name, i) => {
 });
 MONTH_NAMES.set("sept", 8);
 
-/** Words that say the next word is a date: "dentist on sat", "pay rent by 1 may", "gym every fri". */
-const DATE_HINTS = new Set(["on", "due", "by", "every"]);
-/** Of those, the ones that are dropped from the title along with the date. */
-const DROPPED_HINTS = new Set(["on", "due", "by"]);
+/** Words that say the next word is a date: "dentist on sat", "pay rent by 1 may". */
+const DATE_HINTS = new Set(["on", "due", "by"]);
+const DROPPED_HINTS = DATE_HINTS;
+
+const UNITS = new Map<string, Frequency>([
+  ["day", "daily"], ["days", "daily"], ["week", "weekly"], ["weeks", "weekly"],
+  ["month", "monthly"], ["months", "monthly"], ["year", "yearly"], ["years", "yearly"],
+]);
+const WEEKDAY_SET: Day[] = ["mon", "tue", "wed", "thu", "fri"];
+
+/**
+ * "every fri", "every weekday", "every day", "every week", "every 2 weeks", "every other month":
+ * the rule and how many tokens it used (counting "every"). Anything else after "every" is no repeat.
+ */
+function parseEvery(lower: string[], i: number): { repeat: Repeat; used: number; weekday?: number } | null {
+  const a = lower[i + 1];
+  if (a === undefined) return null;
+  const rule = (frequency: Frequency, interval = 1, weekdays: Day[] = []): Repeat => ({ frequency, interval, weekdays, end: { type: "never" } });
+  const wd = FULL_WEEKDAYS.get(a) ?? SHORT_WEEKDAYS.get(a);
+  if (wd !== undefined) {
+    return { repeat: rule("weekly", 1, [DAYS[(wd + 6) % 7]!]), used: 2, weekday: wd };
+  }
+  if (a === "weekday" || a === "weekdays") return { repeat: rule("weekly", 1, WEEKDAY_SET), used: 2 };
+  const unit = UNITS.get(a);
+  if (unit && !a.endsWith("s")) return { repeat: rule(unit), used: 2 };
+  if (a === "other" && UNITS.has(lower[i + 2] ?? "")) return { repeat: rule(UNITS.get(lower[i + 2]!)!, 2), used: 3 };
+  const n = /^\d{1,3}$/.test(a) ? parseInt(a, 10) : 0;
+  if (n >= 1 && UNITS.has(lower[i + 2] ?? "")) return { repeat: rule(UNITS.get(lower[i + 2]!)!, n), used: 3 };
+  return null;
+}
 
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, "");
 const DAY_NUMBER = /^\d{1,2}(st|nd|rd|th)?$/;
@@ -111,6 +140,9 @@ export function parseQuickAdd(
   let listId: string | null = null;
   let priority: Priority = "none";
   let priorityFound = false;
+  let repeat: Repeat | null = null;
+  /** Where "every fri" starts, unless the words name a date. */
+  let firstWeekday: Date | null = null;
 
   const drop = (...indexes: number[]) => indexes.forEach((i) => (keep[i] = false));
   const dropHint = (i: number) => {
@@ -139,6 +171,16 @@ export function parseQuickAdd(
         drop(i);
       }
       continue;
+    }
+
+    if (word === "every" && repeat === null) {
+      const found = parseEvery(lower, i);
+      if (found) {
+        repeat = found.repeat;
+        for (let k = 0; k < found.used; k++) drop(i + k);
+        if (found.weekday !== undefined) firstWeekday = addDays(today, ((found.weekday - today.getDay() + 6) % 7) + 1);
+        continue;
+      }
     }
 
     const t = parseTime(token);
@@ -203,9 +245,11 @@ export function parseQuickAdd(
   const title = tokens.filter((_, i) => keep[i]).join(" ");
   if (title === "") {
     // Nothing left to call it: keep the words as the title and read nothing from them.
-    return { title: raw, due: null, listId: null, priority: "none" };
+    return { title: raw, due: null, listId: null, priority: "none", repeat: null };
   }
 
+  // A repeat starts on a date: the weekday it names, else today.
+  if (repeat && day === null) day = firstWeekday ?? today;
   let due: string | null = null;
   if (day && time) {
     due = makeDue(new Date(day.getFullYear(), day.getMonth(), day.getDate(), time.h, time.m), true);
@@ -216,7 +260,18 @@ export function parseQuickAdd(
     if (at.getTime() < now.getTime()) at = addDays(at, 1);
     due = makeDue(at, true);
   }
-  return { title, due, listId, priority };
+  return { title, due, listId, priority, repeat };
+}
+
+/** "every Friday", "every weekday", "every 2 weeks". */
+export function describeRepeat(r: Repeat): string {
+  if (r.frequency === "weekly" && r.weekdays.length === WEEKDAY_SET.length && WEEKDAY_SET.every((d) => r.weekdays.includes(d))) return "every weekday";
+  if (r.frequency === "weekly" && r.weekdays.length === 1 && r.interval === 1) {
+    const name = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][DAYS.indexOf(r.weekdays[0]!)]!;
+    return `every ${name}`;
+  }
+  const unit = { daily: "day", weekly: "week", monthly: "month", yearly: "year" }[r.frequency];
+  return r.interval === 1 ? `every ${unit}` : `every ${r.interval} ${unit}s`;
 }
 
 /** The live preview: "Dentist · due Fri 13 Nov 15:00 · Errands · High". Empty when nothing was read from the words. */
@@ -227,6 +282,7 @@ export function describeParse(
 ): string {
   const bits = [
     result.due && `due ${formatDueLong(result.due, now)}`,
+    result.repeat && describeRepeat(result.repeat),
     result.listId && lists.find((l) => l.id === result.listId)?.name,
     result.priority !== "none" && result.priority[0]!.toUpperCase() + result.priority.slice(1),
   ].filter(Boolean);

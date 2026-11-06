@@ -22,7 +22,7 @@ export function QuickAddField() {
   const [keep, setKeep] = useState(false);
   const typed = text.trim();
   const parsed = useMemo(
-    () => (keep ? { title: typed, due: null, listId: null, priority: "none" as const } : parseQuickAdd(text, now, lists)),
+    () => (keep ? { title: typed, due: null, listId: null, priority: "none" as const, repeat: null } : parseQuickAdd(text, now, lists)),
     [text, typed, keep, now, lists],
   );
   const preview = keep ? "" : describeParse(parsed, lists, now);
@@ -33,7 +33,7 @@ export function QuickAddField() {
       onSubmit={(event) => {
         event.preventDefault();
         if (!typed) return;
-        const task = store.addTask({ title: parsed.title, due: parsed.due, listId: parsed.listId ?? undefined, priority: parsed.priority });
+        const task = store.addTask({ title: parsed.title, due: parsed.due, listId: parsed.listId ?? undefined, priority: parsed.priority, repeat: parsed.repeat });
         ui.showToast(`Added “${task.title}”`);
         setText("");
       }}
