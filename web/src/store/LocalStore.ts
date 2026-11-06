@@ -1,6 +1,8 @@
 import { coalesce, refKey, type AnyRecord, type Patch, type Ref } from "./outbox";
 import { defaultPersistence, type ApplyResult, type Persistence } from "./persistence";
+import { inOrder, keyBetween } from "./order";
 import { newSeries, validate, type Series } from "./repeat";
+import { completeRepeating } from "./taskRepeat";
 import {
   RESTORE_DAYS,
   type CalendarEvent,
@@ -10,8 +12,12 @@ import {
   type ListColour,
   type ListPatch,
   type NewEvent,
+  type NewProject,
   type NewTask,
   type PlannerCalendar,
+  type Project,
+  type ProjectPatch,
+  type ProjectSection,
   type OutboxEntry,
   type PersistenceState,
   type PlannerState,
@@ -28,7 +34,7 @@ export const INBOX_ID = "inbox";
 export const PERSONAL_CALENDAR_ID = "personal";
 export const CHANNEL_NAME = "orbyn-planner";
 const DAY_MS = 86_400_000;
-const KEY_OF = { task: "tasks", list: "lists", event: "events", calendar: "calendars" } as const;
+const KEY_OF = { task: "tasks", list: "lists", event: "events", calendar: "calendars", project: "projects" } as const;
 
 export interface LocalStoreOptions {
   persistence?: Persistence;
@@ -50,7 +56,7 @@ function describe(error: unknown, doing: "write" | "open"): string {
 
 export class LocalStore implements PlannerStore {
   readonly ready: Promise<void>;
-  private state: PlannerState = { ready: false, tasks: [], lists: [], events: [], calendars: [], outbox: [], persistence: { status: "ok" } };
+  private state: PlannerState = { ready: false, tasks: [], lists: [], events: [], calendars: [], projects: [], outbox: [], persistence: { status: "ok" } };
   private listeners = new Set<() => void>();
   private persistence: Persistence;
   private writes: Promise<void> = Promise.resolve();
@@ -122,7 +128,7 @@ export class LocalStore implements PlannerStore {
   }
 
   private async load(): Promise<void> {
-    let snapshot = { tasks: [] as Task[], lists: [] as TaskList[], events: [] as CalendarEvent[], calendars: [] as PlannerCalendar[], outbox: [] as OutboxEntry[] };
+    let snapshot = { tasks: [] as Task[], lists: [] as TaskList[], events: [] as CalendarEvent[], calendars: [] as PlannerCalendar[], projects: [] as Project[], outbox: [] as OutboxEntry[] };
     let persistence = this.state.persistence;
     try {
       snapshot = await this.persistence.load();
@@ -266,6 +272,11 @@ export class LocalStore implements PlannerStore {
       completedAt: null,
       deletedAt: null,
       checklist: input.checklist ?? [],
+      projectId: input.projectId ?? null,
+      sectionId: input.sectionId ?? null,
+      repeat: input.repeat ? newSeries((input.due ?? stamp).slice(0, 10), input.repeat) : null,
+      reminder: input.reminder ?? null,
+      completions: [],
       createdAt: stamp,
       updatedAt: stamp,
     };
@@ -278,7 +289,10 @@ export class LocalStore implements PlannerStore {
   }
 
   setDone(id: string, done: boolean): void {
-    this.change(id, "update", { done, completedAt: done ? this.now().toISOString() : null });
+    const task = this.task(id);
+    // Completing a repeating task moves it to its next date instead of finishing it.
+    if (done && task.repeat) this.change(id, "update", completeRepeating(task, this.now().toISOString()));
+    else this.change(id, "update", { done, completedAt: done ? this.now().toISOString() : null });
   }
 
   deleteTask(id: string): void {
@@ -332,6 +346,76 @@ export class LocalStore implements PlannerStore {
     const fields: Record<string, unknown> = { ...patch };
     if (patch.name !== undefined) fields.name = patch.name.trim() || current.name;
     this.commit([{ type: "list", id, op: "update", fields }]);
+  }
+
+  // Projects ------------------------------------------------------------------------------------
+
+  private project(id: string): Project {
+    const found = this.state.projects.find((p) => p.id === id);
+    if (!found) throw new Error(`No project ${id}`);
+    return found;
+  }
+
+  addProject(input: NewProject): Project {
+    this.assertReady();
+    const project: Project = { id: this.newId(), name: input.name.trim(), colour: input.colour, goal: input.goal ?? null, sections: [], archived: false };
+    this.commit([{ type: "project", id: project.id, op: "create", record: project }]);
+    return project;
+  }
+
+  updateProject(id: string, patch: ProjectPatch): void {
+    this.assertReady();
+    const current = this.project(id);
+    const fields: Record<string, unknown> = { ...patch };
+    if (patch.name !== undefined) fields.name = patch.name.trim() || current.name;
+    this.commit([{ type: "project", id, op: "update", fields }]);
+  }
+
+  private setSections(projectId: string, sections: ProjectSection[], extra: PatchInput[] = []): void {
+    this.commit([{ type: "project", id: projectId, op: "update", fields: { sections } }, ...extra]);
+  }
+
+  addSection(projectId: string, name: string): ProjectSection {
+    this.assertReady();
+    const project = this.project(projectId);
+    const last = inOrder(project.sections).at(-1)?.order ?? null;
+    const order = keyBetween(last, null);
+    if (order === null) throw new Error("Too many sections");
+    const section: ProjectSection = { id: this.newId(), name: name.trim(), order };
+    this.setSections(projectId, [...project.sections, section]);
+    return section;
+  }
+
+  renameSection(projectId: string, sectionId: string, name: string): void {
+    this.assertReady();
+    const project = this.project(projectId);
+    this.setSections(projectId, project.sections.map((s) => (s.id === sectionId ? { ...s, name: name.trim() || s.name } : s)));
+  }
+
+  moveSection(projectId: string, sectionId: string, direction: "up" | "down"): void {
+    this.assertReady();
+    const project = this.project(projectId);
+    const sorted = inOrder(project.sections);
+    const i = sorted.findIndex((s) => s.id === sectionId);
+    const j = direction === "up" ? i - 1 : i + 1;
+    if (i < 0 || j < 0 || j >= sorted.length) return;
+    // Take the section out and put its key between its new neighbours; no other section changes.
+    const rest = sorted.filter((s) => s.id !== sectionId);
+    const order = keyBetween(rest[j - 1]?.order ?? null, rest[j]?.order ?? null);
+    if (order === null) return;
+    this.setSections(projectId, project.sections.map((s) => (s.id === sectionId ? { ...s, order } : s)));
+  }
+
+  deleteSection(projectId: string, sectionId: string): void {
+    this.assertReady();
+    const project = this.project(projectId);
+    const moved = this.state.tasks.filter((t) => t.sectionId === sectionId && t.deletedAt === null);
+    const stamp = this.now().toISOString();
+    this.setSections(
+      projectId,
+      project.sections.filter((s) => s.id !== sectionId),
+      moved.map((t): PatchInput => ({ type: "task", id: t.id, op: "update", fields: { sectionId: null, updatedAt: stamp } })),
+    );
   }
 
   // Events and calendars ------------------------------------------------------------------------

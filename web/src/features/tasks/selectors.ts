@@ -67,7 +67,12 @@ export function groupToday(tasks: readonly Task[], now: Date): TodayGroups {
   const to = dateKey(addDays(now, 6));
   const thisWeekOpen = open.filter((t) => dueDayKey(t.due!) >= from && dueDayKey(t.due!) <= to).length;
   const weekStart = startOfWeek(now);
-  const doneThisWeek = live.filter((t) => t.done && t.completedAt !== null && new Date(t.completedAt).getTime() >= weekStart.getTime()).length;
+  // A repeating task counts once for each time it was completed; any other task once, when it was done.
+  const since = weekStart.getTime();
+  const doneThisWeek = live.reduce((n, t) => {
+    if (t.repeat) return n + (t.completions ?? []).filter((c) => new Date(c).getTime() >= since).length;
+    return n + (t.done && t.completedAt !== null && new Date(t.completedAt).getTime() >= since ? 1 : 0);
+  }, 0);
   const monday = dateKey(weekStart);
   const sunday = dateKey(addDays(weekStart, 6));
   const openInWeek = open.filter((t) => dueDayKey(t.due!) >= monday && dueDayKey(t.due!) <= sunday).length;

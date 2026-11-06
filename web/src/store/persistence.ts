@@ -1,11 +1,12 @@
 import { coalesce, refKey, type AnyRecord, type PatchBatch, type Ref } from "./outbox";
-import type { CalendarEvent, OutboxEntry, PlannerCalendar, RecordType, Task, TaskList } from "./types";
+import type { CalendarEvent, OutboxEntry, PlannerCalendar, Project, RecordType, Task, TaskList } from "./types";
 
 export interface Snapshot {
   tasks: Task[];
   lists: TaskList[];
   events: CalendarEvent[];
   calendars: PlannerCalendar[];
+  projects: Project[];
   outbox: OutboxEntry[];
 }
 
@@ -37,7 +38,7 @@ export interface Persistence {
   setHandlers(handlers: PersistenceHandlers): void;
 }
 
-const STORE_OF: Record<RecordType, "tasks" | "lists" | "events" | "calendars"> = { task: "tasks", list: "lists", event: "events", calendar: "calendars" };
+const STORE_OF: Record<RecordType, "tasks" | "lists" | "events" | "calendars" | "projects"> = { task: "tasks", list: "lists", event: "events", calendar: "calendars", project: "projects" };
 const storeOf = (type: RecordType) => STORE_OF[type];
 
 /** Keeps everything in memory. Used where IndexedDB does not exist, and in tests. */
@@ -62,6 +63,7 @@ export class MemoryPersistence implements Persistence {
       lists: all.filter(([k]) => k.startsWith("list:")).map(([, v]) => v as TaskList),
       events: all.filter(([k]) => k.startsWith("event:")).map(([, v]) => v as CalendarEvent),
       calendars: all.filter(([k]) => k.startsWith("calendar:")).map(([, v]) => v as PlannerCalendar),
+      projects: all.filter(([k]) => k.startsWith("project:")).map(([, v]) => v as Project),
       outbox: [...this.outbox.values()].sort((a, b) => a.seq - b.seq),
     };
   }
@@ -111,10 +113,10 @@ export class MemoryPersistence implements Persistence {
 }
 
 const DB_NAME = "orbyn-planner";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 type Rec = AnyRecord & Record<string, unknown>;
-const ALL_STORES = ["tasks", "lists", "events", "calendars", "outbox"];
+const ALL_STORES = ["tasks", "lists", "events", "calendars", "projects", "outbox"];
 
 /** One IndexedDB object store per record type, and an outbox keyed by an auto-incrementing number. */
 export class IdbPersistence implements Persistence {
@@ -131,7 +133,7 @@ export class IdbPersistence implements Persistence {
       const req = indexedDB.open(DB_NAME, DB_VERSION);
       req.onupgradeneeded = (event) => {
         const db = req.result;
-        for (const name of ["tasks", "lists", "events", "calendars"]) {
+        for (const name of ["tasks", "lists", "events", "calendars", "projects"]) {
           if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: "id" });
         }
         // Version 1 keyed the outbox by a number made in memory, which two tabs would reuse.
@@ -163,11 +165,12 @@ export class IdbPersistence implements Persistence {
     const db = await this.open();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(ALL_STORES, "readonly");
-      const out: Snapshot = { tasks: [], lists: [], events: [], calendars: [], outbox: [] };
+      const out: Snapshot = { tasks: [], lists: [], events: [], calendars: [], projects: [], outbox: [] };
       tx.objectStore("tasks").getAll().onsuccess = (e) => (out.tasks = (e.target as IDBRequest<Task[]>).result);
       tx.objectStore("lists").getAll().onsuccess = (e) => (out.lists = (e.target as IDBRequest<TaskList[]>).result);
       tx.objectStore("events").getAll().onsuccess = (e) => (out.events = (e.target as IDBRequest<CalendarEvent[]>).result);
       tx.objectStore("calendars").getAll().onsuccess = (e) => (out.calendars = (e.target as IDBRequest<PlannerCalendar[]>).result);
+      tx.objectStore("projects").getAll().onsuccess = (e) => (out.projects = (e.target as IDBRequest<Project[]>).result);
       tx.objectStore("outbox").getAll().onsuccess = (e) => (out.outbox = (e.target as IDBRequest<OutboxEntry[]>).result.sort((a, b) => a.seq - b.seq));
       tx.oncomplete = () => resolve(out);
       tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("The read was aborted"));
