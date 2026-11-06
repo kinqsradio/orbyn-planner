@@ -27,6 +27,8 @@ export interface SyncState {
   waitingForKeys: string[];
   /** Zones no device of the account can open: this is the only trusted device and it has no key for them. */
   stranded: string[];
+  /** This device must be approved again from another of the account's devices before it can open the lists. */
+  needsApproval: boolean;
   /** Zones whose keys couldn't be sent to the other devices yet, so nothing is sent to them. */
   keysPending: string[];
   /** Lists or calendars deleted on another device while this one had changes for them: those changes were dropped. */
@@ -42,7 +44,7 @@ export interface SyncState {
   live: boolean;
 }
 
-const OFF: SyncState = { phase: "off", devices: 0, lastSyncedAt: null, quarantined: 0, waitingForKeys: [], stranded: [], keysPending: [], dropped: [], failed: [], skipped: [], error: null, leader: false, live: false };
+const OFF: SyncState = { phase: "off", devices: 0, lastSyncedAt: null, quarantined: 0, waitingForKeys: [], stranded: [], needsApproval: false, keysPending: [], dropped: [], failed: [], skipped: [], error: null, leader: false, live: false };
 
 /** The part of a WebSocket the controller uses. */
 export interface SocketLike {
@@ -129,8 +131,8 @@ export class SyncController {
     for (const l of this.listeners) l();
     if (this.state.leader) {
       try {
-        const { devices, lastSyncedAt, quarantined, phase, waitingForKeys, stranded, keysPending, dropped, failed, skipped, error } = this.state;
-        this.status?.postMessage({ devices, lastSyncedAt, quarantined, phase, waitingForKeys, stranded, keysPending, dropped, failed, skipped, error });
+        const { devices, lastSyncedAt, quarantined, phase, waitingForKeys, stranded, needsApproval, keysPending, dropped, failed, skipped, error } = this.state;
+        this.status?.postMessage({ devices, lastSyncedAt, quarantined, phase, waitingForKeys, stranded, needsApproval, keysPending, dropped, failed, skipped, error });
       } catch {
         // Other tabs just don't hear it.
       }
@@ -271,6 +273,7 @@ export class SyncController {
         quarantined: report.quarantined,
         waitingForKeys: report.waitingForKeys,
         stranded: report.stranded,
+        needsApproval: report.needsApproval,
         keysPending: report.keysPending,
         dropped,
         failed: report.failed,

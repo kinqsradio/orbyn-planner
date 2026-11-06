@@ -1,3 +1,4 @@
+import { emptySyncState } from "../api/keyStore";
 import { describe, expect, it } from "vitest";
 import { removeDevice, signOut } from "./flows";
 import { ApproverController, DeviceController } from "./pairing";
@@ -195,5 +196,24 @@ describe("signing out", () => {
     };
     await expect(signOut(broken.d.services)).rejects.toThrow(/couldn’t be removed/);
     expect(broken.d.services.tokens.getSession()).toBeNull(); // still signed out here
+  });
+
+  it("when an approval completes, both devices forget which zone keys they sent, so the next pass sends them all again", async () => {
+    const r = await createRig();
+    const sent = { ...emptySyncState(), keysSent: { "list:inbox": "a,d" } };
+    await r.a.keys.saveSyncState(sent);
+    await r.d.keys.saveSyncState(sent);
+    const approver = new ApproverController(r.a.services, r.a.session, r.d.device);
+    const device = new DeviceController(r.d.services, r.d.session);
+    void approver.start();
+    void device.run();
+    await until(() => device.getState().phase === "compare");
+    device.confirm();
+    await until(() => approver.getState().phase === "compare");
+    void approver.confirm();
+    await until(() => device.getState().phase === "trusted" && approver.getState().phase === "done");
+    expect((await r.d.keys.loadSyncState())?.keysSent).toEqual({});
+    expect((await r.a.keys.loadSyncState())?.keysSent).toEqual({});
+    approver.dispose();
   });
 });

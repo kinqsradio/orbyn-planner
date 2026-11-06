@@ -45,6 +45,8 @@ export interface CycleReport {
   waitingForKeys: string[];
   /** Zones waiting for a key when this is the only trusted device: no device of the account can open them. */
   stranded: string[];
+  /** This device trusts nobody but itself while the server lists others as trusted: it must be approved again before it can open or send anything. */
+  needsApproval: boolean;
   /** Zones whose keys couldn't be sent to the other devices yet, so nothing is uploaded to them. */
   keysPending: string[];
   /** Records this device cannot open yet, in all zones. */
@@ -87,7 +89,7 @@ export async function runCycle(
   const { api, keys: keyStore } = services;
   const now = () => services.now();
   const state: SyncState = (await keyStore.loadSyncState()) ?? emptySyncState();
-  const report: CycleReport = { uploaded: 0, received: 0, devices: 0, waitingForKeys: [], stranded: [], keysPending: [], quarantined: 0, dropped: [], failed: [], skipped: [] };
+  const report: CycleReport = { uploaded: 0, received: 0, devices: 0, waitingForKeys: [], stranded: [], needsApproval: false, keysPending: [], quarantined: 0, dropped: [], failed: [], skipped: [] };
 
   const alive = () => {
     if (signal.aborted) throw new Aborted();
@@ -243,6 +245,17 @@ export async function runCycle(
   const verified = await withEngine((e) => e.verifyDevices(devices));
   report.devices = devices.devices.filter((d) => d.state === "trusted").length;
   const owes = [...verified].sort().join(",");
+  // A device that was approved again (it lost its saved state and holds no keys) is in the trusted set already, so the
+  // set didn't change. Its approval did: every trusted device then sends it every zone key it holds, not just the approver.
+  state.approvals ??= {};
+  let reapproved = false;
+  for (const d of devices.devices) {
+    if (d.state !== "trusted" || d.id === session.deviceId) continue;
+    const marker = d.approval_id ?? d.approval_signature ?? "";
+    if (state.approvals[d.id] !== undefined && state.approvals[d.id] !== marker) reapproved = true;
+    state.approvals[d.id] = marker;
+  }
+  if (reapproved) state.keysSent = {};
   const envelopes = await api.keyEnvelopes();
   if (envelopes.envelopes.length > 0) {
     const opened = await withEngine((e) => {
@@ -465,8 +478,16 @@ export async function runCycle(
   const current = new Map(store.getState().outbox.map((o) => [refKey(o), o.idempotencyKey] as const));
   for (const [key, value] of Object.entries(state.failed)) if (current.get(key) !== value.slice(0, value.indexOf("|"))) delete state.failed[key];
   report.failed = Object.entries(state.failed).map(([key, value]) => ({ type: key.slice(0, key.indexOf(":")) as RecordType, id: key.slice(key.indexOf(":") + 1), reason: value.slice(value.indexOf("|") + 1) }));
-  // A zone this device can't open, with no other trusted device to send its key, can't be opened anywhere.
-  if (![...verified].some((id) => id !== session.deviceId)) {
+  // What this device can't open, and why. The server lists other trusted devices that this device doesn't trust (its engine
+  // was reset: it trusts only itself): it has to be approved again before anyone can send it keys, and until then nothing is
+  // called waiting or stranded, since another device can read those zones. Only when BOTH this device's own trust view and the
+  // server's list show no other trusted device can nobody hold a key, and a zone it can't open is stranded.
+  const othersInView = [...verified].some((id) => id !== session.deviceId);
+  const othersOnServer = devices.devices.some((d) => d.state === "trusted" && d.id !== session.deviceId);
+  if (!othersInView && othersOnServer) {
+    report.needsApproval = true;
+    report.waitingForKeys = [];
+  } else if (!othersInView && !othersOnServer) {
     const closed = new Set([...report.waitingForKeys, ...Object.entries(state.quarantined).filter(([, ids]) => ids.length > 0).map(([zone]) => zone)]);
     report.stranded = [...closed].filter((zone) => serverZones.has(zone) && !serverZones.get(zone)!.deleted && !state.made[zone]).sort();
   }
