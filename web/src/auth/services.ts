@@ -57,7 +57,8 @@ export function createAuthServices(options: AuthServiceOptions = {}): AuthServic
   const crypto = options.crypto ?? requireAuthCrypto;
   const now = options.now ?? Date.now;
   const wrapSecret = options.wrapSecret ?? (() => wrapSecretFrom(keys));
-  const engine = createEngineHost({ keys, crypto, wrapSecret, now, lock: options.lock });
+  // With a wrapping secret supplied from outside (tests) there is no stored key to look for.
+  const engine = createEngineHost({ keys, crypto, wrapSecret, now, lock: options.lock, wrapKeyPresent: options.wrapSecret ? async () => true : undefined });
   const channelName = "orbyn-planner-auth";
   const signedOut = {
     post: () => {

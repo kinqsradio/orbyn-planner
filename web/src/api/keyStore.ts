@@ -16,6 +16,8 @@ export interface StoredSession {
 export interface DeviceIdentity {
   accountId: string;
   deviceId: string;
+  /** The normalised email the keys were made for. Keys are never reused for another email, so two accounts can't be linked by one key. */
+  email?: string;
 }
 
 /** How many unreadable snapshots are kept. */
@@ -37,18 +39,24 @@ export interface KeyStore {
   /** Which account and device the keys and the snapshot were made for. A session for another one finds them stale. */
   loadIdentity(): Promise<DeviceIdentity | null>;
   saveIdentity(identity: DeviceIdentity): Promise<void>;
-  /** Keeps a snapshot that could not be read, sealed as it was, so it isn't lost. At most `QUARANTINE_KEEP`, newest last. */
+  /**
+   * Keeps a snapshot that could not be read, sealed as it was, so it isn't lost. The first one kept
+   * is pinned (it is the original, with the zone keys) and never pushed out; an identical blob is
+   * not kept twice; of the rest the newest fit, up to `QUARANTINE_KEEP` in all. Oldest first.
+   */
   quarantineSnapshot(sealed: Uint8Array): Promise<void>;
   loadQuarantine(): Promise<Uint8Array[]>;
   /** The non-extractable WebCrypto key the wrapping secret comes from. It can be stored but not read. */
   loadWrapKey(): Promise<CryptoKey | null>;
   saveWrapKey(key: CryptoKey): Promise<void>;
-  /** Forgets this device: keys, snapshot and wrapping key together (the snapshot is bound to the keys). */
+  /** Forgets this device: keys, snapshot, wrapping key, identity and the quarantine together (all are sealed under, or bound to, the keys). */
   clearDevice(): Promise<void>;
   loadSession(): Promise<StoredSession | null>;
   saveSession(session: StoredSession): Promise<void>;
   clearSession(): Promise<void>;
 }
+
+const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
 
 export const KEY_DB_NAME = "orbyn-planner-keys";
 
@@ -111,10 +119,12 @@ export function createIdbKeyStore(factory: IDBFactory = indexedDB): KeyStore {
     const database = await open();
     const tx = database.transaction("quarantine", "readwrite");
     const store = tx.objectStore("quarantine");
-    // Keys are increasing numbers, so the oldest are the lowest; keep the newest few.
-    const keys = await request(store.getAllKeys());
-    store.put(sealed, (keys.length ? Number(keys[keys.length - 1]) : 0) + 1);
-    for (const k of keys.slice(0, Math.max(keys.length + 1 - QUARANTINE_KEEP, 0))) store.delete(k);
+    const [keys, blobs] = await Promise.all([request(store.getAllKeys()), request(store.getAll() as IDBRequest<Uint8Array[]>)]);
+    if (!blobs.some((b) => sameBytes(b, sealed))) {
+      store.put(sealed, (keys.length ? Number(keys[keys.length - 1]) : 0) + 1);
+      // The first stays; when full, the oldest after it goes.
+      if (keys.length + 1 > QUARANTINE_KEEP) store.delete(keys[1]!);
+    }
     await new Promise<void>((resolve, reject) => {
       tx.oncomplete = () => resolve();
       tx.onerror = tx.onabort = () => reject(tx.error);
@@ -138,11 +148,18 @@ export function createIdbKeyStore(factory: IDBFactory = indexedDB): KeyStore {
       return request(database.transaction("quarantine", "readonly").objectStore("quarantine").getAll() as IDBRequest<Uint8Array[]>);
     },
     clearDevice: async () => {
-      // The quarantine stays: it is what a person could still recover.
       await remove("device");
       await remove("snapshot");
       await remove("wrap");
       await remove("identity");
+      // The quarantine is sealed under the wrapping key just removed: nothing could open it again.
+      const database = await open();
+      const tx = database.transaction("quarantine", "readwrite");
+      tx.objectStore("quarantine").clear();
+      await new Promise<void>((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = tx.onabort = () => reject(tx.error);
+      });
     },
     loadSession: () => get<StoredSession>("session"),
     saveSession: (s) => put("session", s),
@@ -170,8 +187,9 @@ export function createMemoryKeyStore(): KeyStore {
     loadIdentity: async () => identity,
     saveIdentity: async (i) => void (identity = i),
     quarantineSnapshot: async (b) => {
+      if (quarantined.some((q) => sameBytes(q, b))) return;
       quarantined.push(b);
-      while (quarantined.length > QUARANTINE_KEEP) quarantined.shift();
+      if (quarantined.length > QUARANTINE_KEEP) quarantined.splice(1, 1);
     },
     loadQuarantine: async () => [...quarantined],
     clearDevice: async () => {
@@ -179,6 +197,7 @@ export function createMemoryKeyStore(): KeyStore {
       snapshot = null;
       wrap = null;
       identity = null;
+      quarantined.length = 0;
     },
     loadSession: async () => session,
     saveSession: async (s) => void (session = s),

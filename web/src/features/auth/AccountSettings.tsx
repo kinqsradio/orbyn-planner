@@ -161,6 +161,10 @@ function AddDeviceDialog({ onClose }: { onClose: () => void }) {
 function EngineNotice() {
   const { services } = useAuth()!;
   const message = useSyncExternalStore(services.engine.notice.subscribe, services.engine.notice.get);
+  // Read the store when this screen opens: the notice shows after a reload and for what another tab quarantined.
+  useEffect(() => {
+    void services.engine.notice.refresh();
+  }, [services]);
   if (!message) return null;
   return (
     <div className="card" role="status" style={{ gap: 6 }}>

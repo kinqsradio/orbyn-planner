@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { ApiFailure } from "../../api/auth";
 import { SignInUnavailable } from "../../api/authCrypto";
 import { Icon } from "../../components/Icon";
-import { signIn, signUp } from "../../auth/flows";
+import { KeysForAnotherAccount, signIn, signUp } from "../../auth/flows";
 import { useAuth, type AuthScreen } from "../../auth/AuthProvider";
 
 /** A readable line for whatever went wrong. */
@@ -85,20 +85,40 @@ function SignIn({ go }: { go: (s: AuthScreen) => void }) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** This browser holds another account's keys: nothing has been sent, and the person decides. */
+  const [foreign, setForeign] = useState<KeysForAnotherAccount | null>(null);
 
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
+  const attempt = async (replaceKeys: boolean) => {
     setBusy(true);
     setError(null);
     try {
-      await signIn(auth.services, { email, password });
+      await signIn(auth.services, { email, password, replaceKeys });
       auth.closeAuth();
     } catch (e) {
-      setError(describeError(e));
+      if (e instanceof KeysForAnotherAccount) setForeign(e);
+      else setError(describeError(e));
     } finally {
       setBusy(false);
     }
   };
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    void attempt(false);
+  };
+
+  if (foreign) {
+    return (
+      <div className="authcard" role="alertdialog" aria-modal="true" aria-label="Sign in to a different account" aria-describedby="foreign-keys">
+        <h1 className="auth-title">Sign in to a different account?</h1>
+        <p id="foreign-keys" className="t3">{foreign.message}</p>
+        <div className="dialog-actions">
+          <button type="button" className="ghost" data-autofocus onClick={() => setForeign(null)}>Cancel</button>
+          <button type="button" className="btn" disabled={busy} onClick={() => { setForeign(null); void attempt(true); }}>Sign in anyway</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <form className="authcard" onSubmit={submit} aria-label="Sign in" noValidate>
