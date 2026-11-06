@@ -78,7 +78,10 @@ const env = { ...process.env, CARGO_ENCODED_RUSTFLAGS: rustflags, CARGO_BUILD_TA
 delete env.RUSTFLAGS;
 run("cargo", [`+${lock.rust}`, "build", "-p", "orbyn-wasm", "--release", "--target", "wasm32-unknown-unknown", "--locked"], { cwd: engine, env });
 
-const out = mkdtempSync(join(tmpdir(), "orbyn-wasm-"));
+// ORBYN_WASM_KEEP names a folder that keeps the fresh build (CI uploads it, so a package that CI's
+// own build doesn't reproduce can be compared, or replaced by CI's build).
+const keep = process.env.ORBYN_WASM_KEEP;
+const out = keep ? (mkdirSync(keep, { recursive: true }), keep) : mkdtempSync(join(tmpdir(), "orbyn-wasm-"));
 try {
   run("wasm-bindgen", ["--target", "web", "--out-dir", out, join(env.CARGO_BUILD_TARGET_DIR, "wasm32-unknown-unknown/release/orbyn_wasm.wasm")]);
   const missing = FILES.filter((f) => !existsSync(join(out, f)));
@@ -133,5 +136,5 @@ try {
     console.log(`wasm: wrote ${FILES.length} file(s) and ${MANIFEST} to src/generated/wasm`);
   }
 } finally {
-  rmSync(out, { recursive: true, force: true });
+  if (!keep) rmSync(out, { recursive: true, force: true });
 }
