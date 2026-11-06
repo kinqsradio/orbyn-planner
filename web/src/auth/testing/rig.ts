@@ -22,6 +22,8 @@ export interface Rig {
   delay: { devices: number; nonce: number };
   /** Replace what the new device is shown of the approver's nonce (the server lying), when set. */
   tamper: { approverNonce: string | null };
+  /** Runs once, after the approver's device-list read that follows its confirmation has been answered but before the page sees the answer: the new device finishes in that gap. */
+  race: { afterDevicesOnce: (() => Promise<void>) | null };
 }
 
 export async function createRig(options: { newDeviceState?: "pending" | "trusted"; slowDevices?: number } = {}): Promise<Rig> {
@@ -49,6 +51,7 @@ export async function createRig(options: { newDeviceState?: "pending" | "trusted
   const fail = { save: false };
   const delay = { devices: options.slowDevices ?? 0, nonce: 0 };
   const tamper = { approverNonce: null as string | null };
+  const race = { afterDevicesOnce: null as (() => Promise<void>) | null };
 
   const keyStore = (): KeyStore => {
     const k = createMemoryKeyStore();
@@ -74,6 +77,11 @@ export async function createRig(options: { newDeviceState?: "pending" | "trusted
         if (delay.devices && /\/v1\/devices$/.test(String(url)) && (init?.method ?? "GET") === "GET") await new Promise((r) => setTimeout(r, delay.devices));
         if (delay.nonce && init?.method === "POST" && String(url).endsWith("/nonce")) await new Promise((r) => setTimeout(r, delay.nonce));
         const response = await engine.fetch(url, init);
+        if (race.afterDevicesOnce && /\/v1\/devices$/.test(String(url)) && (init?.method ?? "GET") === "GET" && engine.calls.some((c) => c.method === "POST" && c.path.endsWith("/confirm"))) {
+          const gap = race.afterDevicesOnce;
+          race.afterDevicesOnce = null;
+          await gap(); // the answer above was read before this, so it still lists the new device as pending
+        }
         if (tamper.approverNonce && /\/v1\/devices\/current$/.test(String(url))) {
           const body = (await response.json()) as { approval: { approver_nonce: string | null } | null };
           if (body.approval?.approver_nonce) body.approval.approver_nonce = tamper.approverNonce;
@@ -105,7 +113,7 @@ export async function createRig(options: { newDeviceState?: "pending" | "trusted
   engine.accounts.set("a@b.co", { id: ACCOUNT, email: "a@b.co", verifier: new Uint8Array(32), devices: [a.device, d.device] });
   engine.sessions.set("tok-a", { accountId: ACCOUNT, deviceId: ID_A });
   engine.sessions.set("tok-d", { accountId: ACCOUNT, deviceId: ID_D });
-  return { engine, counts, a, d, fail, delay, tamper, tabOfD: async () => {
+  return { engine, counts, a, d, fail, delay, tamper, race, tabOfD: async () => {
       const tab = build(d.keys);
       await tab.tokens.set(d.session);
       return tab;
