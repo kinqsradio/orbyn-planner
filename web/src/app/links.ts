@@ -37,18 +37,35 @@ export function openExternal(url: string): void {
   }
 }
 
+/**
+ * Sends a click on a web link to the system browser, never the window. A primary click and a
+ * middle click (`auxclick`, button 1) both do; the right button is left to the context menu.
+ */
+export function openLinkFromEvent(e: MouseEvent): void {
+  if (e.button !== 0 && e.button !== 1) return;
+  const a = (e.target as Element | null)?.closest?.("a[href]");
+  const href = a?.getAttribute("href");
+  if (!href || !isWebAddress(href)) return;
+  e.preventDefault();
+  openExternal(href);
+}
+
+/** Listens for link clicks on the document; returns the function that stops listening. */
+export function listenForExternalLinks(): () => void {
+  document.addEventListener("click", openLinkFromEvent);
+  // A middle click does not fire "click" in a browser or a webview; without this it would open
+  // the link in a new window of the shell.
+  document.addEventListener("auxclick", openLinkFromEvent);
+  return () => {
+    document.removeEventListener("click", openLinkFromEvent);
+    document.removeEventListener("auxclick", openLinkFromEvent);
+  };
+}
+
 /** In the desktop app, a click on a web link anywhere opens it in the system browser, never in the window. */
 export function useExternalLinks(): void {
   useEffect(() => {
     if (!isDesktop()) return;
-    const onClick = (e: MouseEvent) => {
-      const a = (e.target as Element | null)?.closest?.("a[href]");
-      const href = a?.getAttribute("href");
-      if (!href || !isWebAddress(href)) return;
-      e.preventDefault();
-      openExternal(href);
-    };
-    document.addEventListener("click", onClick);
-    return () => document.removeEventListener("click", onClick);
+    return listenForExternalLinks();
   }, []);
 }

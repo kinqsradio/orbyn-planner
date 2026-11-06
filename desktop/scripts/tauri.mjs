@@ -15,7 +15,14 @@ if (command !== "dev" && command !== "build") {
 
 const config = JSON.parse(readFileSync(join(root, "config.json"), "utf8"));
 const engineUrl = process.env.ORBYN_ENGINE_URL || config.engineUrl;
-const csp = contentSecurityPolicy(engineUrl, { dev: command === "dev" });
+let csp;
+try {
+  // A release build is refused here if its policy would allow localhost.
+  csp = contentSecurityPolicy(engineUrl, { dev: command === "dev" });
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
 const override = JSON.stringify({ app: { security: { csp, devCsp: csp } } });
 
 const bin = join(root, "node_modules", ".bin", process.platform === "win32" ? "tauri.cmd" : "tauri");

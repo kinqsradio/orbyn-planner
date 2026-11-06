@@ -13,8 +13,8 @@
     "withGlobalTauri": false,
     "windows": [],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http://localhost:8080 ws://localhost:8080; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'",
-      "devCsp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http://localhost:8080 ws://localhost:8080 http://localhost:5173 ws://localhost:5173; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'",
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ipc:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'",
+      "devCsp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ipc: http://localhost:8080 ws://localhost:8080 http://localhost:5173 ws://localhost:5173; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'",
       "capabilities": ["main"]
     }
   },

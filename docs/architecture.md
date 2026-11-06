@@ -49,7 +49,8 @@ Accounts are optional in v1. Signed out, the person sees the landing page, and "
 - **Navigation.** The window may show only the app's own pages (`tauri://localhost`, `http(s)://tauri.localhost`) and, in a debug build, the dev server on port 5173. Links to anywhere else, the engine included, are refused, and a request for a new window is denied.
 - **Content security policy.** Built from `desktop/config.json` (`engineUrl`) by `desktop/scripts/engine.mjs`: scripts only from the app, `connect-src` the app and the engine origin, no frames or objects.
 - **Platform.** `web/src/app/platform.ts` tells the desktop app from a browser by Tauri's injected `__TAURI_INTERNALS__`; the browser-only install hint in Settings is hidden in the desktop app.
-- **Links.** A link in notes or anywhere else opens in the system browser through `open_link`; the window never navigates to it.
+- **Links.** A link in notes or anywhere else opens in the system browser through `open_link`; the window never navigates to it. A primary click and a middle click (`auxclick`) are both handled; a right click is left to the context menu.
+- **Content security policy.** `scripts/tauri.mjs` generates the window's policy from the engine URL at build time: a release build allows its own origin and that one https engine origin, and the script refuses to build if the policy would allow localhost, 127.0.0.1 or ::1. A development build adds localhost and the dev server. The checked-in `tauri.conf.json` carries the closed policy (no engine), so a build that skips the script reaches no engine.
 - **Engine address.** Production builds refuse a plain `http://` engine URL; development accepts it for localhost and 127.0.0.1 only. Feed subscriptions go through the engine (`POST /v1/feeds/fetch`), since the page's policy forbids fetching other sites.
 - **Not yet.** Code signing and notarisation, auto-update and background reminders.
 
