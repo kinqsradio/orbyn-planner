@@ -30,15 +30,37 @@ export function engineOrigin(url, { allowLocalHttp = false } = {}) {
 }
 
 /**
+ * Throws if a policy names a local address. A release build must carry only the configured engine
+ * origin, never localhost, 127.0.0.1 or ::1. The one allowed exception is `http://ipc.localhost`,
+ * the address Tauri's own channel uses on Windows.
+ */
+export function assertNoLocalAddress(csp) {
+  const stripped = csp.replaceAll("http://ipc.localhost", "");
+  const local = stripped.match(/localhost|127\.0\.0\.1|\[::1\]/i);
+  if (local) {
+    throw new Error(
+      `A release build's content security policy must not allow ${local[0]}: ` +
+        "point ORBYN_ENGINE_URL (or desktop/config.json) at the real engine, or use `npm run dev`.",
+    );
+  }
+}
+
+/**
  * The CSP for the desktop window: itself, and the engine to talk to. Nothing else is loaded or
- * contacted. `ipc:` is Tauri's own channel between the page and the shell.
+ * contacted. `ipc:` is Tauri's own channel between the page and the shell. With no `engineUrl` the
+ * window can reach no engine at all: that is what the checked-in tauri.conf.json carries, so a
+ * build that skips scripts/tauri.mjs fails closed. A release build (`dev` unset) is refused if
+ * its policy would allow a local address; only a development build adds localhost.
  */
 export function contentSecurityPolicy(engineUrl, { dev = false, allowLocalHttp = dev } = {}) {
-  const engine = engineOrigin(engineUrl, { allowLocalHttp });
-  const connect = ["'self'", "ipc:", "http://ipc.localhost", engine.http, engine.socket];
+  const connect = ["'self'", "ipc:", "http://ipc.localhost"];
+  if (engineUrl) {
+    const engine = engineOrigin(engineUrl, { allowLocalHttp });
+    connect.push(engine.http, engine.socket);
+  }
   // The dev server pushes updates over its own socket.
   if (dev) connect.push("http://localhost:5173", "ws://localhost:5173");
-  return [
+  const csp = [
     "default-src 'self'",
     // 'wasm-unsafe-eval' lets the page compile the engine's WebAssembly module (sign-in and device keys). It does
     // not allow eval() or inline scripts.
@@ -52,4 +74,6 @@ export function contentSecurityPolicy(engineUrl, { dev = false, allowLocalHttp =
     "form-action 'self'",
     "frame-src 'none'",
   ].join("; ");
+  if (!dev && !allowLocalHttp) assertNoLocalAddress(csp);
+  return csp;
 }
