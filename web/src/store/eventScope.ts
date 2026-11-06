@@ -182,3 +182,28 @@ export function duplicateOccurrence(store: PlannerStore, occ: Occurrence): Calen
   const calendarId = event.readOnly ? (own?.id ?? event.calendarId) : event.calendarId;
   return store.addEvent({ ...copyOf(event), calendarId, title: event.title, start: occ.start, end: occ.end, repeat: null, series: null });
 }
+
+/** The fields an undo puts back on an event. */
+const EVENT_FIELDS = ["title", "calendarId", "allDay", "start", "end", "place", "notes", "people", "reminder", "repeat", "overrideOf"] as const;
+
+/**
+ * Runs a change to events and returns how to undo it: events it changed go back to what they were
+ * (dates, repeat and skipped dates included), and events it made are deleted.
+ */
+export function undoableEvents<T>(store: PlannerStore, run: () => T): { result: T; undo: () => void } {
+  const before = new Map(store.getState().events.map((e) => [e.id, e]));
+  const result = run();
+  const now = store.getState().events;
+  const changed = now.filter((e) => before.has(e.id) && JSON.stringify(before.get(e.id)) !== JSON.stringify(e));
+  const made = now.filter((e) => !before.has(e.id));
+  return {
+    result,
+    undo: () => {
+      for (const e of made) store.deleteEvent(e.id);
+      for (const e of changed) {
+        const was = before.get(e.id)!;
+        store.updateEvent(e.id, Object.fromEntries(EVENT_FIELDS.map((f) => [f, was[f]])));
+      }
+    },
+  };
+}

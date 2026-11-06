@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fetchFeed } from "../features/calendar/subscriptions";
 import { ApiError, fetchFeedViaEngine } from "./feeds";
+import { sessionToken, setSessionToken } from "./session";
 
 const FEED = ["BEGIN:VCALENDAR", "BEGIN:VEVENT", "DTSTART:20261107T090000", "SUMMARY:Open day", "END:VEVENT", "END:VCALENDAR"].join("\r\n");
 const answer = (body: unknown, status = 200) => vi.fn(async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
@@ -32,6 +33,17 @@ describe("fetching a feed through the engine", () => {
     await expect(fetchFeed("https://e.com/a.ics", answer({ code: "blocked_address" }, 403), "http://engine", "tok")).rejects.toThrow(/won’t fetch/);
     await expect(fetchFeed("https://e.com/a.ics", answer({ code: "unauthorized" }, 401), "http://engine", "tok")).rejects.toThrow(/Sign in/);
     await expect(fetchFeed("https://e.com/a.ics", answer({ code: "too_many_attempts" }, 429), "http://engine", "tok")).rejects.toThrow(/Try again later/);
+  });
+
+  it("a 401 from the feed route forgets the session token, so later refreshes take the signed-out path", async () => {
+    setSessionToken("tok");
+    await expect(fetchFeed("https://e.com/a.ics", answer({ code: "unauthorized" }, 401), "http://engine", "tok")).rejects.toThrow(/Sign in/);
+    expect(sessionToken()).toBeNull();
+    // A different token (a newer sign-in) is not forgotten by an old request's 401.
+    setSessionToken("newer");
+    await expect(fetchFeed("https://e.com/a.ics", answer({ code: "unauthorized" }, 401), "http://engine", "tok")).rejects.toThrow();
+    expect(sessionToken()).toBe("newer");
+    setSessionToken(null);
   });
 
   it("reads the feed in the browser when signed out, and asks for sign-in in the desktop app", async () => {

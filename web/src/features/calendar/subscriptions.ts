@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { ApiError, NEEDS_ENGINE, NEEDS_SIGN_IN, configuredEngine, fetchFeedViaEngine, inDesktopApp } from "../../api/feeds";
-import { sessionToken } from "../../api/session";
+import { sessionToken, setSessionToken } from "../../api/session";
 import { IcsError, MAX_FEED_BYTES, parseIcs } from "../../lib/ics";
 import { usePlanner, useStore } from "../../store/context";
 import type { FeedEvent, PlannerCalendar, PlannerStore } from "../../store/types";
@@ -93,7 +93,11 @@ export async function fetchFeed(
     try {
       text = await fetchFeedViaEngine(engine, address, token, fetchFn);
     } catch (error) {
-      if (error instanceof ApiError) throw new FeedError(REFUSALS[error.code] ?? REFUSALS.upstream_error!);
+      if (error instanceof ApiError) {
+        // The engine no longer accepts this session: forget the token here, so later refreshes take the signed-out path.
+        if (error.code === "unauthorized" && token === sessionToken()) setSessionToken(null);
+        throw new FeedError(REFUSALS[error.code] ?? REFUSALS.upstream_error!);
+      }
       throw new FeedError(typeof navigator !== "undefined" && navigator.onLine === false ? "You’re offline." : "Couldn’t reach the Orbyn engine.");
     }
     return parseText(text);

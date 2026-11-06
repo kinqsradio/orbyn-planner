@@ -114,6 +114,10 @@ export class LocalStore implements PlannerStore {
     this.channel = null;
   }
 
+  nowIso(): string {
+    return this.now().toISOString();
+  }
+
   pendingChanges(): number {
     return this.state.outbox.length;
   }

@@ -11,7 +11,7 @@ import { usePlanner, useStore } from "../../store/context";
 import { inOrder, keyBetween } from "../../store/order";
 import { CannotMoveSeries, type Scope } from "../../store/eventScope";
 import type { Repeat } from "../../store/repeat";
-import { allowedScopes, editTaskRepeat, type RepeatEdit } from "../../store/taskRepeat";
+import { allowedScopes, editTaskRepeat, undoableTasks, type RepeatEdit } from "../../store/taskRepeat";
 import { PRIORITIES, type Task } from "../../store/types";
 import { ScopeDialog } from "../calendar/ScopeDialog";
 import { RepeatPicker } from "./RepeatPicker";
@@ -90,8 +90,9 @@ function Panel({ task }: { task: Task }) {
   const choose = (scope: Scope) => {
     if (asking) {
       try {
-        editTaskRepeat(store, task, asking, scope, today);
+        const { undo } = undoableTasks(store, () => editTaskRepeat(store, task, asking, scope, today));
         setSaveError(null);
+        ui.showToast("Repeat changed", undo);
       } catch (e) {
         setSaveError(e instanceof CannotMoveSeries ? e.message : "Couldn’t save that change.");
       }

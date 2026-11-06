@@ -5,7 +5,7 @@ import { Portal } from "../../components/Portal";
 import { PHONE_QUERY, useMediaQuery } from "../../components/useMediaQuery";
 import { useDialog } from "../../components/useDialog";
 import { usePlanner, useStore } from "../../store/context";
-import { CannotMoveSeries, deleteOccurrence, duplicateOccurrence, editOccurrence, type Scope } from "../../store/eventScope";
+import { CannotMoveSeries, undoableEvents, deleteOccurrence, duplicateOccurrence, editOccurrence, type Scope } from "../../store/eventScope";
 import { expandEvents, repeatLabel, type Occurrence } from "../../store/occurrences";
 import type { Person, Response } from "../../store/types";
 import { REMINDERS, REPEAT_CHOICES, RESPONSE_LABELS, choiceOf, parsePeople, ruleOf, type RepeatChoice } from "./eventForm";
@@ -49,8 +49,9 @@ function Panel({ occ }: { occ: Occurrence }) {
 
   const save = (scope: Scope) => {
     let created: ReturnType<typeof editOccurrence>;
+    let undo: (() => void) | undefined;
     try {
-      created = editOccurrence(store, occ, scope, {
+      const done = undoableEvents(store, () => editOccurrence(store, occ, scope, {
         title: title.trim(),
         allDay,
         start,
@@ -62,7 +63,10 @@ function Panel({ occ }: { occ: Occurrence }) {
         reminder,
         // Only a changed repeat is sent; the same one must not reset the dates skipped from it.
         repeat: repeat === initialRepeat ? undefined : ruleOf(repeat),
-      });
+      }));
+      created = done.result;
+      // A change that reached a series (this one, this and following, all) can be taken back.
+      if (event.repeat) undo = done.undo;
     } catch (e) {
       // A move the repeat cannot say: nothing was changed, and the person is told why.
       setAsk(null);
@@ -72,7 +76,7 @@ function Panel({ occ }: { occ: Occurrence }) {
     setAsk(null);
     setSaveError(null);
     ui.openEvent(created?.id ?? event.id, startDay);
-    ui.showToast("Event saved");
+    ui.showToast("Event saved", undo);
   };
 
   const remove = (scope: Scope) => {

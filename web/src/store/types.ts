@@ -223,6 +223,8 @@ export interface PlannerStore {
   getState(): PlannerState;
   readonly ready: Promise<void>;
   pendingChanges(): number;
+  /** The store's clock, as an ISO time: what stamps its changes. */
+  nowIso(): string;
 
   addTask(input: NewTask): Task;
   updateTask(id: string, patch: TaskPatch): void;

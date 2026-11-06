@@ -86,7 +86,7 @@ export function editTaskRepeat(store: PlannerStore, task: Task, edit: RepeatEdit
     const skipped = skip(series, currentDue);
     const upcoming = nextOnOrAfter(skipped, currentDue);
     // With no date left in the series, replacing this one finishes it.
-    store.updateTask(task.id, upcoming !== null ? { repeat: skipped, due: upcoming + timeOf(task.due) } : { repeat: skipped, done: true, completedAt: new Date().toISOString() });
+    store.updateTask(task.id, upcoming !== null ? { repeat: skipped, due: upcoming + timeOf(task.due) } : { repeat: skipped, done: true, completedAt: store.nowIso() });
     store.addTask({
       title: task.title,
       notes: task.notes,
@@ -135,4 +135,28 @@ function remaining(series: Series, currentDue: string, start: string): Series {
   if (end.type !== "count") return { start, repeat: { ...series.repeat }, skipped: [] };
   const used = countBefore(series, currentDue);
   return { start, repeat: { ...series.repeat, end: { type: "count", value: Math.max(end.value - used, 1) } }, skipped: [] };
+}
+
+/** The fields an undo puts back on a task. */
+const TASK_FIELDS = ["title", "notes", "listId", "due", "priority", "checklist", "projectId", "sectionId", "repeat", "reminder", "completions", "done", "completedAt", "overrideOf"] as const;
+
+/**
+ * Runs a change to tasks and returns how to undo it: tasks it changed go back to what they were
+ * (the due, the repeat and its skipped dates, whether it was done), and tasks it made are deleted.
+ */
+export function undoableTasks<T>(store: PlannerStore, run: () => T): { result: T; undo: () => void } {
+  const before = new Map(store.getState().tasks.map((t) => [t.id, t]));
+  const result = run();
+  const changed = store.getState().tasks.filter((t) => before.has(t.id) && JSON.stringify(before.get(t.id)) !== JSON.stringify(t));
+  const made = store.getState().tasks.filter((t) => !before.has(t.id));
+  return {
+    result,
+    undo: () => {
+      for (const t of made) store.deleteTask(t.id);
+      for (const t of changed) {
+        const was = before.get(t.id)!;
+        store.updateTask(t.id, Object.fromEntries(TASK_FIELDS.map((f) => [f, was[f]])));
+      }
+    },
+  };
 }

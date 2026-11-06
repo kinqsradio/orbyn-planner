@@ -21,6 +21,12 @@ export function shiftTo(event: Pick<CalendarEvent, "start" | "end" | "allDay">, 
   return { start: addWall(event.start, days), end: addWall(event.end, days) };
 }
 
+/**
+ * How many ranges are remembered per event. A calendar view asks for one or two ranges at a time and
+ * moves on, so a few are plenty; a larger cap only kept stale ones alive for every event.
+ */
+const MAX_RANGES = 8;
+
 const cache = new WeakMap<CalendarEvent, Map<string, Occurrence[]>>();
 
 /** The occurrences of one repeating event in a range, remembered per event and range. */
@@ -37,7 +43,7 @@ function repeating(event: CalendarEvent, from: string, to: string): Occurrence[]
     const { start, end } = shiftTo(event, date);
     if (lastDayOf(start, end, event.allDay) >= from) out.push({ event, date, start, end, allDay: event.allDay });
   }
-  if (ranges.size > 50) ranges.clear();
+  if (ranges.size >= MAX_RANGES) ranges.clear();
   ranges.set(key, out);
   return out;
 }
@@ -47,15 +53,15 @@ function repeating(event: CalendarEvent, from: string, to: string): Occurrence[]
  * that zone, a day either side of the range, and each is then converted to the viewer's time, so a
  * change of daylight saving in either place moves it correctly.
  */
-function zoned(event: CalendarEvent, from: string, to: string): Occurrence[] {
+function zoned(event: CalendarEvent, from: string, to: string, viewer: string): Occurrence[] {
   let ranges = zonedCache.get(event);
   if (!ranges) zonedCache.set(event, (ranges = new Map()));
   // Occurrences are in the viewer's time, so a change of the device's time zone must miss the cache.
-  const key = `${from}|${to}|${viewerZone()}`;
+  const key = `${from}|${to}|${viewer}`;
   const hit = ranges.get(key);
   if (hit) return hit;
   const out = zonedUncached(event, from, to);
-  if (ranges.size > 50) ranges.clear();
+  if (ranges.size >= MAX_RANGES) ranges.clear();
   ranges.set(key, out);
   return out;
 }
@@ -87,10 +93,12 @@ function zonedUncached(event: CalendarEvent, from: string, to: string): Occurren
 /** Every occurrence of the visible events that touches the days `from` to `to` (inclusive, `YYYY-MM-DD`), in start order. */
 export function expandEvents(events: readonly CalendarEvent[], from: string, to: string): Occurrence[] {
   const out: Occurrence[] = [];
+  // The device's time zone is read once for the whole expansion, not once per zoned event.
+  const viewer = viewerZone();
   for (const event of events) {
     if (event.deletedAt !== null) continue;
     if (event.zone && !event.allDay) {
-      out.push(...zoned(event, from, to));
+      out.push(...zoned(event, from, to, viewer));
     } else if (event.repeat) {
       out.push(...repeating(event, from, to));
     } else if (event.start.slice(0, 10) <= to && lastDayOf(event.start, event.end, event.allDay) >= from) {
