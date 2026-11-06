@@ -110,6 +110,8 @@ export interface SyncApi {
   trash(zone: string): string;
   takeFromTrash(zone: string, recordId: string): string | undefined;
   deleteZoneProof(zone: string): string;
+  /** Trusts a device the person checked another way (keys base64url). */
+  pinDevice(deviceId: string, signingKey: string, agreementKey: string): void;
 }
 
 /** The approval functions of the sync engine for one device (orbyn-wasm's `SyncEngine`). */

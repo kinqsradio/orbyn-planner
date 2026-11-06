@@ -23,15 +23,17 @@ export interface SyncState {
   zoneOf: Record<string, string>;
   /** Outbox entries already staged in the engine, by "type:id" -> idempotency key, so an entry is never staged twice. */
   staged: Record<string, string>;
+  /** The zone each staged entry was staged into, so the entry is cleared when that zone has nothing left to send. */
+  stagedZone: Record<string, string>;
   /** The trusted devices the zone keys were last sent to (sorted ids joined), so a new device gets them. */
   keysFor: string;
-  /** Records the engine could not open yet, by zone, for Settings. */
-  quarantined: Record<string, number>;
+  /** Ids of the records the engine could not open yet, by zone, for Settings. */
+  quarantined: Record<string, string[]>;
   /** ISO time of the last complete sync. */
   lastSyncedAt: string | null;
 }
 
-export const emptySyncState = (): SyncState => ({ zones: [], zoneOf: {}, staged: {}, keysFor: "", quarantined: {}, lastSyncedAt: null });
+export const emptySyncState = (): SyncState => ({ zones: [], zoneOf: {}, staged: {}, stagedZone: {}, keysFor: "", quarantined: {}, lastSyncedAt: null });
 
 /** The account and device the stored keys belong to. */
 export interface DeviceIdentity {

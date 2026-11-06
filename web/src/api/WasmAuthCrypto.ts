@@ -40,6 +40,7 @@ export interface WasmSyncEngine {
   trash(zone: string): string;
   takeFromTrash(zone: string, recordId: string): string | undefined;
   deleteZoneProof(zone: string): string;
+  pinDevice(deviceId: string, signingKey: string, agreementKey: string): void;
   verifyDevices(devicesJson: string): string;
   signRemoval(deviceJson: string): string;
   snapshot(wrapSecret: Uint8Array): Uint8Array;
@@ -101,6 +102,7 @@ function wasmApprovals(engine: WasmSyncEngine): ApprovalEngine {
       trash: (zone) => engine.trash(zone),
       takeFromTrash: (zone, id) => engine.takeFromTrash(zone, id) ?? undefined,
       deleteZoneProof: (zone) => engine.deleteZoneProof(zone),
+      pinDevice: (id, signing, agreement) => engine.pinDevice(id, signing, agreement),
     },
     free: () => engine.free(),
     snapshot: (wrapSecret) => engine.snapshot(wrapSecret),
