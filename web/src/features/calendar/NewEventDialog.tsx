@@ -18,12 +18,12 @@ export function NewEventDialog() {
   const ref = useRef<HTMLDivElement>(null);
   useDialog(ref, ui.closeNewEvent);
 
-  const nextHour = Math.min(now.getHours() + 1, 22);
+  const nextHour = ui.newEventTime ? Number(ui.newEventTime.slice(0, 2)) : Math.min(now.getHours() + 1, 22);
   const [title, setTitle] = useState("");
   const [allDay, setAllDay] = useState(false);
   const [day, setDay] = useState(ui.newEventDate || dateKey(now));
   const [startTime, setStartTime] = useState(`${pad(nextHour)}:00`);
-  const [endTime, setEndTime] = useState(`${pad(nextHour + 1)}:00`);
+  const [endTime, setEndTime] = useState(`${pad(Math.min(nextHour + 1, 23))}:00`);
   const writable = calendars.filter((c) => c.kind.type === "local");
   const [calendarId, setCalendarId] = useState(writable[0]?.id ?? "");
   const [repeat, setRepeat] = useState<RepeatChoice>("never");

@@ -433,3 +433,46 @@ describe("Monday to Friday and the weekend", () => {
     expect(document.querySelectorAll(".dh")).toHaveLength(5);
   });
 });
+
+describe("keyboard", () => {
+  it("Month: days are in rows, arrows move between them, Enter adds an event on that day", async () => {
+    await open({ seed: seedWeek });
+    await userEvent.click(screen.getByRole("radio", { name: "Month" }));
+    const grid = screen.getByRole("grid", { name: "Month" });
+    expect(within(grid).getAllByRole("row").length).toBeGreaterThanOrEqual(6);
+    expect(within(within(grid).getAllByRole("row")[1]!).getAllByRole("gridcell")).toHaveLength(7);
+    const today = document.querySelector('[data-day="2026-11-06"]') as HTMLElement;
+    expect(today).toHaveAttribute("tabindex", "0");
+    expect(document.querySelectorAll('[role="gridcell"][tabindex="0"]')).toHaveLength(1);
+    today.focus();
+    await userEvent.keyboard("{ArrowRight}");
+    expect(document.querySelector('[data-day="2026-11-07"]')).toHaveFocus();
+    await userEvent.keyboard("{ArrowDown}");
+    expect(document.querySelector('[data-day="2026-11-14"]')).toHaveFocus();
+    await userEvent.keyboard("{ArrowLeft}{ArrowUp}");
+    expect(document.querySelector('[data-day="2026-11-06"]')).toHaveFocus();
+    await userEvent.keyboard("{ArrowRight}{Enter}");
+    const dialog = screen.getByRole("dialog", { name: "New event" });
+    expect(within(dialog).getByLabelText("When")).toHaveValue("2026-11-07");
+  });
+
+  it("Week: a focused hour slot takes Enter to add an event at that time", async () => {
+    await open();
+    const slot = document.querySelector('[data-slot="2026-11-06T14"]') as HTMLElement;
+    slot.focus();
+    expect(slot).toHaveAccessibleName(/Friday 6, 14:00/);
+    await userEvent.keyboard("{ArrowDown}");
+    expect(document.querySelector('[data-slot="2026-11-06T15"]')).toHaveFocus();
+    await userEvent.keyboard("{ArrowLeft}{Enter}");
+    const dialog = screen.getByRole("dialog", { name: "New event" });
+    expect(within(dialog).getByLabelText("When")).toHaveValue("2026-11-05");
+    expect(within(dialog).getByLabelText("Start time")).toHaveValue("15:00");
+    expect(within(dialog).getByLabelText("End time")).toHaveValue("16:00");
+  });
+
+  it("Week: clicking a slot also adds an event there", async () => {
+    await open();
+    await userEvent.click(document.querySelector('[data-slot="2026-11-04T10"]') as HTMLElement);
+    expect(within(screen.getByRole("dialog", { name: "New event" })).getByLabelText("Start time")).toHaveValue("10:00");
+  });
+});

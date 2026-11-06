@@ -415,3 +415,5 @@ button.pillx { border: 0; }
 .feed-status { display: flex; gap: 8px; align-items: baseline; padding: 0 0 8px 14px; font-size: 12px; flex-wrap: wrap; }
 .red-text { color: var(--red); font-weight: 500; }
 .kv label { font-size: inherit; color: inherit; }
+.month-row { display: contents; }
+.md:focus-visible, .slot:focus-visible { outline: 2px solid var(--t1); outline-offset: -2px; }

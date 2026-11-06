@@ -25,7 +25,9 @@ interface Ui {
   closeEvent: () => void;
   /** The day a new event starts on, while the New event dialog is open. */
   newEventDate: string | null;
-  openNewEvent: (date?: string) => void;
+  /** The hour a new event starts at (`HH:00`), when it was started from a time slot. */
+  newEventTime: string | null;
+  openNewEvent: (date?: string, time?: string) => void;
   closeNewEvent: () => void;
   calendarsOpen: boolean;
   openCalendars: () => void;
@@ -50,6 +52,7 @@ export function UiProvider({ children }: { children: ReactNode }) {
   const [taskId, setTaskId] = useState<string | null>(null);
   const [eventKey, setEventKey] = useState<EventKey | null>(null);
   const [newEventDate, setNewEventDate] = useState<string | null>(null);
+  const [newEventTime, setNewEventTime] = useState<string | null>(null);
   const [calendarsOpen, setCalendarsOpen] = useState(false);
   const [listId, setListId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -77,7 +80,11 @@ export function UiProvider({ children }: { children: ReactNode }) {
       },
       closeEvent: () => setEventKey(null),
       newEventDate,
-      openNewEvent: (date?: string) => setNewEventDate(date ?? ""),
+      newEventTime,
+      openNewEvent: (date?: string, time?: string) => {
+        setNewEventTime(time ?? null);
+        setNewEventDate(date ?? "");
+      },
       closeNewEvent: () => setNewEventDate(null),
       calendarsOpen,
       openCalendars: () => setCalendarsOpen(true),
@@ -94,7 +101,7 @@ export function UiProvider({ children }: { children: ReactNode }) {
       showToast,
       dismissToast,
     }),
-    [taskId, eventKey, newEventDate, calendarsOpen, listId, newTaskOpen, searchOpen, toast, showToast, dismissToast],
+    [taskId, eventKey, newEventDate, newEventTime, calendarsOpen, listId, newTaskOpen, searchOpen, toast, showToast, dismissToast],
   );
   return <UiContext.Provider value={value}>{children}</UiContext.Provider>;
 }

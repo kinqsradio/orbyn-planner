@@ -61,7 +61,7 @@ const formatters = new Map<string, Intl.DateTimeFormat | null>();
 
 function formatterFor(zone: string): Intl.DateTimeFormat | null {
   if (formatters.has(zone)) return formatters.get(zone)!;
-  let f: Intl.DateTimeFormat | null = null;
+  let f: Intl.DateTimeFormat | null;
   try {
     f = new Intl.DateTimeFormat("en-US", {
       timeZone: zone,
