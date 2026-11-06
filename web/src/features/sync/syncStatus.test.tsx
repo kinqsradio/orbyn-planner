@@ -76,6 +76,7 @@ describe("a zone no device can open", () => {
     expect(removeStranded).not.toHaveBeenCalled(); // asks first
     const ask = screen.getByRole("dialog", { name: "Delete on every device" });
     expect(ask).toHaveTextContent("Delete “this list” on every device? This can’t be undone.");
+    expect(ask).toHaveTextContent("Only do this if no other device of yours is signed in.");
     await userEvent.click(within(ask).getByRole("button", { name: "Cancel" }));
     expect(removeStranded).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "Remove it" }));

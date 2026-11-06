@@ -113,6 +113,7 @@ describe("a zone no device can open", () => {
     r.a.store.addTask({ title: "Passport", listId: trip.id });
     await sync(r.a);
     await r.a.keys.clearSnapshot();
+    await resendKeysAfterApproval(r.a.services); // approved again once since the reset (and then B was removed)
     // B is gone for good: the server lists no other trusted device either.
     const account = [...r.engine.accounts.values()][0]!;
     account.devices = account.devices.filter((d) => d.id !== r.b.id);
@@ -211,5 +212,59 @@ describe("three devices: a re-approval makes every trusted device resend the key
     expect(titles(r.c)).toContain("Added to Mine after recovery");
     expect(titles(r.c)).toContain("A's unsent edit"); // and A's outbox went up
     expect((await sync(r.a)).needsApproval).toBe(false);
+  });
+});
+
+describe("a server can't make a reset device look like the account's only device", () => {
+  it("with the other devices hidden from the list, a reset device still says it must be approved again, and offers no Remove", async () => {
+    const r = await createSyncRig();
+    const trip = r.a.store.addList("Trip", "c3");
+    r.a.store.addTask({ title: "Passport", listId: trip.id });
+    await sync(r.a);
+    await sync(r.b);
+    await r.a.keys.clearSnapshot(); // A's engine is reset
+    const account = [...r.engine.accounts.values()][0]!;
+    account.devices = account.devices.filter((d) => d.id !== r.b.id); // and the server hides B: both views now show nobody else
+    const report = await sync(r.a);
+    expect(report.stranded).toEqual([]);
+    expect(report.needsApproval).toBe(true);
+    expect((await r.a.keys.loadSyncState())?.reset).toBe(true); // persisted
+    // Once this device has been approved again (an approval completed here), the flag ends.
+    await resendKeysAfterApproval(r.a.services);
+    expect((await r.a.keys.loadSyncState())?.reset).toBe(false);
+    expect((await sync(r.a)).stranded).toContain(`list:${trip.id}`);
+  });
+});
+
+describe("keys are resent for a changed approval at most once per value and once per ten minutes", () => {
+  it("a server that changes approval_id on every poll doesn't make every pass resend every key", async () => {
+    const r = await createSyncRig();
+    r.a.store.addTask({ title: "Seed" });
+    for (const d of [r.a, r.b, r.a, r.b]) await sync(d);
+    const real = r.engine.fetch;
+    let sends = 0;
+    r.engine.fetch = (async (url: string, init?: RequestInit) => {
+      if (init?.method === "POST" && String(url).endsWith("/v1/keychain/envelopes")) sends++;
+      return real(url, init);
+    }) as typeof fetch;
+    const flip = (n: number) => void (r.a.device.approval_id = `00000000-0000-4000-8000-0000000000${(10 + n).toString(16)}`);
+    flip(1);
+    await sync(r.b);
+    const first = sends;
+    expect(first).toBeGreaterThan(0); // the first change is acted on
+    for (let i = 2; i <= 6; i++) {
+      flip(i);
+      r.clock.now += 30_000;
+      await sync(r.b);
+    }
+    expect(sends).toBe(first); // five more flips within ten minutes: nothing more is sent
+    flip(7);
+    r.clock.now += 11 * 60_000;
+    await sync(r.b);
+    expect(sends).toBeGreaterThan(first); // after ten minutes the latest change is acted on
+    const after = sends;
+    await sync(r.b); // the same value again: once per value
+    expect(sends).toBe(after);
+    r.engine.fetch = real;
   });
 });

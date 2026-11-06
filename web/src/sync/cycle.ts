@@ -276,12 +276,23 @@ export async function runCycle(
   // A device that was approved again (it lost its saved state and holds no keys) is in the trusted set already, so the
   // set didn't change. Its approval did: every trusted device then sends it every zone key it holds, not just the approver.
   state.approvals ??= {};
+  state.resentAt ??= {};
   let reapproved = false;
   for (const d of devices.devices) {
     if (d.state !== "trusted" || d.id === session.deviceId) continue;
     const marker = d.approval_id ?? d.approval_signature ?? "";
-    if (state.approvals[d.id] !== undefined && state.approvals[d.id] !== marker) reapproved = true;
-    state.approvals[d.id] = marker;
+    const seen = state.approvals[d.id];
+    if (seen === undefined) {
+      state.approvals[d.id] = marker;
+    } else if (seen !== marker) {
+      // At most once per ten minutes per device, so a server that changes the value on every poll can't make every pass resend
+      // every key. A throttled change is not recorded, so it is acted on once the ten minutes are up.
+      if (now() - (state.resentAt[d.id] ?? 0) >= RESEND_EVERY_MS) {
+        reapproved = true;
+        state.resentAt[d.id] = now();
+        state.approvals[d.id] = marker;
+      }
+    }
   }
   if (reapproved) state.keysSent = {};
   const envelopes = await api.keyEnvelopes();
@@ -533,7 +544,9 @@ export async function runCycle(
   // server's list show no other trusted device can nobody hold a key, and a zone it can't open is stranded.
   const othersInView = [...verified].some((id) => id !== session.deviceId);
   const othersOnServer = devices.devices.some((d) => d.state === "trusted" && d.id !== session.deviceId);
-  if (!othersInView && othersOnServer) {
+  if (!othersInView && (othersOnServer || state.reset)) {
+    // A device whose saved state was reset says so until it has been approved again once, whatever the server's list shows: a
+    // server that hides the others must not be able to make this look like the account's only device.
     report.needsApproval = true;
     report.waitingForKeys = [];
   } else if (!othersInView && !othersOnServer) {
@@ -546,6 +559,9 @@ export async function runCycle(
   if (transient !== null) throw transient;
   return report;
 }
+
+/** A device whose approval changed gets the keys again at most this often (unless an approval completed on this device). */
+const RESEND_EVERY_MS = 10 * 60 * 1000;
 
 const STORE_KEY = { task: "tasks", list: "lists", event: "events", calendar: "calendars", project: "projects" } as const satisfies Record<RecordType, string>;
 

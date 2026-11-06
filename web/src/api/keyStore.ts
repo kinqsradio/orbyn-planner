@@ -29,6 +29,10 @@ export interface SyncState {
   keysSent: Record<string, string>;
   /** Zones this device made (or chose to make) the key for, so a crash between making a zone and its key can't strand it. */
   made: Record<string, true>;
+  /** True from the moment the engine's snapshot was dropped or replaced until this device has been approved again once: nothing is called stranded, and no delete is offered, while it is true. */
+  reset?: boolean;
+  /** When (ms) every key was last resent because a device's approval changed, per device: at most once in ten minutes unless an approval completed here. */
+  resentAt: Record<string, number>;
   /** Per other trusted device, the approval it was last seen with (its `approval_id`): a change means it was approved again, and every zone key is sent to it again. */
   approvals: Record<string, string>;
   /** Records that can't be sent, by "type:id", with why (too large, say): left out of uploads and shown. */
@@ -43,10 +47,10 @@ export interface SyncState {
 
 /** What only the engine's snapshot can vouch for. Dropping or replacing the snapshot makes it untrue. */
 export function withoutEngineSide(state: SyncState): SyncState {
-  return { ...state, staged: {}, stagedZone: {}, keysSent: {}, made: {}, quarantined: {} };
+  return { ...state, staged: {}, stagedZone: {}, keysSent: {}, made: {}, quarantined: {}, reset: true };
 }
 
-export const emptySyncState = (): SyncState => ({ zones: [], zoneOf: {}, staged: {}, stagedZone: {}, keysSent: {}, made: {}, approvals: {}, failed: {}, backoff: {}, quarantined: {}, lastSyncedAt: null });
+export const emptySyncState = (): SyncState => ({ zones: [], zoneOf: {}, staged: {}, stagedZone: {}, keysSent: {}, made: {}, approvals: {}, resentAt: {}, failed: {}, backoff: {}, quarantined: {}, lastSyncedAt: null });
 
 /** The account and device the stored keys belong to. */
 export interface DeviceIdentity {
