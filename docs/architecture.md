@@ -67,15 +67,31 @@ Accounts, device keys and the sync engine's saved state run on orbyn-engine's `o
 
 `src/e2e/engine.e2e.test.ts` signs up, signs in on a second device, pairs with the digits compared by the test, removes a device, and checks a cancel and a refusal, all against a real engine with the real module. It runs only when `ORBYN_E2E_ENGINE` is set.
 
+The **End to end** job in `.github/workflows/ci.yml` runs it on every pull request, as a check like the others (`timeout-minutes: 20`). It checks out `kinqsradio/orbyn-engine` at the commit in `web/src/generated/wasm/manifest.json` (refused unless it is 40 hex characters, as in the Wasm package job), so the engine under test is the one the committed module was built from. It then:
+
+1. builds the engine's Docker image (`docker compose build`);
+2. removes any volume (`docker compose down --volumes`), so the database is made fresh for the run, and makes `ORBYN_AUTH_SETUP` with `orbyn auth-setup` inside the image (masked in the log);
+3. starts `postgres`, `migrate`, `server` and `worker`, deletes the rows of `auth_attempts` (already empty on a fresh database; it keeps a repeated run on a reused one under the sign-up limit), and waits up to two minutes for `/health`;
+4. runs `npx vitest run src/e2e --no-file-parallelism` with `ORBYN_E2E_ENGINE=http://127.0.0.1:8080` (one file at a time: run in parallel against one engine, pairings occasionally time out; the cause is not yet known);
+5. on failure, uploads `docker compose logs` as the `e2e-compose-logs` artifact; always, stops the stack and removes its volume.
+
+To run the same thing locally, check the engine out at the pinned commit (`git -C ../orbyn-engine worktree add --detach /tmp/engine-pin $(node -p "require('./src/generated/wasm/manifest.json').engine")`, from `web/`), then:
+
 ```bash
-cd ../orbyn-engine
+cd /tmp/engine-pin
+docker compose down --volumes --remove-orphans      # a fresh database
 docker compose build
 SETUP=$(docker compose run --rm server auth-setup | tail -1)
-ORBYN_AUTH_SETUP="$SETUP" docker compose up -d
-cd ../orbyn-planner/web
-ORBYN_E2E_ENGINE=http://localhost:8080 npx vitest run src/e2e --no-file-parallelism
+ORBYN_AUTH_SETUP="$SETUP" docker compose up -d postgres migrate server worker
+docker compose exec -T postgres psql -U orbyn -d orbyn -c "delete from auth_attempts"
+curl -fsS http://127.0.0.1:8080/health
+cd <planner>/web
+ORBYN_E2E_ENGINE=http://127.0.0.1:8080 npx vitest run src/e2e --no-file-parallelism
+docker compose down --volumes                       # in the engine checkout
 ```
 The files run one after the other: both pair devices from one address, and run together they intermittently time out waiting for a pairing to finish. Each run makes three accounts, and the engine allows 20 sign-ups an hour per address. If a run answers "Too many attempts", clear the window: `docker compose exec -T postgres psql -U orbyn -d orbyn -c "delete from auth_attempts"`.
+
+The compose file publishes Postgres on 5432 and the server on 8080, so another engine stack on the machine is in the way. Put a `compose.override.yaml` beside the checkout's `compose.yaml` that moves the ports (`ports: !reset []` for `postgres`, `ports: !override ["127.0.0.1:18080:8080"]` for `server`) and give every service of `orbyn-engine:dev` another `image:` so the build does not replace your own, set `COMPOSE_PROJECT_NAME` to another name, and point `ORBYN_E2E_ENGINE` at the new port. Each run makes a few accounts and the engine allows 20 sign-ups an hour per address; if a run on a reused database answers "Too many attempts", the `delete from auth_attempts` line above clears the window.
 
 ## Record sync
 
