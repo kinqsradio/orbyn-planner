@@ -373,3 +373,14 @@ describe("Today with events", () => {
     expect(screen.getByRole("complementary", { name: "Event" })).toBeInTheDocument();
   });
 });
+
+describe("after Undo of a deleted event", () => {
+  it("focus returns to the restored event", async () => {
+    await open({ seed: seedWeek });
+    await userEvent.click(screen.getByRole("button", { name: /Lunch with Maya/ }));
+    await userEvent.click(within(screen.getByRole("complementary", { name: "Event" })).getByRole("button", { name: "Delete" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Undo" }));
+    const back = await screen.findByRole("button", { name: /Lunch with Maya/ });
+    await waitFor(() => expect(back).toHaveFocus());
+  });
+});

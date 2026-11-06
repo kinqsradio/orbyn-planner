@@ -8,6 +8,8 @@ export interface ToastState {
   undo?: () => void;
   /** Move focus to Undo when it appears, for a change that took the focused thing away. */
   focusUndo?: boolean;
+  /** After Undo, move focus to the row with this id (see lib/focus.ts). */
+  focusRowOnUndo?: string;
 }
 
 export interface EventKey {
@@ -41,7 +43,7 @@ interface Ui {
   openSearch: () => void;
   closeSearch: () => void;
   toast: ToastState | null;
-  showToast: (message: string, undo?: () => void, options?: { focusUndo?: boolean }) => void;
+  showToast: (message: string, undo?: () => void, options?: { focusUndo?: boolean; focusRowOnUndo?: string }) => void;
   dismissToast: () => void;
 }
 
@@ -59,8 +61,8 @@ export function UiProvider({ children }: { children: ReactNode }) {
   const [newTaskDefaults, setNewTaskDefaults] = useState<{ projectId?: string | null; sectionId?: string | null }>({});
   const [toast, setToast] = useState<ToastState | null>(null);
 
-  const showToast = useCallback((message: string, undo?: () => void, options?: { focusUndo?: boolean }) => {
-    setToast({ id: ++toastCounter, message, undo, focusUndo: options?.focusUndo });
+  const showToast = useCallback((message: string, undo?: () => void, options?: { focusUndo?: boolean; focusRowOnUndo?: string }) => {
+    setToast({ id: ++toastCounter, message, undo, focusUndo: options?.focusUndo, focusRowOnUndo: options?.focusRowOnUndo });
   }, []);
   const dismissToast = useCallback(() => setToast(null), []);
 

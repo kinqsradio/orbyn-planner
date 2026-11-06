@@ -187,3 +187,13 @@ describe("checklist order", () => {
     expect(shown.filter((l) => ["first", "second", "third"].includes(l!))).toEqual(["first", "second", "third"]);
   });
 });
+
+describe("after Undo", () => {
+  it("focus returns to the restored row", async () => {
+    await open();
+    await userEvent.click(within(screen.getByRole("complementary", { name: "Task" })).getByRole("button", { name: "Delete" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Undo" }));
+    const row = await screen.findByRole("button", { name: "water plants" });
+    await waitFor(() => expect(row).toHaveFocus());
+  });
+});

@@ -66,7 +66,7 @@ function BoardCard({ task }: { task: Task }) {
   const now = useNow();
   const list = lists.find((l) => l.id === task.listId);
   return (
-    <li className="tcard" data-done={task.done}>
+    <li className="tcard" data-row-id={task.id} data-done={task.done}>
       <button type="button" className="tt link-btn" onClick={open}>{task.title}</button>
       <span className="m">
         {list && <Swatch colour={list.colour} />}

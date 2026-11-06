@@ -54,7 +54,7 @@ export function TaskRow({ task, layout = "tasks", extra }: { task: Task; layout?
   const columns = layout === "tasks" ? TASKS_COLS : layout === "list" ? LIST_COLS : "22px minmax(0,1fr) 140px 120px";
 
   return (
-    <li className={`tr ${layout}${task.done ? " done" : ""}`} style={{ gridTemplateColumns: columns }} data-done={task.done}>
+    <li className={`tr ${layout}${task.done ? " done" : ""}`} data-row-id={task.id} style={{ gridTemplateColumns: columns }} data-done={task.done}>
       <span><Check task={task} /></span>
       <button type="button" className="tt link-btn" onClick={open}>{task.title}</button>
       {layout === "tasks" && (
@@ -94,7 +94,7 @@ export function TodayRow({ task, late, compact = false }: { task: Task; late?: n
   else meta = list && !list.isInbox ? list.name : (list?.name ?? "");
 
   return (
-    <li className={task.done ? "row done" : "row"} data-done={task.done} style={compact ? { gridTemplateColumns: "16px minmax(0,1fr) auto" } : undefined}>
+    <li className={task.done ? "row done" : "row"} data-row-id={task.id} data-done={task.done} style={compact ? { gridTemplateColumns: "16px minmax(0,1fr) auto" } : undefined}>
       {!compact && <span className="time">{time}</span>}
       <Check task={task} />
       <button type="button" className="what link-btn" onClick={open}>{task.title}</button>

@@ -35,7 +35,7 @@ export function MonthView({ days, anchor, occurrences, today, weekStart, onDay }
           <div className={classes} role="gridcell" key={day} data-day={day}>
             <button type="button" className="n" aria-label={`${date.getDate()} ${WEEKDAYS[date.getDay()]}`} onClick={() => onDay(day)}>{date.getDate()}</button>
             {here.slice(0, MAX_CHIPS).map((o) => (
-              <button key={`${o.event.id}-${o.date}-${day}`} type="button" className="chipx" onClick={() => ui.openEvent(o.event.id, o.date)}>
+              <button key={`${o.event.id}-${o.date}-${day}`} type="button" data-row-id={o.event.id} className="chipx" onClick={() => ui.openEvent(o.event.id, o.date)}>
                 <span className="sw" style={{ background: colourOf(calendars, o.event) }} aria-hidden="true" />
                 {o.event.title}
               </button>

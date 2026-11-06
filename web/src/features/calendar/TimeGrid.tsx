@@ -108,6 +108,7 @@ export function TimeGrid({ days, occurrences, today, now, mode }: { days: string
                     <button
                       key={`${o.event.id}-${o.date}`}
                       type="button"
+                      data-row-id={o.event.id}
                       className={p.overlaps ? "ev clash" : "ev"}
                       aria-current={ui.eventKey?.id === o.event.id && ui.eventKey.date === o.date ? "true" : undefined}
                       style={{

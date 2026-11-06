@@ -24,6 +24,7 @@ export function useComplete() {
         if (after.done) store.setDone(task.id, false);
         store.updateTask(task.id, { due: before.due, completions: before.completions });
       },
+      { focusRowOnUndo: task.id },
     );
   };
 }

@@ -36,6 +36,7 @@ export function AgendaView({ days, occurrences, today }: { days: string[]; occur
               return (
                 <li
                   className="row"
+                  data-row-id={o.event.id}
                   key={`${o.event.id}-${o.date}-${g.day}`}
                   style={ui.eventKey?.id === o.event.id && ui.eventKey.date === o.date ? { background: "var(--sel)", borderRadius: 8, padding: "0 8px" } : undefined}
                 >

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { TOAST_MS, useUi, type ToastState } from "../app/ui";
+import { focusRow } from "../lib/focus";
 
 /** One toast. Its timer waits while the pointer or focus is on it, so there is time to reach Undo. */
 function ToastBody({ toast, dismiss }: { toast: ToastState; dismiss: () => void }) {
@@ -35,6 +36,7 @@ function ToastBody({ toast, dismiss }: { toast: ToastState; dismiss: () => void 
           onClick={() => {
             toast.undo?.();
             dismiss();
+            if (toast.focusRowOnUndo) focusRow(toast.focusRowOnUndo);
           }}
         >
           Undo

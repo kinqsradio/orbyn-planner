@@ -22,7 +22,7 @@ function EventRow({ occ }: { occ: Occurrence }) {
   const ui = useUi();
   const meta = ["Event", occ.event.place].filter(Boolean).join(" · ");
   return (
-    <li className="row">
+    <li className="row" data-row-id={occ.event.id}>
       <span className="time">{occ.allDay ? "All day" : formatTime(parseDue(occ.start).date)}</span>
       <span className="sw" style={{ background: colourOf(calendars, occ.event) }} aria-hidden="true" />
       <button type="button" className="what link-btn" onClick={() => ui.openEvent(occ.event.id, occ.date)}>{occ.event.title}</button>
