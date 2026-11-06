@@ -1,4 +1,7 @@
+import type { ApprovalNonce } from "../../generated/ApprovalNonce";
+import type { ConfirmApproval } from "../../generated/ConfirmApproval";
 import type { CreateApproval } from "../../generated/CreateApproval";
+import type { PendingApproval } from "../../generated/PendingApproval";
 import type { Device } from "../../generated/Device";
 import type { LoginFinish } from "../../generated/LoginFinish";
 import type { LoginStart } from "../../generated/LoginStart";
@@ -6,17 +9,16 @@ import type { RegisterFinish } from "../../generated/RegisterFinish";
 import type { RegisterStart } from "../../generated/RegisterStart";
 import { decodeBytes, encodeBytes, utf8 } from "../bytes";
 import {
-  DEVICE_APPROVAL_CONTEXT,
   DEVICE_LOGIN_CONTEXT,
   DEVICE_REGISTER_CONTEXT,
   TRUSTED_START_CONTEXT,
-  approvalMessage,
   loginMessage,
   normalizeEmail,
   registerMessage,
   trustedStartMessage,
 } from "./authMessages";
 import { fakeVerify } from "./FakeAuthCrypto";
+import { fakeCommitment, fakeSas, pairingBytes, partsOfView } from "./fakePairing";
 
 /** A recorded request, for tests to look at. */
 export interface Call {
@@ -32,12 +34,19 @@ interface Account {
   verifier: Uint8Array;
   devices: Device[];
 }
+/** An approval as the server holds it: the fields each step adds, in order. */
 interface Approval {
   id: string;
-  deviceId: string;
   accountId: string;
-  code: string;
-  left: number;
+  approverId: string;
+  deviceId: string;
+  createdAt: number;
+  expiresAt: number;
+  commitment: string;
+  deviceNonce: string | null;
+  approverNonce: string | null;
+  signature: string | null;
+  endorsement: string | null;
   closed: boolean;
 }
 
@@ -57,7 +66,7 @@ export function createMockEngine(now: () => number = () => Date.now()) {
   const calls: Call[] = [];
   /** Refuse the next calls to a path (or a path prefix) with this error: `refuseNext("/v1/sessions/login/start", 429, "too_many_attempts")`. */
   const refusals: { path: string; status: number; code: string; message: string; times: number }[] = [];
-  const state = { codes: ["418207", "530011", "999123"], attemptsPerEmail: new Map<string, number>(), trustedProofs: 0 };
+  const state = { attemptsPerEmail: new Map<string, number>(), trustedProofs: 0 };
 
   const json = (status: number, body: unknown) => new Response(status === 204 ? null : JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   const fail = (status: number, code: string, message: string) => json(status, { code, message });
@@ -176,26 +185,60 @@ export function createMockEngine(now: () => number = () => Date.now()) {
       for (const [t, s] of sessions) if (s.deviceId === device.id && authorization?.endsWith(t)) sessions.delete(t);
       return json(204, null);
     }
+    const open = (a: Approval | undefined) => (a && !a.closed && now() <= a.expiresAt ? a : undefined);
+    const keysOf = (id: string) => account.devices.find((d) => d.id === id)!;
+    const viewOf = (a: Approval): PendingApproval => {
+      const approver = keysOf(a.approverId);
+      const target = keysOf(a.deviceId);
+      return {
+        id: a.id, expires_at: new Date(a.expiresAt).toISOString(), created_at: a.createdAt, approver_id: approver.id, approver_signing_key: approver.signing_key,
+        approver_agreement_key: approver.agreement_key, device_id: target.id, device_signing_key: target.signing_key, device_agreement_key: target.agreement_key,
+        commitment: a.commitment, device_nonce: a.deviceNonce, approver_nonce: a.approverNonce, signature: a.signature, endorsement: a.endorsement,
+      };
+    };
+    const approvalOf = (p: string) => approvals.get(p.split("/")[4]!);
+
     if (method === "GET" && path === "/v1/devices/current") {
-      const approval = [...approvals.values()].find((a) => a.deviceId === device.id && !a.closed);
-      return json(200, { device: view(device), approval: approval ? { id: approval.id, expires_at: new Date(now() + 600_000).toISOString() } : null });
+      const approval = [...approvals.values()].find((a) => a.deviceId === device.id && open(a));
+      return json(200, { device: view(device), approval: approval ? viewOf(approval) : null });
+    }
+    if (method === "GET" && /^\/v1\/devices\/approvals\/[^/]+$/.test(path)) {
+      const a = approvalOf(path);
+      if (!a || (a.approverId !== device.id && a.deviceId !== device.id)) return fail(404, "not_found", "Not found.");
+      return open(a) ? json(200, viewOf(a)) : fail(410, "approval_expired", "The approval has expired.");
+    }
+    if (method === "POST" && /^\/v1\/devices\/approvals\/[^/]+\/nonce$/.test(path)) {
+      const a = approvalOf(path);
+      if (!a || a.deviceId !== device.id) return fail(404, "not_found", "Not found.");
+      if (!open(a)) return fail(410, "approval_expired", "The approval has expired.");
+      if (a.deviceNonce || a.approverNonce) return fail(409, "approval_out_of_order", "That step was already done.");
+      a.deviceNonce = (body as ApprovalNonce).nonce;
+      return json(204, null);
+    }
+    if (method === "POST" && /^\/v1\/devices\/approvals\/[^/]+\/cancel$/.test(path)) {
+      const a = approvalOf(path);
+      if (!a || (a.approverId !== device.id && a.deviceId !== device.id)) return fail(404, "not_found", "Not found.");
+      a.closed = true;
+      return json(204, null);
     }
     if (method === "POST" && /^\/v1\/devices\/approvals\/[^/]+\/code$/.test(path)) {
-      const approval = approvals.get(path.split("/")[4]!);
-      if (!approval || approval.deviceId !== device.id || approval.closed) return fail(410, "approval_expired", "The approval has expired.");
-      if ((body as { code: string }).code !== approval.code) {
-        approval.left -= 1;
-        if (approval.left <= 0) approval.closed = true;
-        return fail(400, "wrong_code", `The code is wrong. Attempts left: ${approval.left}.`);
-      }
+      const a = approvalOf(path);
+      if (!a || a.deviceId !== device.id || !open(a)) return fail(410, "approval_expired", "The approval has expired.");
+      if (!a.signature || !a.approverNonce || !a.deviceNonce) return fail(409, "approval_not_confirmed", "The approver has not confirmed yet.");
+      // One try: the server computes the digits from the public values and closes the approval either way.
+      const v = viewOf(a);
+      const sas = fakeSas(pairingBytes(partsOfView(account.id, v)), decodeBytes(a.approverNonce), decodeBytes(a.deviceNonce));
+      a.closed = true;
+      if ((body as { code: string }).code !== sas) return fail(400, "wrong_code", "The code is wrong. Attempts left: 0.");
       device.state = "trusted";
-      approval.closed = true;
+      device.approved_by = a.approverId;
+      device.approval_signature = a.signature;
       return json(200, view(device));
     }
 
     if (device.state !== "trusted") return fail(403, "device_not_trusted", "This device is not trusted.");
 
-    if (method === "GET" && path === "/v1/devices") return json(200, { devices: account.devices.map(view) });
+    if (method === "GET" && path === "/v1/devices") return json(200, { devices: account.devices.map(view), removals: [] });
     if (method === "DELETE" && path === "/v1/sessions") {
       for (const [t, s] of sessions) if (s.accountId === account.id) sessions.delete(t);
       return json(204, null);
@@ -204,12 +247,37 @@ export function createMockEngine(now: () => number = () => Date.now()) {
       const b = body as CreateApproval;
       const pending = account.devices.find((d) => d.id === b.device_id && d.state === "pending");
       if (!pending) return fail(404, "not_found", "Not found.");
-      if (!fakeVerify(decodeBytes(device.signing_key), DEVICE_APPROVAL_CONTEXT, approvalMessage(account.id, pending.id, publicKeys(pending)), decodeBytes(b.signature))) {
-        return fail(400, "invalid_signature", "The signature is not valid.");
-      }
-      const approval: Approval = { id: uuid(), deviceId: pending.id, accountId: account.id, code: state.codes.shift() ?? "000000", left: 5, closed: false };
+      if (Math.abs(now() / 1000 - b.created_at) > 300) return fail(400, "invalid_request", "The time is too far from the server's.");
+      if (approvals.has(b.approval_id)) return fail(409, "invalid_request", "That approval id was used.");
+      const approval: Approval = {
+        id: b.approval_id, accountId: account.id, approverId: device.id, deviceId: pending.id, createdAt: b.created_at, expiresAt: now() + 600_000,
+        commitment: b.commitment, deviceNonce: null, approverNonce: null, signature: null, endorsement: null, closed: false,
+      };
       approvals.set(approval.id, approval);
-      return json(201, { id: approval.id, code: approval.code, expires_at: new Date(now() + 600_000).toISOString() });
+      return json(201, { id: approval.id, expires_at: new Date(approval.expiresAt).toISOString() });
+    }
+    if (method === "POST" && /^\/v1\/devices\/approvals\/[^/]+\/reveal$/.test(path)) {
+      const a = approvalOf(path);
+      if (!a || a.approverId !== device.id) return fail(404, "not_found", "Not found.");
+      if (!open(a)) return fail(410, "approval_expired", "The approval has expired.");
+      if (!a.deviceNonce || a.approverNonce) return fail(409, "approval_out_of_order", "That step is not next.");
+      const nonce = (body as ApprovalNonce).nonce;
+      const pairing = pairingBytes(partsOfView(account.id, viewOf(a)));
+      if (encodeBytes(fakeCommitment(pairing, decodeBytes(nonce))) !== a.commitment) {
+        a.closed = true;
+        return fail(400, "invalid_commitment", "That nonce does not match the commitment.");
+      }
+      a.approverNonce = nonce;
+      return json(204, null);
+    }
+    if (method === "POST" && /^\/v1\/devices\/approvals\/[^/]+\/confirm$/.test(path)) {
+      const a = approvalOf(path);
+      if (!a || a.approverId !== device.id) return fail(404, "not_found", "Not found.");
+      if (!open(a)) return fail(410, "approval_expired", "The approval has expired.");
+      if (!a.approverNonce || a.signature) return fail(409, "approval_out_of_order", "That step is not next.");
+      a.signature = (body as ConfirmApproval).signature;
+      a.endorsement = (body as ConfirmApproval).endorsement ?? null;
+      return json(204, null);
     }
     if (method === "DELETE" && /^\/v1\/devices\/[^/]+$/.test(path)) {
       const target = account.devices.find((d) => d.id === path.split("/")[3]);

@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { concat, utf8 } from "./bytes";
 import {
-  DEVICE_APPROVAL_CONTEXT,
   DEVICE_LOGIN_CONTEXT,
   DEVICE_REGISTER_CONTEXT,
   TRUSTED_START_CONTEXT,
-  approvalMessage,
   loginMessage,
   normalizeEmail,
   registerMessage,
@@ -22,10 +20,9 @@ const uuidB = "00000000-0000-4000-8000-000000000002";
 
 describe("device messages (as orbyn-auth-client builds them)", () => {
   it("the contexts are the engine's", () => {
-    expect([DEVICE_REGISTER_CONTEXT, DEVICE_LOGIN_CONTEXT, DEVICE_APPROVAL_CONTEXT, TRUSTED_START_CONTEXT]).toEqual([
+    expect([DEVICE_REGISTER_CONTEXT, DEVICE_LOGIN_CONTEXT, TRUSTED_START_CONTEXT]).toEqual([
       "orbyn/device-register/v1",
       "orbyn/device-login/v1",
-      "orbyn/device-approval/v1",
       "orbyn/trusted-login-start/v1",
     ]);
   });
@@ -36,10 +33,9 @@ describe("device messages (as orbyn-auth-client builds them)", () => {
     expect(message).toEqual(concat(be(2), utf8("ab"), be(1), new Uint8Array([99]), a.signing, a.agreement));
   });
 
-  it("login and approval: raw ids then keys", () => {
+  it("login: the raw id then keys", () => {
     expect(loginMessage(uuidA, a)).toHaveLength(16 + 64);
     expect(Array.from(loginMessage(uuidA, a).slice(0, 16))).toEqual([0, 0, 0, 0, 0, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 0, 0, 1]);
-    expect(approvalMessage(uuidA, uuidB, a)).toHaveLength(16 + 16 + 64);
   });
 
   it("trusted start ends with the time as eight bytes, big endian", () => {
@@ -48,8 +44,8 @@ describe("device messages (as orbyn-auth-client builds them)", () => {
   });
 
   it("every part is bound: changing any one changes the message", () => {
-    expect(approvalMessage(uuidA, uuidB, a)).not.toEqual(approvalMessage(uuidA, uuidB, b));
-    expect(approvalMessage(uuidA, uuidB, a)).not.toEqual(approvalMessage(uuidB, uuidA, a));
+    expect(loginMessage(uuidA, a)).not.toEqual(loginMessage(uuidA, b));
+    expect(loginMessage(uuidA, a)).not.toEqual(loginMessage(uuidB, a));
     expect(registerMessage("ab", utf8("c"), a)).not.toEqual(registerMessage("a", utf8("bc"), a));
     expect(trustedStartMessage("a@b.co", new Uint8Array([1]), 1)).not.toEqual(trustedStartMessage("a@b.co", new Uint8Array([1]), 2));
   });

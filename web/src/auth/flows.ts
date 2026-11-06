@@ -2,8 +2,6 @@ import { ApiFailure } from "../api/auth";
 import { isAuthFailed, type AuthCrypto, type DeviceKeys } from "../api/authCrypto";
 import { decodeBytes, encodeBytes, utf8 } from "../api/bytes";
 import type { StoredSession } from "../api/keyStore";
-import type { ApprovalCreated } from "../generated/ApprovalCreated";
-import type { Device } from "../generated/Device";
 import type { NewDevice } from "../generated/NewDevice";
 import type { SessionCreated } from "../generated/SessionCreated";
 import { deviceName } from "./deviceName";
@@ -113,20 +111,4 @@ export async function signOut(services: AuthServices): Promise<void> {
     // Already over, or unreachable: either way this device forgets it.
   }
   await services.tokens.clear();
-}
-
-/** Approves a pending device from a trusted one: signs its id and keys, and gets the six-digit code to show. */
-export async function approveDevice(services: AuthServices, session: StoredSession, pending: Device): Promise<ApprovalCreated> {
-  const saved = await services.keys.loadKeys();
-  if (!saved) throw new ApiFailure("device_not_trusted", 403, "This device has no keys, so it can’t approve another.");
-  const mine = services.crypto().deviceKeys.import(saved);
-  const signature = mine.signApproval(session.accountId, pending.id, pending.signing_key, pending.agreement_key);
-  return services.api.createApproval({ device_id: pending.id, signature: encodeBytes(signature) });
-}
-
-/** The pending device types the code; on success this device is trusted. */
-export async function submitApprovalCode(services: AuthServices, approvalId: string, code: string): Promise<Device> {
-  const device = await services.api.submitCode(approvalId, { code: code.replace(/\s+/g, "") });
-  await services.tokens.update({ deviceState: device.state });
-  return device;
 }

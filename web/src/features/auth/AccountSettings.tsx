@@ -1,13 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ApiFailure } from "../../api/auth";
 import { authCryptoAvailable, SIGN_IN_UNAVAILABLE } from "../../api/authCrypto";
 import { Icon } from "../../components/Icon";
 import { Portal } from "../../components/Portal";
 import { useDialog } from "../../components/useDialog";
-import type { ApprovalCreated } from "../../generated/ApprovalCreated";
 import type { Device } from "../../generated/Device";
 import { useAuth } from "../../auth/AuthProvider";
-import { approveDevice } from "../../auth/flows";
+import { ApproverController } from "../../auth/pairing";
 import { describeError } from "./AuthScreens";
 
 const PLATFORMS: Record<Device["platform"], string> = { web: "Web", ios: "iPhone or iPad", android: "Android", macos: "Mac", windows: "Windows", linux: "Linux" };
@@ -34,46 +33,76 @@ function Modal({ label, onClose, children }: { label: string; onClose: () => voi
   );
 }
 
-/** A trusted device's side of adding a device: say what is asking, then sign the approval and show the code. */
+/** The digits and the device's key fingerprint, side by side with the choice: nothing is approved until "They match". */
 function ApproveDialog({ device, onClose, onDone }: { device: Device; onClose: () => void; onDone: () => void }) {
   const auth = useAuth()!;
-  const [approval, setApproval] = useState<ApprovalCreated | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const { services } = auth;
+  const [attempt, setAttempt] = useState(0);
+  const controller = useMemo(() => {
+    void attempt; // a new attempt is a new approval
+    return new ApproverController(services, auth.session!, device);
+  }, [services, auth.session, device, attempt]);
+  const state = useSyncExternalStore(controller.subscribe, controller.getState);
 
-  const allow = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      setApproval(await approveDevice(auth.services, auth.session!, device));
-    } catch (e) {
-      setError(describeError(e));
-    } finally {
-      setBusy(false);
-    }
+  useEffect(() => {
+    void controller.start();
+    return () => controller.dispose();
+  }, [controller]);
+
+  const close = () => {
+    // Leaving before it is done closes the approval; a finished or closed one just goes.
+    if (state.phase !== "done" && state.phase !== "closed") void controller.cancel();
+    onClose();
   };
 
   return (
-    <Modal label="New sign-in" onClose={onClose}>
+    <Modal label="New sign-in" onClose={close}>
       <b className="card-title">New sign-in</b>
       <div className="kv"><span>Device</span><b>{device.name}</b></div>
       <div className="kv"><span>Kind</span><b>{PLATFORMS[device.platform]}</b></div>
       <div className="kv"><span>When</span><b>{when(device.created_at)}</b></div>
-      {approval ? (
+      {(state.phase === "starting" || state.phase === "waiting") && (
         <>
-          <p className="t3 small">Type this code on {device.name}. It works for ten minutes, with five tries.</p>
-          <span className="mono code" data-testid="approval-code" aria-label={`Code ${approval.code.split("").join(" ")}`}>{groupCode(approval.code)}</span>
+          <p className="t3 small" role="status">Waiting for {device.name} to show its code…</p>
+          <p className="t3 small">It appears once that device is open and signed in.</p>
+          <div className="dialog-actions">
+            <button type="button" className="ghost" onClick={() => void controller.cancel()}>Cancel</button>
+          </div>
+        </>
+      )}
+      {state.phase === "compare" && (
+        <>
+          <p className="t3 small">{device.name} should show the same 6 digits. Only if they are identical, choose They match.</p>
+          <span className="mono code" data-testid="approval-code" aria-label={`Code ${state.sas.split("").join(" ")}`}>{groupCode(state.sas)}</span>
+          <div className="kv"><span>Device key</span><b className="mono" data-testid="fingerprint">{state.fingerprint}</b></div>
+          <div className="dialog-actions">
+            <button type="button" className="ghost" onClick={() => void controller.cancel()}>Cancel</button>
+            <button type="button" className="btn" onClick={() => void controller.confirm()}>They match</button>
+          </div>
+        </>
+      )}
+      {(state.phase === "confirming" || state.phase === "finishing") && (
+        <>
+          <p className="t3 small" role="status">Waiting for {device.name} to confirm…</p>
+          <div className="dialog-actions">
+            <button type="button" className="ghost" onClick={() => void controller.cancel()}>Cancel</button>
+          </div>
+        </>
+      )}
+      {state.phase === "done" && (
+        <>
+          <p className="t3 small" role="status">{device.name} is trusted.</p>
           <div className="dialog-actions">
             <button type="button" className="btn" onClick={onDone}>Done</button>
           </div>
         </>
-      ) : (
+      )}
+      {state.phase === "closed" && (
         <>
-          <p className="t3 small">If this was you, allow it and type the code that appears on the new device.</p>
-          {error && <p className="err" role="alert">{error}</p>}
+          <p className="err" role="alert">{state.message}</p>
           <div className="dialog-actions">
-            <button type="button" className="ghost" onClick={onClose}>Don’t allow</button>
-            <button type="button" className="btn" disabled={busy} onClick={() => void allow()}>{busy ? "Allowing…" : "Allow"}</button>
+            <button type="button" className="ghost" onClick={onClose}>Close</button>
+            <button type="button" className="btn" onClick={() => setAttempt((n) => n + 1)}>Start again</button>
           </div>
         </>
       )}
@@ -118,7 +147,7 @@ function AddDeviceDialog({ onClose }: { onClose: () => void }) {
       <ol className="steps">
         <li>On the new device, open Orbyn Planner and sign in with your email and password.</li>
         <li>It will say it is waiting for approval. Come back here and choose Approve next to it.</li>
-        <li>Type the 6-digit code that appears here on the new device.</li>
+        <li>Both devices show the same 6 digits. If they match, choose They match on each.</li>
       </ol>
       <div className="dialog-actions">
         <button type="button" className="btn" onClick={onClose}>Done</button>

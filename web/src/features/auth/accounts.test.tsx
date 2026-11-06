@@ -17,14 +17,19 @@ const SAM = { name: "Sam Rivera", email: "Sam@Example.com", password: "correct h
 const crypto = new FakeAuthCrypto();
 
 let engine: MockEngine;
+/** The clock the server and the devices share; a test moves it to expire an approval. */
+let nowMs = NOW.getTime();
+/** Fast polling so the tests do not wait; the real schedule is 2 s backing off to 10 s. */
+const FAST_POLL = { firstMs: 5, maxMs: 20, totalMs: 5000 };
 
-function services(keys: KeyStore = createMemoryKeyStore(), useRealCrypto = false): AuthServices {
+function services(keys: KeyStore = createMemoryKeyStore(), useRealCrypto = false, poll = FAST_POLL): AuthServices {
   return createAuthServices({
     fetch: engine.fetch,
     baseUrl: "http://engine.test",
     keys,
     crypto: useRealCrypto ? undefined : () => crypto,
-    now: () => NOW.getTime(),
+    now: () => nowMs,
+    poll,
   });
 }
 
@@ -42,6 +47,7 @@ async function mount(auth: AuthServices, path = "/today") {
     { container: root },
   );
   return {
+    root,
     unmount: () => {
       view.unmount();
       root.remove();
@@ -53,7 +59,8 @@ beforeEach(() => {
   vi.unstubAllGlobals();
   // The planner's own health check, which the account screens do not use.
   vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("offline"))));
-  engine = createMockEngine(() => NOW.getTime());
+  nowMs = NOW.getTime();
+  engine = createMockEngine(() => nowMs);
 });
 afterEach(() => {
   cleanup();
@@ -269,60 +276,136 @@ describe("adding a device", () => {
     return { a, b };
   }
 
-  it("the trusted device approves and shows the code; the new device types it and opens", async () => {
+  /** A shows the dialog for B; both are mounted at once so they can poll each other. */
+  async function bothMounted() {
     const { a, b } = await twoDevices();
-
-    // Device A: Settings · Account lists B as waiting, and Allow shows the code.
     const onA = await mount(a, "/settings");
     await openAccount();
     const list = await screen.findByRole("list", { name: "Devices" });
     await waitFor(() => expect(within(list).getAllByRole("listitem")).toHaveLength(2));
     expect(within(list).getByText(/this device/)).toBeInTheDocument();
     expect(within(list).getByText("Waiting for approval")).toBeInTheDocument();
+    const onB = await mount(b);
     await userEvent.click(within(list).getByRole("button", { name: `Approve ${deviceName()}` }));
     const dialog = screen.getByRole("dialog", { name: "New sign-in" });
-    expect(within(dialog).queryByTestId("approval-code")).not.toBeInTheDocument(); // not before it is allowed
-    await userEvent.click(within(dialog).getByRole("button", { name: "Allow" }));
-    expect(await within(dialog).findByTestId("approval-code")).toHaveTextContent("418 207");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Done" }));
-    onA.unmount();
+    return { a, b, onA, onB, dialog, onDevice: within(onB.root) };
+  }
 
-    // Device B: the code input, with attempts left after a wrong code.
-    await mount(b);
-    const code = await screen.findByLabelText("6-digit code");
-    await userEvent.type(code, "111111");
-    await userEvent.click(screen.getByRole("button", { name: "Continue" }));
-    expect(await screen.findByText("The code is wrong. Attempts left: 4.")).toBeInTheDocument();
-    await userEvent.type(screen.getByLabelText("6-digit code"), "418 207");
-    await userEvent.click(screen.getByRole("button", { name: "Continue" }));
-    await todayShown();
+  /** Both screens show the digits. */
+  async function compared() {
+    const t = await bothMounted();
+    const sasA = (await within(t.dialog).findByTestId("approval-code")).textContent;
+    const sasB = (await t.onDevice.findByTestId("approval-code")).textContent;
+    return { ...t, sasA, sasB };
+  }
+
+  const confirmCalls = () => engine.calls.filter((c) => c.path.endsWith("/confirm")).length;
+  const createCalls = () => engine.calls.filter((c) => c.method === "POST" && c.path === "/v1/devices/approvals").length;
+
+  it("both devices show the same six digits, the key fingerprint is on the trusted one, and nothing is approved until They match", async () => {
+    const { a, b, dialog, sasA, sasB, onDevice } = await compared();
+    expect(sasA).toMatch(/^\d{3} \d{3}$/);
+    expect(sasB).toBe(sasA);
+    expect(within(dialog).getByTestId("fingerprint").textContent).toMatch(/^[0-9A-F]{4}( [0-9A-F]{4}){3}$/);
+    // The server holds only a commitment so far: no confirm, and the new device is still pending.
+    expect(confirmCalls()).toBe(0);
+    expect([...engine.accounts.values()][0]!.devices.find((d) => d.state === "pending")).toBeDefined();
+    const commit = engine.calls.find((c) => c.method === "POST" && c.path === "/v1/devices/approvals")!.body as Record<string, unknown>;
+    expect(Object.keys(commit).sort()).toEqual(["approval_id", "commitment", "created_at", "device_id"]);
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "They match" }));
+    expect(await within(dialog).findByText(/Waiting for .* to confirm/)).toBeInTheDocument();
+    expect(confirmCalls()).toBe(1);
+    // The new device is not trusted until its own person confirms.
+    expect([...engine.accounts.values()][0]!.devices.filter((d) => d.state === "trusted")).toHaveLength(1);
+    await userEvent.click(onDevice.getByRole("button", { name: "They match" }));
+    expect(await within(dialog).findByText(/is trusted/)).toBeInTheDocument();
+    expect(await onDevice.findByText("This device is trusted.")).toBeInTheDocument();
+    await userEvent.click(onDevice.getByRole("button", { name: "Continue" }));
+    expect(await onDevice.findByRole("heading", { name: "Nothing planned yet" })).toBeInTheDocument();
     expect(b.tokens.getSession()?.deviceState).toBe("trusted");
     expect((await b.keys.loadSession())?.deviceState).toBe("trusted");
+    void a;
   });
 
-  it("the code needs six digits", async () => {
-    const { a, b } = await twoDevices();
-    const onA = await mount(a, "/settings");
+  it("the new device can type the digits instead of tapping", async () => {
+    const { dialog, sasA, onDevice } = await compared();
+    await userEvent.click(within(dialog).getByRole("button", { name: "They match" }));
+    await userEvent.click(onDevice.getByRole("button", { name: "Type the code instead" }));
+    await userEvent.type(onDevice.getByLabelText("6-digit code on the other device"), sasA!);
+    await userEvent.click(onDevice.getByRole("button", { name: "Continue" }));
+    expect(await onDevice.findByText("This device is trusted.")).toBeInTheDocument();
+  });
+
+  it("a mismatch closes the approval for both: typed digits that differ, then Start again needs a new approval", async () => {
+    const { dialog, sasA, onDevice } = await compared();
+    await userEvent.click(within(dialog).getByRole("button", { name: "They match" }));
+    await userEvent.click(onDevice.getByRole("button", { name: "Type the code instead" }));
+    const wrong = sasA!.replace(" ", "") === "000000" ? "111111" : "000000";
+    await userEvent.type(onDevice.getByLabelText("6-digit code on the other device"), wrong);
+    await userEvent.click(onDevice.getByRole("button", { name: "Continue" }));
+    expect(await onDevice.findByRole("alert")).toHaveTextContent("digits didn’t match");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("was closed");
+    expect([...engine.accounts.values()][0]!.devices.filter((d) => d.state === "trusted")).toHaveLength(1);
+
+    // One attempt per approval: a new one is made, and its digits are new.
+    const created = createCalls();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Start again" }));
+    await userEvent.click(onDevice.getByRole("button", { name: "Start again" }));
+    await waitFor(() => expect(createCalls()).toBe(created + 1));
+    const again = within(screen.getByRole("dialog", { name: "New sign-in" }));
+    expect((await again.findByTestId("approval-code")).textContent).toMatch(/^\d{3} \d{3}$/);
+    expect((await onDevice.findByTestId("approval-code")).textContent).toBe(again.getByTestId("approval-code").textContent);
+  });
+
+  it("Cancel on the trusted device closes it for the new one, which can start again", async () => {
+    const { dialog, onDevice } = await compared();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("cancelled");
+    expect(await onDevice.findByRole("alert")).toHaveTextContent("was closed");
+    expect(confirmCalls()).toBe(0);
+    expect(engine.calls.some((c) => c.path.endsWith("/cancel"))).toBe(true);
+    expect(onDevice.getByRole("button", { name: "Start again" })).toBeInTheDocument();
+  });
+
+  it("Cancel on the new device closes it for the trusted one", async () => {
+    const { dialog, onDevice } = await compared();
+    await userEvent.click(onDevice.getByRole("button", { name: "Cancel" }));
+    expect(await onDevice.findByRole("alert")).toHaveTextContent("cancelled");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("was closed");
+    expect(within(dialog).getByRole("button", { name: "Start again" })).toBeInTheDocument();
+  });
+
+  it("an approval left for ten minutes runs out: the trusted device is told when it confirms", async () => {
+    const { dialog, onDevice } = await compared();
+    nowMs += 11 * 60_000;
+    await userEvent.click(within(dialog).getByRole("button", { name: "They match" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("ran out of time");
+    expect(within(dialog).getByRole("button", { name: "Start again" })).toBeInTheDocument();
+    expect(await onDevice.findByRole("alert")).toHaveTextContent("ran out of time");
+  });
+
+  it("the trusted device gives up waiting for a new device that never shows up", async () => {
+    const { a } = await twoDevices();
+    const short = services(createMemoryKeyStore(), false, { firstMs: 5, maxMs: 10, totalMs: 60 });
+    // Same keys as A, a short patience; no new device is mounted, so nothing joins.
+    const withKeys = createAuthServices({ fetch: engine.fetch, baseUrl: "http://engine.test", keys: a.keys, crypto: () => crypto, now: () => nowMs, poll: { firstMs: 5, maxMs: 10, totalMs: 60 } });
+    void short;
+    await mount(withKeys, "/settings");
     await openAccount();
     await userEvent.click(await screen.findByRole("button", { name: `Approve ${deviceName()}` }));
-    await userEvent.click(screen.getByRole("button", { name: "Allow" }));
-    await screen.findByTestId("approval-code");
-    onA.unmount();
-    await mount(b);
-    await userEvent.type(await screen.findByLabelText("6-digit code"), "4182");
-    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+    expect(await screen.findByRole("alert")).toHaveTextContent("ran out of time");
   });
 
-  it("a refused approval is explained and Allow can be tried again", async () => {
+  it("a refused approval is explained and Start again tries once more", async () => {
     const { a } = await twoDevices();
     await mount(a, "/settings");
     await openAccount();
-    await userEvent.click(await screen.findByRole("button", { name: `Approve ${deviceName()}` }));
     engine.refuseNext("/v1/devices/approvals", 429, "too_many_attempts");
-    await userEvent.click(screen.getByRole("button", { name: "Allow" }));
+    await userEvent.click(await screen.findByRole("button", { name: `Approve ${deviceName()}` }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Too many attempts");
-    await userEvent.click(screen.getByRole("button", { name: "Allow" }));
-    expect(await screen.findByTestId("approval-code")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Start again" }));
+    expect(await screen.findByText(/Waiting for .* to show its code/)).toBeInTheDocument();
   });
 
   it("Add a device explains the steps", async () => {

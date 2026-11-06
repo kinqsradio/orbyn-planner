@@ -1,99 +1,78 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { ApiFailure } from "../../api/auth";
-import type { CurrentDevice } from "../../generated/CurrentDevice";
+import { useEffect, useMemo, useState, useSyncExternalStore, type FormEvent } from "react";
 import { useAuth } from "../../auth/AuthProvider";
-import { submitApprovalCode } from "../../auth/flows";
-import { describeError } from "./AuthScreens";
+import { DeviceController } from "../../auth/pairing";
+import { groupCode } from "./AccountSettings";
 
-/** How often a waiting device asks whether it has been approved. */
-export const POLL_MS = 5000;
-
-/** The device signed in but is not trusted yet: it waits for a trusted device, then takes the six-digit code. */
+/**
+ * The device signed in but is not trusted yet. A trusted device starts an approval; both screens
+ * then show the same six digits and the person confirms on each. Typing the other device's digits
+ * is the alternative to tapping "They match".
+ */
 export function PendingScreen() {
   const auth = useAuth()!;
   const { services } = auth;
-  const [current, setCurrent] = useState<CurrentDevice | null>(null);
-  const [code, setCode] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [left, setLeft] = useState<number | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const refresh = useCallback(
-    () =>
-      services.api.currentDevice().then(
-        async (next) => {
-          setCurrent(next);
-          if (next.device.state === "trusted") await services.tokens.update({ deviceState: "trusted" });
-        },
-        (e: unknown) => {
-          // A 401 has already signed this device out; other failures are shown by the next action.
-          if (!(e instanceof ApiFailure && e.status === 401)) setError(describeError(e));
-        },
-      ),
-    [services],
-  );
+  const controller = useMemo(() => new DeviceController(services, auth.session!), [services, auth.session]);
+  const state = useSyncExternalStore(controller.subscribe, controller.getState);
+  const [typing, setTyping] = useState(false);
+  const [typed, setTyped] = useState("");
 
   useEffect(() => {
-    void refresh();
-    const timer = setInterval(() => void refresh(), POLL_MS);
-    return () => clearInterval(timer);
-  }, [refresh]);
+    void controller.run();
+    return () => controller.dispose();
+  }, [controller]);
 
-  const approval = current?.approval ?? null;
-
-  const submit = async (event: FormEvent) => {
+  const digits = typed.replace(/\D/g, "");
+  const submitTyped = (event: FormEvent) => {
     event.preventDefault();
-    if (!approval) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await submitApprovalCode(services, approval.id, code);
-    } catch (e) {
-      setError(describeError(e));
-      setLeft(e instanceof ApiFailure ? e.attemptsLeft : null);
-      setCode("");
-      if (e instanceof ApiFailure && (e.code === "approval_expired" || e.attemptsLeft === 0)) void refresh();
-    } finally {
-      setBusy(false);
-    }
+    if (digits.length === 6) controller.confirm(digits);
   };
-
-  const digits = code.replace(/\D/g, "");
 
   return (
     <main className="public-page" id="content" tabIndex={-1}>
-      <form className="authcard" onSubmit={submit} aria-label="Approve this device">
+      <div className="authcard" aria-label="Approve this device">
         <h1 className="auth-title">Approve this device</h1>
-        <p className="t3">
-          {auth.session?.email} is already open on another device. Open Orbyn Planner there, choose Allow for “{current?.device.name ?? "this device"}”, and type the 6-digit code it shows.
-        </p>
-        {approval ? (
+        {(state.phase === "waiting" || state.phase === "joining" || state.phase === "joined") && (
           <>
-            <label htmlFor="approval-code">6-digit code</label>
-            <input
-              id="approval-code"
-              className="field mono-input"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              autoFocus
-              maxLength={7}
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              aria-describedby="approval-help"
-            />
-            <p id="approval-help" className="t3 small" role="status">
-              {error ?? (left !== null ? `Attempts left: ${left}.` : "The code works for a few minutes, with five tries.")}
+            <p className="t3">
+              {auth.session?.email} is already open on another device. Open Orbyn Planner there, go to Settings, Account and choose Approve for this device.
             </p>
-            <button type="submit" className="btn" disabled={busy || digits.length !== 6}>{busy ? "Checking…" : "Continue"}</button>
+            <p className="t3" role="status">{state.phase === "waiting" ? "Waiting for a trusted device to approve this one." : "Connecting to the trusted device…"}</p>
           </>
-        ) : (
+        )}
+        {state.phase === "compare" && (
           <>
-            <p className="t3" role="status">{error ?? "Waiting for a trusted device to approve this one."}</p>
-            <button type="button" className="ghost" onClick={() => void refresh()}>Check again</button>
+            <p className="t3">The other device should show the same 6 digits. Only if they are identical, choose They match.</p>
+            <span className="mono code" data-testid="approval-code" aria-label={`Code ${state.sas.split("").join(" ")}`}>{groupCode(state.sas)}</span>
+            <div className="dialog-actions">
+              <button type="button" className="ghost" onClick={() => void controller.cancel()}>Cancel</button>
+              <button type="button" className="btn" onClick={() => controller.confirm()}>They match</button>
+            </div>
+            {typing ? (
+              <form onSubmit={submitTyped}>
+                <label htmlFor="approval-code">6-digit code on the other device</label>
+                <input id="approval-code" className="field mono-input" inputMode="numeric" autoComplete="off" autoFocus maxLength={7} value={typed} onChange={(e) => setTyped(e.target.value)} />
+                <button type="submit" className="btn" disabled={digits.length !== 6}>Continue</button>
+              </form>
+            ) : (
+              <button type="button" className="link-btn quiet-link" onClick={() => setTyping(true)}>Type the code instead</button>
+            )}
+          </>
+        )}
+        {state.phase === "finishing" && <p className="t3" role="status">Waiting for the other device to confirm…</p>}
+        {state.phase === "trusted" && (
+          <>
+            <p role="status">This device is trusted.</p>
+            <button type="button" className="btn" onClick={() => void controller.continue()}>Continue</button>
+          </>
+        )}
+        {state.phase === "closed" && (
+          <>
+            <p className="err" role="alert">{state.message}</p>
+            <button type="button" className="btn" onClick={() => { setTyping(false); setTyped(""); controller.startAgain(); }}>Start again</button>
           </>
         )}
         <button type="button" className="link-btn quiet-link" onClick={() => void auth.signOut()}>Sign out</button>
-      </form>
+      </div>
     </main>
   );
 }

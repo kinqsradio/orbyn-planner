@@ -58,6 +58,22 @@ describe("the WebAssembly adapter", () => {
     ]);
   });
 
+  it("approvals go to the module's SyncEngine, with JSON in and out", () => {
+    const { module, log } = WasmAuthCrypto_forTests();
+    const crypto = wasmAuthCrypto(module);
+    const engine = crypto.approvals(crypto.deviceKeys.create(), "acct", "dev");
+    const a = engine.startApproval({ id: "d" } as never, 1);
+    expect(a.deviceFingerprint()).toBe("fp");
+    expect(a.reveal({} as never)).toEqual({ nonce: "n" });
+    expect(a.sas()).toBe("123456");
+    expect(engine.confirmApproval(a, { devices: [], removals: [] })).toEqual({ signature: "s" });
+    const d = engine.joinApproval({} as never, 2);
+    expect(d.nonce).toEqual({ nonce: "d" });
+    expect(d.sas({} as never)).toBe("123456");
+    expect(engine.finishApproval(d, {} as never, undefined, 3)).toBe("123456");
+    expect(log).toEqual(expect.arrayContaining(["SyncEngine.create", "startApproval", "reveal", "confirmApproval", "joinApproval", "finishApproval"]));
+  });
+
   it("loading initialises the module and nothing registers it", async () => {
     const { module, log } = WasmAuthCrypto_forTests();
     const loader = vi.fn(async () => module);

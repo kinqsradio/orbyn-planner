@@ -2,12 +2,11 @@ import { concat, utf8, uuidBytes } from "../bytes";
 
 /**
  * The messages devices sign, byte for byte as orbyn-auth-client builds them (a port of
- * `register_message`, `login_message`, `trusted_start_message` and `approval_message`), and the
+ * `register_message`, `login_message` and `trusted_start_message`), and the
  * domain contexts they are signed under. Keep them in step with the engine.
  */
 export const DEVICE_REGISTER_CONTEXT = "orbyn/device-register/v1";
 export const DEVICE_LOGIN_CONTEXT = "orbyn/device-login/v1";
-export const DEVICE_APPROVAL_CONTEXT = "orbyn/device-approval/v1";
 export const TRUSTED_START_CONTEXT = "orbyn/trusted-login-start/v1";
 
 /** A device's two public keys, 32 bytes each. */
@@ -61,9 +60,4 @@ export function trustedStartMessage(email: string, credentialRequest: Uint8Array
   const time = new Uint8Array(8);
   new DataView(time.buffer).setBigInt64(0, BigInt(signedAt), false);
   return concat(prefixed(utf8(email)), prefixed(credentialRequest), time);
-}
-
-/** What a trusted device signs to approve a pending one: the account, the pending device's id and its keys. */
-export function approvalMessage(accountId: string, deviceId: string, keys: DevicePublic): Uint8Array {
-  return concat(uuidBytes(accountId), uuidBytes(deviceId), device(keys));
 }

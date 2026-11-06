@@ -1,4 +1,28 @@
-import type { AuthCrypto, DeviceKeys, PendingLogin, PendingRegistration } from "./authCrypto";
+import type { ApprovalNonce } from "../generated/ApprovalNonce";
+import type { ConfirmApproval } from "../generated/ConfirmApproval";
+import type { CreateApproval } from "../generated/CreateApproval";
+import type { PendingApproval } from "../generated/PendingApproval";
+import type { ApprovalEngine, ApproverPairing, AuthCrypto, DeviceKeys, DevicePairing, PendingLogin, PendingRegistration } from "./authCrypto";
+
+/** `ApproverSession` in orbyn-wasm. */
+export interface WasmApproverSession {
+  readonly createJson: string;
+  deviceFingerprint(): string;
+  reveal(viewJson: string): string;
+  sas(): string | undefined;
+}
+/** `DeviceSession` in orbyn-wasm. */
+export interface WasmDeviceSession {
+  readonly nonceJson: string;
+  sas(viewJson: string): string;
+}
+/** `SyncEngine` in orbyn-wasm, as far as approving a device needs it. Data goes in and out as JSON. */
+export interface WasmSyncEngine {
+  startApproval(deviceJson: string, nowSecs: number): WasmApproverSession;
+  confirmApproval(session: WasmApproverSession, devicesJson: string): string;
+  joinApproval(viewJson: string, nowSecs: number): WasmDeviceSession;
+  finishApproval(session: WasmDeviceSession, viewJson: string, typed: string | undefined, nowSecs: number): string;
+}
 
 /**
  * The shape of the module `wasm-bindgen --target web` makes from the engine's orbyn-wasm crate
@@ -15,7 +39,41 @@ export interface OrbynWasmModule {
     create(): DeviceKeys;
     import(bytes: Uint8Array): DeviceKeys;
   };
+  SyncEngine: {
+    create(keys: DeviceKeys, accountId: string, deviceId: string): WasmSyncEngine;
+  };
   normalizeEmail(email: string): string | undefined;
+}
+
+/** The approval functions over a loaded module: typed objects in, the module's JSON strings underneath. */
+function wasmApprovals(engine: WasmSyncEngine): ApprovalEngine {
+  const sessions = new WeakMap<object, WasmApproverSession | WasmDeviceSession>();
+  const approver = (s: ApproverPairing) => sessions.get(s) as WasmApproverSession;
+  const device = (s: DevicePairing) => sessions.get(s) as WasmDeviceSession;
+  return {
+    startApproval: (target, nowSecs) => {
+      const inner = engine.startApproval(JSON.stringify(target), nowSecs);
+      const pairing: ApproverPairing = {
+        createRequest: JSON.parse(inner.createJson) as CreateApproval,
+        deviceFingerprint: () => inner.deviceFingerprint(),
+        reveal: (view: PendingApproval) => JSON.parse(inner.reveal(JSON.stringify(view))) as ApprovalNonce,
+        sas: () => inner.sas() ?? undefined,
+      };
+      sessions.set(pairing, inner);
+      return pairing;
+    },
+    confirmApproval: (session, devices) => JSON.parse(engine.confirmApproval(approver(session), JSON.stringify(devices))) as ConfirmApproval,
+    joinApproval: (view, nowSecs) => {
+      const inner = engine.joinApproval(JSON.stringify(view), nowSecs);
+      const pairing: DevicePairing = {
+        nonce: JSON.parse(inner.nonceJson) as ApprovalNonce,
+        sas: (v: PendingApproval) => inner.sas(JSON.stringify(v)),
+      };
+      sessions.set(pairing, inner);
+      return pairing;
+    },
+    finishApproval: (session, view, typed, nowSecs) => engine.finishApproval(device(session), JSON.stringify(view), typed, nowSecs),
+  };
 }
 
 /** AuthCrypto over a loaded module: every call goes straight to the module's function of the same name. */
@@ -29,6 +87,7 @@ export function wasmAuthCrypto(module: OrbynWasmModule): AuthCrypto {
       create: () => module.DeviceKeys.create(),
       import: (bytes) => module.DeviceKeys.import(bytes),
     },
+    approvals: (keys, accountId, deviceId) => wasmApprovals(module.SyncEngine.create(keys, accountId, deviceId)),
     normalizeEmail: (email) => module.normalizeEmail(email),
   };
 }

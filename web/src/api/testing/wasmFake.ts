@@ -12,6 +12,17 @@ export function WasmAuthCrypto_forTests(): { module: OrbynWasmModule; log: strin
     startLogin: () => (log.push("startLogin"), { request: new Uint8Array() }),
     finishLogin: () => (log.push("finishLogin"), new Uint8Array()),
     DeviceKeys: { create: () => (log.push("DeviceKeys.create"), keys), import: () => (log.push("DeviceKeys.import"), keys) },
+    SyncEngine: {
+      create: () => {
+        log.push("SyncEngine.create");
+        return {
+          startApproval: () => (log.push("startApproval"), { createJson: "{}", deviceFingerprint: () => "fp", reveal: () => (log.push("reveal"), '{"nonce":"n"}'), sas: () => "123456" }),
+          confirmApproval: () => (log.push("confirmApproval"), '{"signature":"s"}'),
+          joinApproval: () => (log.push("joinApproval"), { nonceJson: '{"nonce":"d"}', sas: () => "123456" }),
+          finishApproval: () => (log.push("finishApproval"), "123456"),
+        };
+      },
+    },
     normalizeEmail: (e) => (log.push("normalizeEmail"), e.trim().toLowerCase()),
   };
   return { module, log };

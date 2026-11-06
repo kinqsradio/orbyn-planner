@@ -30,7 +30,12 @@ describe("the account calls", () => {
     await client.signOut().catch(() => undefined);
     await client.signOutEverywhere().catch(() => undefined);
     await client.currentDevice();
-    await client.createApproval({ device_id: "d", signature: "s" });
+    await client.createApproval({ approval_id: "x", device_id: "d", created_at: 1, commitment: "c" });
+    await client.approval("a b");
+    await client.submitNonce("a b", { nonce: "n" });
+    await client.revealNonce("a b", { nonce: "n" });
+    await client.confirmApproval("a b", { signature: "s" });
+    await client.cancelApproval("a b");
     await client.submitCode("a b", { code: "123456" });
     await client.removeDevice("d/1");
     expect(fetchMock.mock.calls.map(([u, i]) => `${i.method} ${String(u).replace("http://engine.test", "")}`)).toEqual([
@@ -41,6 +46,11 @@ describe("the account calls", () => {
       "DELETE /v1/sessions",
       "GET /v1/devices/current",
       "POST /v1/devices/approvals",
+      "GET /v1/devices/approvals/a%20b",
+      "POST /v1/devices/approvals/a%20b/nonce",
+      "POST /v1/devices/approvals/a%20b/reveal",
+      "POST /v1/devices/approvals/a%20b/confirm",
+      "POST /v1/devices/approvals/a%20b/cancel",
       "POST /v1/devices/approvals/a%20b/code",
       "DELETE /v1/devices/d%2F1",
     ]);
@@ -79,11 +89,11 @@ describe("errors", () => {
     expect((failure as ApiFailure).message).not.toContain("raw server text");
   });
 
-  it("a wrong code keeps the server's own words, with the attempts left", async () => {
-    const { client } = api(() => error(400, "wrong_code", "The code is wrong. Attempts left: 3."));
+  it("a wrong code closes the approval, and says to start again", async () => {
+    const { client } = api(() => error(400, "wrong_code", "The code is wrong. Attempts left: 0."));
     const failure = (await client.submitCode("a", { code: "000000" }).catch((e: unknown) => e)) as ApiFailure;
-    expect(failure.message).toBe("The code is wrong. Attempts left: 3.");
-    expect(failure.attemptsLeft).toBe(3);
+    expect(failure.code).toBe("wrong_code");
+    expect(failure.message).toMatch(/Start again/);
   });
 
   it("an unreachable server is a network error", async () => {

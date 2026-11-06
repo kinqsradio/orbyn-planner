@@ -1,5 +1,8 @@
 import type { ApiError } from "../generated/ApiError";
 import type { ApprovalCode } from "../generated/ApprovalCode";
+import type { ApprovalNonce } from "../generated/ApprovalNonce";
+import type { ConfirmApproval } from "../generated/ConfirmApproval";
+import type { PendingApproval } from "../generated/PendingApproval";
 import type { ApprovalCreated } from "../generated/ApprovalCreated";
 import type { CreateApproval } from "../generated/CreateApproval";
 import type { CurrentDevice } from "../generated/CurrentDevice";
@@ -21,7 +24,10 @@ const MESSAGES: Record<string, string> = {
   login_failed: "That email and password don’t match.",
   device_not_trusted: "This device hasn’t been approved yet. Approve it from a device you already trust.",
   last_trusted_device: "This is your last trusted device. Approve another device first, then remove this one.",
-  approval_expired: "That approval ran out of time. Ask the trusted device for a new one.",
+  approval_expired: "That approval ran out of time or was closed. Start again from a trusted device.",
+  approval_out_of_order: "That approval isn’t at that step. Start again.",
+  approval_not_confirmed: "The trusted device hasn’t confirmed yet.",
+  invalid_commitment: "The two devices didn’t agree, so the approval was closed. Start again.",
   invalid_email: "Enter a valid email address.",
   invalid_device_name: "This device’s name isn’t valid.",
   invalid_signature: "This device couldn’t be verified. Try again.",
@@ -47,16 +53,10 @@ export class ApiFailure extends Error {
     super(message);
     this.name = "ApiFailure";
   }
-
-  /** Attempts left after a wrong approval code, if the server said. */
-  get attemptsLeft(): number | null {
-    const m = /Attempts left: (\d+)/.exec(this.serverMessage);
-    return m ? Number(m[1]) : null;
-  }
 }
 
-export function plainMessage(code: string, serverMessage = ""): string {
-  if (code === "wrong_code") return serverMessage || "That code isn’t right.";
+export function plainMessage(code: string): string {
+  if (code === "wrong_code") return "The digits didn’t match, so the approval was closed. Start again.";
   return MESSAGES[code] ?? "Something went wrong. Try again.";
 }
 
@@ -100,7 +100,7 @@ export function createAuthApi(options: AuthApiOptions) {
     const code = typeof error.code === "string" ? error.code : response.status === 401 ? "unauthorized" : response.status >= 500 ? "internal" : "invalid_request";
     // A 401 on a signed-in call ends the session, whatever the code.
     if (authed && response.status === 401) options.onUnauthorized();
-    throw new ApiFailure(code, response.status, plainMessage(code, error.message), error.message ?? "");
+    throw new ApiFailure(code, response.status, plainMessage(code), error.message ?? "");
   }
 
   return {
@@ -116,6 +116,16 @@ export function createAuthApi(options: AuthApiOptions) {
     devices: () => call<DeviceList>("GET", "/v1/devices", undefined, true),
     currentDevice: () => call<CurrentDevice>("GET", "/v1/devices/current", undefined, true),
     createApproval: (body: CreateApproval) => call<ApprovalCreated>("POST", "/v1/devices/approvals", body, true),
+    /** An approval as either of its devices sees it. */
+    approval: (id: string) => call<PendingApproval>("GET", `/v1/devices/approvals/${encodeURIComponent(id)}`, undefined, true),
+    /** Step 2, from the new device. */
+    submitNonce: (id: string, body: ApprovalNonce) => call<void>("POST", `/v1/devices/approvals/${encodeURIComponent(id)}/nonce`, body, true),
+    /** Step 3, from the approver. */
+    revealNonce: (id: string, body: ApprovalNonce) => call<void>("POST", `/v1/devices/approvals/${encodeURIComponent(id)}/reveal`, body, true),
+    /** Step 4, from the approver, after the person confirmed the digits match. */
+    confirmApproval: (id: string, body: ConfirmApproval) => call<void>("POST", `/v1/devices/approvals/${encodeURIComponent(id)}/confirm`, body, true),
+    /** Closes the approval, from either device. */
+    cancelApproval: (id: string) => call<void>("POST", `/v1/devices/approvals/${encodeURIComponent(id)}/cancel`, undefined, true),
     submitCode: (approvalId: string, body: ApprovalCode) =>
       call<Device>("POST", `/v1/devices/approvals/${encodeURIComponent(approvalId)}/code`, body, true),
     removeDevice: (id: string) => call<void>("DELETE", `/v1/devices/${encodeURIComponent(id)}`, undefined, true),
