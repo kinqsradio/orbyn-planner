@@ -1,6 +1,7 @@
 import { Search } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { CalendarPage } from "../features/calendar/CalendarPage";
+import { CompletedPage } from "../features/completed/CompletedPage";
 import { ListsPage } from "../features/lists/ListsPage";
 import { NotificationsPage } from "../features/notifications/NotificationsPage";
 import { ProjectsPage } from "../features/projects/ProjectsPage";
@@ -24,6 +25,7 @@ const PAGES: Record<string, () => ReactNode> = {
   "/lists": () => <ListsPage />,
   "/projects": () => <ProjectsPage />,
   "/notifications": () => <NotificationsPage />,
+  "/completed": () => <CompletedPage />,
   "/settings": () => <SettingsPage />,
   "/search": () => <SearchPage />,
 };
