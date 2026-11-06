@@ -67,6 +67,8 @@ export interface OutboxEntry {
   op: OutboxOp;
   /** Field names and their latest values (the whole record for a create). Empty for a purge. */
   changedFields: Record<string, unknown>;
+  /** When each field was last edited (ISO), so a field edited early is not given the time of a later edit of another. Older entries have none: `updatedAt` stands in. */
+  fieldTimes?: Record<string, string>;
   /** Kept while entries are folded together, so a retried send is not applied twice. */
   idempotencyKey: string;
   createdAt: string;

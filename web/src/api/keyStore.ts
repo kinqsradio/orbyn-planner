@@ -25,15 +25,21 @@ export interface SyncState {
   staged: Record<string, string>;
   /** The zone each staged entry was staged into, so the entry is cleared when that zone has nothing left to send. */
   stagedZone: Record<string, string>;
-  /** The trusted devices the zone keys were last sent to (sorted ids joined), so a new device gets them. */
-  keysFor: string;
+  /** Per zone, the set of trusted devices (sorted ids joined) its keys were last sent to and the server confirmed. A zone is not uploaded to until this matches the current set. */
+  keysSent: Record<string, string>;
+  /** Zones this device made (or chose to make) the key for, so a crash between making a zone and its key can't strand it. */
+  made: Record<string, true>;
+  /** Records that can't be sent, by "type:id", with why (too large, say): left out of uploads and shown. */
+  failed: Record<string, string>;
+  /** Zones skipped for a while after a refusal: the time they may be tried again (ms) and the next wait. */
+  backoff: Record<string, { until: number; step: number }>;
   /** Ids of the records the engine could not open yet, by zone, for Settings. */
   quarantined: Record<string, string[]>;
   /** ISO time of the last complete sync. */
   lastSyncedAt: string | null;
 }
 
-export const emptySyncState = (): SyncState => ({ zones: [], zoneOf: {}, staged: {}, stagedZone: {}, keysFor: "", quarantined: {}, lastSyncedAt: null });
+export const emptySyncState = (): SyncState => ({ zones: [], zoneOf: {}, staged: {}, stagedZone: {}, keysSent: {}, made: {}, failed: {}, backoff: {}, quarantined: {}, lastSyncedAt: null });
 
 /** The account and device the stored keys belong to. */
 export interface DeviceIdentity {

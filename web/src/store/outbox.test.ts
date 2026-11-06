@@ -14,7 +14,7 @@ const purge: Patch = { type: "task", id: "t1", op: "purge", key: "k4" };
 describe("coalesce", () => {
   it("a create makes an entry holding the whole record", () => {
     expect(coalesce(undefined, create, AT1)).toEqual({
-      write: { seq: 0, type: "task", id: "t1", op: "create", changedFields: task, idempotencyKey: "k1", createdAt: AT1, updatedAt: AT1 },
+      write: { seq: 0, type: "task", id: "t1", op: "create", changedFields: task, fieldTimes: { id: AT1, title: AT1 }, idempotencyKey: "k1", createdAt: AT1, updatedAt: AT1 },
     });
   });
 
@@ -27,7 +27,8 @@ describe("coalesce", () => {
     const first = coalesce(undefined, update({ title: "b", notes: "n" }), AT1).write!;
     const entry = { ...first, seq: 7 };
     const { write } = coalesce(entry, update({ title: "c" }, "k9"), AT2);
-    expect(write).toEqual({ ...entry, changedFields: { title: "c", notes: "n" }, idempotencyKey: "k9", updatedAt: AT2 });
+    // Each field keeps the time of its own last edit: the notes were not touched at AT2.
+    expect(write).toEqual({ ...entry, changedFields: { title: "c", notes: "n" }, fieldTimes: { title: AT2, notes: AT1 }, idempotencyKey: "k9", updatedAt: AT2 });
   });
 
   it("an entry that is still a create stays a create, however it is edited or deleted", () => {
