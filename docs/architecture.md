@@ -81,7 +81,7 @@ To run the same thing locally, check the engine out at the pinned commit (`git -
 cd /tmp/engine-pin
 docker compose down --volumes --remove-orphans      # a fresh database
 docker compose build
-SETUP=$(docker compose run --rm server auth-setup | tail -1)
+SETUP=$(docker compose run --rm -T server auth-setup)   # prints the value alone
 ORBYN_AUTH_SETUP="$SETUP" docker compose up -d postgres migrate server worker
 docker compose exec -T postgres psql -U orbyn -d orbyn -c "delete from auth_attempts"
 curl -fsS http://127.0.0.1:8080/health
@@ -89,7 +89,7 @@ cd <planner>/web
 ORBYN_E2E_ENGINE=http://127.0.0.1:8080 npx vitest run src/e2e --no-file-parallelism
 docker compose down --volumes                       # in the engine checkout
 ```
-The files run one after the other: both pair devices from one address, and run together they intermittently time out waiting for a pairing to finish. Each run makes three accounts, and the engine allows 20 sign-ups an hour per address. If a run answers "Too many attempts", clear the window: `docker compose exec -T postgres psql -U orbyn -d orbyn -c "delete from auth_attempts"`.
+The files run one after the other: both pair devices from one address, and run together they intermittently time out waiting for a pairing to finish.
 
 The compose file publishes Postgres on 5432 and the server on 8080, so another engine stack on the machine is in the way. Put a `compose.override.yaml` beside the checkout's `compose.yaml` that moves the ports (`ports: !reset []` for `postgres`, `ports: !override ["127.0.0.1:18080:8080"]` for `server`) and give every service of `orbyn-engine:dev` another `image:` so the build does not replace your own, set `COMPOSE_PROJECT_NAME` to another name, and point `ORBYN_E2E_ENGINE` at the new port. Each run makes a few accounts and the engine allows 20 sign-ups an hour per address; if a run on a reused database answers "Too many attempts", the `delete from auth_attempts` line above clears the window.
 
