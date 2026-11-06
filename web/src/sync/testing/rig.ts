@@ -22,6 +22,8 @@ export interface SyncRig {
   engine: MockEngine;
   a: TestDevice;
   b: TestDevice;
+  /** A third trusted device, only with `{ third: true }`. */
+  c: TestDevice;
   /** Moves the clock every device and the server share. */
   clock: { now: number };
   /** Another store over the same stored data: what a reload of the device shows. */
@@ -45,7 +47,7 @@ export interface SyncRig {
 }
 
 /** Two trusted devices of one account on the mock server, with the real module and each pinning the other. Tests only. */
-export async function createSyncRig(): Promise<SyncRig> {
+export async function createSyncRig(options: { third?: boolean } = {}): Promise<SyncRig> {
   const crypto = realAuthCrypto();
   const clock = { now: Date.UTC(2026, 10, 7, 10, 0, 0) };
   const network: SyncRig["network"] = { down: false, loseAnswer: false, refuseKeys: false, dropZoneMake: false, refuseUploads: new Map<string, { status: number; code: string }>(), delayMs: 0 };
@@ -83,7 +85,7 @@ export async function createSyncRig(): Promise<SyncRig> {
     await keys.saveKeys(material.export(wrap));
     const services = createAuthServices({ fetch: fetchFn, baseUrl: "http://engine.test", keys, crypto: () => crypto, now: () => clock.now, wrapSecret: async () => wrap.slice(), poll: { firstMs: 5, maxMs: 15, totalMs: 4000 } });
     const device: Device = {
-      id, name: n === 1 ? "A" : "B", platform: "web", state: "trusted", signing_key: material.signingKey(), agreement_key: material.agreementKey(),
+      id, name: ["", "A", "B", "C"][n]!, platform: "web", state: "trusted", signing_key: material.signingKey(), agreement_key: material.agreementKey(),
       created_at: new Date(clock.now).toISOString(), approved_by: null, approval_signature: null, current: false,
     };
     const session: StoredSession = { token: `tok-${n}`, accountId: ACCOUNT, deviceId: id, deviceState: "trusted", expiresAt: "2030-01-01T00:00:00Z", email: "s@example.com", name: "" };
@@ -98,17 +100,21 @@ export async function createSyncRig(): Promise<SyncRig> {
 
   const a = await make(1);
   const b = await make(2);
-  engine.accounts.set("s@example.com", { id: ACCOUNT, email: "s@example.com", verifier: new Uint8Array(32), devices: [a.device, b.device] });
-  engine.sessions.set("tok-1", { accountId: ACCOUNT, deviceId: a.id });
-  engine.sessions.set("tok-2", { accountId: ACCOUNT, deviceId: b.id });
-  // Each device trusts the other, as it would have after the two-way comparison.
-  for (const [me, other] of [[a, b], [b, a]] as const) {
-    await me.services.engine.run(me.session, (e) => e.sync?.pinDevice(other.id, other.device.signing_key, other.device.agreement_key));
+  const c = options.third ? await make(3) : (undefined as unknown as TestDevice);
+  const all = options.third ? [a, b, c] : [a, b];
+  engine.accounts.set("s@example.com", { id: ACCOUNT, email: "s@example.com", verifier: new Uint8Array(32), devices: all.map((d) => d.device) });
+  for (const [i, d] of all.entries()) engine.sessions.set(`tok-${i + 1}`, { accountId: ACCOUNT, deviceId: d.id });
+  // Each device trusts the others, as it would have after the two-way comparison.
+  for (const me of all) {
+    for (const other of all) {
+      if (other !== me) await me.services.engine.run(me.session, (e) => e.sync?.pinDevice(other.id, other.device.signing_key, other.device.agreement_key));
+    }
   }
   return {
     engine,
     a,
     b,
+    c,
     clock,
     network,
     reload: async (d) => {

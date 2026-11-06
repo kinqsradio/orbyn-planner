@@ -1,5 +1,9 @@
-import { render, renderHook, screen } from "@testing-library/react";
+import { render, renderHook, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StoreProvider } from "../../store/context";
+import { LocalStore } from "../../store/LocalStore";
+import { MemoryPersistence } from "../../store/persistence";
+import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { SyncState } from "../../sync/controller";
 import { SyncProviderForTests } from "../../sync/testing/SyncProviderForTests";
@@ -8,7 +12,7 @@ import { OnlyDeviceNote } from "../auth/AccountSettings";
 import { SyncSettings } from "../settings/SyncSettings";
 import { useSyncStatus } from "./SyncLine";
 
-const base: SyncState = { phase: "idle", devices: 2, lastSyncedAt: "2026-11-07T10:00:00Z", quarantined: 0, waitingForKeys: [], stranded: [], keysPending: [], dropped: [], failed: [], skipped: [], error: null, leader: true, live: true };
+const base: SyncState = { phase: "idle", devices: 2, lastSyncedAt: "2026-11-07T10:00:00Z", quarantined: 0, waitingForKeys: [], stranded: [], needsApproval: false, keysPending: [], dropped: [], failed: [], skipped: [], error: null, leader: true, live: true };
 
 describe("the sync line follows real sync when it runs", () => {
   const status = (sync: SyncState | null, pending = 0) => renderHook(() => useSyncStatus(pending, sync)).result.current.status;
@@ -32,9 +36,9 @@ describe("Settings shows sync", () => {
   it("says what is synced, lists what can't be opened yet, and syncs on request", async () => {
     const syncNow = vi.fn();
     render(
-      <SyncProviderForTests state={{ ...base, quarantined: 2, waitingForKeys: ["list:x"] }} syncNow={syncNow}>
+      <WithStore><SyncProviderForTests state={{ ...base, quarantined: 2, waitingForKeys: ["list:x"] }} syncNow={syncNow}>
         <SyncSettings />
-      </SyncProviderForTests>,
+      </SyncProviderForTests></WithStore>,
     );
     expect(screen.getByRole("status")).toHaveTextContent("Synced · 2 devices");
     expect(screen.getByText(/2 items from your other devices can’t be opened on this one yet/)).toBeInTheDocument();
@@ -45,13 +49,16 @@ describe("Settings shows sync", () => {
 
   it("shows nothing when this device isn't syncing", () => {
     const { container } = render(
-      <SyncProviderForTests state={null}>
+      <WithStore><SyncProviderForTests state={null}>
         <SyncSettings />
-      </SyncProviderForTests>,
+      </SyncProviderForTests></WithStore>,
     );
     expect(container).toBeEmptyDOMElement();
   });
 });
+
+const plannerStore = new LocalStore({ persistence: new MemoryPersistence(), broadcast: false });
+const WithStore = ({ children }: { children: ReactNode }) => <StoreProvider store={plannerStore}>{children}</StoreProvider>;
 
 describe("a zone no device can open", () => {
   const stranded = { ...base, devices: 1, waitingForKeys: ["list:trip"], stranded: ["list:trip"] };
@@ -59,37 +66,55 @@ describe("a zone no device can open", () => {
   it("is said plainly in Settings and can be removed for the account, and isn't also called merely waiting", async () => {
     const removeStranded = vi.fn(async () => undefined);
     render(
-      <SyncProviderForTests state={stranded} removeStranded={removeStranded}>
+      <WithStore><SyncProviderForTests state={stranded} removeStranded={removeStranded}>
         <SyncSettings />
-      </SyncProviderForTests>,
+      </SyncProviderForTests></WithStore>,
     );
     expect(screen.getByText("This list can’t be opened on any of your devices.")).toBeInTheDocument();
     expect(screen.queryByText(/waiting for a key from another of your devices/)).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    expect(removeStranded).not.toHaveBeenCalled(); // asks first
+    const ask = screen.getByRole("dialog", { name: "Delete on every device" });
+    expect(ask).toHaveTextContent("Delete “this list” on every device? This can’t be undone.");
+    await userEvent.click(within(ask).getByRole("button", { name: "Cancel" }));
+    expect(removeStranded).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
     expect(removeStranded).toHaveBeenCalledWith("list:trip");
+  });
+
+  it("a device that must be approved again says so, once, and nothing is called stranded or waiting", () => {
+    render(
+      <WithStore><SyncProviderForTests state={{ ...stranded, needsApproval: true, waitingForKeys: [], stranded: [] }}>
+        <SyncSettings />
+      </SyncProviderForTests></WithStore>,
+    );
+    expect(screen.getAllByText("This device needs to be approved again to open your lists. Approve it from another of your devices.")).toHaveLength(1);
+    expect(screen.queryByText(/can’t be opened on any of your devices/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Remove it" })).toBeNull();
   });
 
   it("shows on the lists page for lists only", () => {
     render(
-      <SyncProviderForTests state={{ ...stranded, stranded: ["list:trip", "calendar:work"] }}>
+      <WithStore><SyncProviderForTests state={{ ...stranded, stranded: ["list:trip", "calendar:work"] }}>
         <StrandedZones only="list" />
-      </SyncProviderForTests>,
+      </SyncProviderForTests></WithStore>,
     );
     expect(screen.getAllByRole("alert")).toHaveLength(1);
   });
 
   it("sign-out warns on the only trusted device, and not when there are others", () => {
     const { unmount } = render(
-      <SyncProviderForTests state={stranded}>
+      <WithStore><SyncProviderForTests state={stranded}>
         <OnlyDeviceNote />
-      </SyncProviderForTests>,
+      </SyncProviderForTests></WithStore>,
     );
     expect(screen.getByRole("alert")).toHaveTextContent("This is your only trusted device. Removing its planner here can’t be undone: lists only this device can open will be lost.");
     unmount();
     render(
-      <SyncProviderForTests state={base}>
+      <WithStore><SyncProviderForTests state={base}>
         <OnlyDeviceNote />
-      </SyncProviderForTests>,
+      </SyncProviderForTests></WithStore>,
     );
     expect(screen.queryByRole("alert")).toBeNull();
   });

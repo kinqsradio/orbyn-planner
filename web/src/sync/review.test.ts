@@ -409,3 +409,25 @@ describe("a zone this device made is its own to key again", () => {
     r.engine.fetch = real;
   });
 });
+
+describe("a remote delete never takes a create that wasn't acknowledged", () => {
+  it("the create reached the server but its answer was lost; B deletes the record; A keeps it and its create waits", async () => {
+    const r = await createSyncRig();
+    r.a.store.addTask({ title: "Seed" });
+    await sync(r.a);
+    await sync(r.b);
+    const task = r.a.store.addTask({ title: "Created, answer lost" });
+    r.network.loseAnswer = true;
+    await sync(r.a).catch(() => undefined); // on the server; A never heard, so the create is still in A's outbox
+    expect(r.a.store.getState().outbox.some((o) => o.id === task.id && o.op === "create")).toBe(true);
+    await sync(r.b);
+    expect(titles(r.b)).toContain("Created, answer lost");
+    // B purges it for good: a signed delete.
+    await r.b.persistence.apply({ at: new Date(r.clock.now).toISOString(), patches: [{ type: "task", id: task.id, op: "purge", key: "purge" }] });
+    r.b.store = await r.reload(r.b);
+    await sync(r.b);
+    const report = await sync(r.a);
+    expect(report.received).toBeGreaterThanOrEqual(0);
+    expect(titles(r.a)).toContain("Created, answer lost"); // the removal didn't take A's unacknowledged create
+  });
+});
