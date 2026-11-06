@@ -60,8 +60,9 @@ export function readExport(text: string): PlannerExport {
     throw new ExportError("This isn’t an Orbyn Planner export.");
   }
   const d = data as Partial<PlannerExport> | null;
-  if (!d || d.format !== EXPORT_FORMAT || typeof d.formatVersion !== "number") throw new ExportError("This isn’t an Orbyn Planner export.");
-  if (d.formatVersion > EXPORT_VERSION) throw new ExportError("This export is from a newer version of Orbyn Planner.");
+  const version = d?.formatVersion;
+  if (!d || d.format !== EXPORT_FORMAT || typeof version !== "number" || !Number.isInteger(version) || version < 1) throw new ExportError("This isn’t an Orbyn Planner export.");
+  if (version > EXPORT_VERSION) throw new ExportError("This export is from a newer version of Orbyn Planner.");
   const arrays = [d.lists, d.tasks, d.projects, d.calendars, d.events, d.trash?.tasks, d.trash?.events];
   if (!arrays.every(Array.isArray)) throw new ExportError("This Orbyn Planner export is missing part of the planner.");
   return d as PlannerExport;

@@ -9,7 +9,19 @@ const PRIORITY: Record<Priority, number | null> = { none: null, high: 1, medium:
 const PARTSTAT: Record<Response, string> = { accepted: "ACCEPTED", declined: "DECLINED", tentative: "TENTATIVE", none: "NEEDS-ACTION" };
 
 /** TEXT values: backslash, semicolon, comma and line breaks are escaped (RFC 5545 §3.3.11). */
-const text = (s: string) => s.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
+const text = (s: string) =>
+  s
+    .replace(/\\/g, "\\\\")
+    .replace(/;/g, "\\;")
+    .replace(/,/g, "\\,")
+    .replace(/\r\n?|\n/g, "\\n")
+    // Other control characters have no place in a TEXT value and could break the line structure.
+    // eslint-disable-next-line no-control-regex -- matching control characters is the point
+    .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
+
+/** An address safe to put after `mailto:`: no whitespace, control characters or iCalendar delimiters. */
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
+const SAFE_EMAIL = /^[^\s\x00-\x1f\x7f;:,"<>\\]+@[^\s\x00-\x1f\x7f;:,"<>\\]+$/;
 
 /** `YYYY-MM-DD` or `YYYY-MM-DDTHH:mm` as `YYYYMMDD` or `YYYYMMDDTHHMM00` (floating: the wall time as written). */
 function when(value: string): { value: string; date: boolean } {
@@ -58,9 +70,13 @@ function rrule(repeat: Repeat, dateOnly: boolean): string {
 /** The time of day an occurrence of a series has, taken from its first one. */
 const atTime = (date: string, first: string) => (first.includes("T") ? `${date}T${first.split("T")[1]}` : date);
 
-function alarm(minutes: number | null): string[] {
+/** Date-only items remind at 09:00 that day, as the planner does, so the trigger counts from 09:00, not midnight. */
+const DATE_ONLY_REMINDER = 9 * 60;
+
+function alarm(minutes: number | null, dateOnly: boolean): string[] {
   if (minutes === null) return [];
-  const trigger = minutes === 0 ? "PT0S" : `-PT${minutes}M`;
+  const offset = dateOnly ? DATE_ONLY_REMINDER - minutes : -minutes;
+  const trigger = offset === 0 ? "PT0S" : offset > 0 ? `PT${offset}M` : `-PT${-offset}M`;
   return ["BEGIN:VALARM", "ACTION:DISPLAY", "DESCRIPTION:Reminder", `TRIGGER:${trigger}`, "END:VALARM"];
 }
 
@@ -87,8 +103,11 @@ function vevent(e: CalendarEvent, stamp: string, all: readonly CalendarEvent[]):
     const overridden = new Set(all.filter((o) => o.overrideOf?.id === e.id && o.deletedAt === null).map((o) => o.overrideOf!.date));
     lines.push(...exdates(e.repeat, e.start, overridden));
   }
-  for (const p of e.people) lines.push(`ATTENDEE;PARTSTAT=${PARTSTAT[p.response]}:mailto:${p.email}`);
-  lines.push(...alarm(e.reminder), "END:VEVENT");
+  for (const p of e.people) {
+    // An address that could break the file is left out rather than written.
+    if (SAFE_EMAIL.test(p.email)) lines.push(`ATTENDEE;PARTSTAT=${PARTSTAT[p.response]}:mailto:${p.email}`);
+  }
+  lines.push(...alarm(e.reminder, start.date), "END:VEVENT");
   return lines;
 }
 
@@ -105,7 +124,7 @@ function vtodo(t: Task, listName: string, stamp: string): string[] {
   if (t.done) lines.push("STATUS:COMPLETED", ...(t.completedAt ? [`COMPLETED:${utc(t.completedAt)}`] : []));
   else lines.push("STATUS:NEEDS-ACTION");
   if (t.repeat) lines.push(rrule(t.repeat.repeat, due.date), ...exdates(t.repeat, t.due!, new Set()));
-  lines.push(...alarm(t.reminder), "END:VTODO");
+  lines.push(...alarm(t.reminder, due.date), "END:VTODO");
   return lines;
 }
 

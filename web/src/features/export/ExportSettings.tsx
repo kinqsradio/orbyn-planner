@@ -48,7 +48,7 @@ export function ExportSettings() {
         <Modal label="Export your planner" onClose={() => setOpen(false)}>
           <b className="card-title">Export your planner</b>
           <p className="t3 small">Made on this device from what is stored here, and saved as a file. Nothing is sent to Orbyn.</p>
-          <p role="note" className="small"><b style={{ fontWeight: 500 }}>The file is not encrypted.</b> Anyone who gets it can read your planner, so keep it somewhere safe. It has no keys or sign-in details.</p>
+          <p role="note" className="small"><b style={{ fontWeight: 500 }}>The file is not encrypted.</b> Anyone who gets it can read your planner, so keep it somewhere safe. It has no keys or sign-in details, but it does include the web addresses of calendars you subscribe to, which can be private.</p>
           {message && <p className="err" role="alert">{message}</p>}
           <div className="dialog-actions" style={{ flexWrap: "wrap" }}>
             <button type="button" className="ghost" onClick={() => setOpen(false)}>Cancel</button>

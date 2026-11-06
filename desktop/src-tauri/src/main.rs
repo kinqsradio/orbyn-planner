@@ -61,6 +61,14 @@ fn export_name_ok(name: &str) -> bool {
         && name.len() <= 100
         && !name.starts_with('.')
         && name.chars().all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | ' '))
+        && !windows_reserved(name)
+}
+
+/// Windows device names (CON, NUL, COM1 …), which it refuses as file names whatever the extension.
+fn windows_reserved(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or("").trim_end().to_ascii_uppercase();
+    matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ((stem.starts_with("COM") || stem.starts_with("LPT")) && stem.len() == 4 && stem.as_bytes()[3].is_ascii_digit() && stem.as_bytes()[3] != b'0')
 }
 
 /// The page's second command: save an export. The person always picks the place in the system's own save dialog (the page
@@ -234,10 +242,10 @@ mod tests {
 
     #[test]
     fn only_plain_json_and_ics_names_are_saved() {
-        for ok in ["orbyn-planner-2026-11-07.json", "orbyn-planner-2026-11-07.ics", "My planner.json"] {
+        for ok in ["orbyn-planner-2026-11-07.json", "orbyn-planner-2026-11-07.ics", "My planner.json", "COM0.json", "CONSOLE.json"] {
             assert!(export_name_ok(ok), "{ok}");
         }
-        for bad in ["", ".json", "a.txt", "../a.json", "a/b.json", "a\\b.ics", "a.json.exe", "a\n.json", &format!("{}.json", "x".repeat(100))] {
+        for bad in ["", ".json", "a.txt", "../a.json", "a/b.json", "a\\b.ics", "a.json.exe", "a\n.json", "CON.json", "nul.ics", "Com1.json", "LPT9.ics", &format!("{}.json", "x".repeat(100))] {
             assert!(!export_name_ok(bad), "{bad:?}");
         }
     }

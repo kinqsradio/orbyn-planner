@@ -50,6 +50,9 @@ describe("the JSON export", () => {
     ["not JSON", "hello"],
     ["another kind of JSON", JSON.stringify({ tasks: [] })],
     ["a newer version", JSON.stringify({ format: "orbyn-planner-export", formatVersion: EXPORT_VERSION + 1, lists: [], tasks: [], projects: [], calendars: [], events: [], trash: { tasks: [], events: [] } })],
+    ["version 0", JSON.stringify({ format: "orbyn-planner-export", formatVersion: 0, lists: [], tasks: [], projects: [], calendars: [], events: [], trash: { tasks: [], events: [] } })],
+    ["version -1", JSON.stringify({ format: "orbyn-planner-export", formatVersion: -1, lists: [], tasks: [], projects: [], calendars: [], events: [], trash: { tasks: [], events: [] } })],
+    ["version 0.5", JSON.stringify({ format: "orbyn-planner-export", formatVersion: 0.5, lists: [], tasks: [], projects: [], calendars: [], events: [], trash: { tasks: [], events: [] } })],
     ["a missing part", JSON.stringify({ format: "orbyn-planner-export", formatVersion: 1, lists: [] })],
   ])("refuses %s", (_name, text) => {
     expect(() => readExport(text)).toThrow(/Orbyn Planner/);

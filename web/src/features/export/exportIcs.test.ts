@@ -49,6 +49,9 @@ const cases: Case[] = [
   { name: "a task with a due time is a VTODO with priority, its list as category and a reminder", tasks: [task({ priority: "high", reminder: 30 })], has: ["BEGIN:VTODO", "UID:t1@orbyn-planner", "DUE:20261107T120000", "SUMMARY:Send the brief", "CATEGORIES:Inbox", "PRIORITY:1", "STATUS:NEEDS-ACTION", "TRIGGER:-PT30M"] },
   { name: "a done task is COMPLETED with its time in UTC", tasks: [task({ due: "2026-11-07", done: true, completedAt: "2026-11-07T09:30:00.000Z" })], has: ["DUE;VALUE=DATE:20261107", "STATUS:COMPLETED", "COMPLETED:20261107T093000Z"] },
   { name: "a repeating task has DTSTART at the series start and an RRULE", tasks: [task({ due: "2026-11-21", repeat: newSeries("2026-11-07", never("weekly")) })], has: ["DTSTART;VALUE=DATE:20261107", "DUE;VALUE=DATE:20261121", "RRULE:FREQ=WEEKLY"] },
+  { name: "an attendee address that could break the file is left out", events: [event({ people: [{ email: "a@b.com\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nSUMMARY:Injected", response: "none" }, { email: "ok@example.com", response: "none" }] })], has: ["ATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:ok@example.com"], lacks: ["Injected", "a@b.com"] },
+  { name: "control characters are dropped from text, and a lone CR is a line break", events: [event({ title: "A\u0000B\u001bC", notes: "one\rtwo" })], has: ["SUMMARY:ABC", "DESCRIPTION:one\\ntwo"] },
+  { name: "a date-only reminder counts from 09:00, as the planner reminds", tasks: [task({ due: "2026-11-07", reminder: 30 }), task({ id: "t2", due: "2026-11-08", reminder: 600 })], has: ["TRIGGER:PT510M", "TRIGGER:-PT60M"] },
   { name: "tasks without a due date, and deleted tasks, are left out", tasks: [task({ id: "nodue", title: "Someday", due: null }), task({ id: "del", title: "Deleted task", deletedAt: "2026-11-02T00:00:00Z" })], lacks: ["Someday", "Deleted task", "BEGIN:VTODO"] },
 ];
 
