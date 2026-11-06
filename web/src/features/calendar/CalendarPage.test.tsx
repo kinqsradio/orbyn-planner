@@ -6,6 +6,7 @@ import { ClockProvider } from "../../app/clock";
 import { LocalStore } from "../../store/LocalStore";
 import { MemoryPersistence } from "../../store/persistence";
 import { repeatEvery } from "../../store/repeat";
+import { viewDays } from "./CalendarPage";
 
 // Friday 6 November 2026, 10:00. The week is Monday 2 to Friday 6, ISO week 45.
 const NOW = new Date(2026, 10, 6, 10, 0);
@@ -52,7 +53,7 @@ describe("Week view", () => {
     await open({ seed: seedWeek });
     expect(screen.getByRole("heading", { level: 1, name: "November 2026" })).toBeInTheDocument();
     expect(screen.getByText("Week 45")).toBeInTheDocument();
-    expect(Array.from(document.querySelectorAll(".dh")).map((d) => d.textContent)).toEqual(["Mon 2", "Tue 3", "Wed 4", "Thu 5", "Fri 6"]);
+    expect(Array.from(document.querySelectorAll(".dh")).map((d) => d.textContent)).toEqual(["Mon 2", "Tue 3", "Wed 4", "Thu 5", "Fri 6", "Sat 7", "Sun 8"]);
 
     const planning = screen.getByRole("button", { name: /Team planning/ });
     const club = screen.getByRole("button", { name: /Book club/ });
@@ -102,10 +103,13 @@ describe("Week view", () => {
     expect(screen.getByText("Room 3 · 2h")).toBeInTheDocument();
   });
 
-  it("shows seven days when the setting says so", async () => {
-    localStorage.setItem("orbyn-planner.prefs", JSON.stringify({ weekStart: "mon", weekDays: 7 }));
+  it("shows the whole week by default, and Monday to Friday when asked", async () => {
     await open({ seed: seedWeek });
     expect(document.querySelectorAll(".dh")).toHaveLength(7);
+    document.getElementById("root")?.remove();
+    localStorage.setItem("orbyn-planner.prefs", JSON.stringify({ weekStart: "mon", weekDays: 5 }));
+    await open({ seed: seedWeek });
+    expect(Array.from(document.querySelectorAll(".dh")).map((d) => d.textContent)).toEqual(["Mon 2", "Tue 3", "Wed 4", "Thu 5", "Fri 6"]);
   });
 });
 
@@ -345,8 +349,9 @@ describe("Calendars", () => {
 describe("Settings · Calendars", () => {
   it("lists the calendars and lets the week be set", async () => {
     await open({ path: "/settings" });
-    await userEvent.click(screen.getByRole("radio", { name: "7 days" }));
-    expect(JSON.parse(localStorage.getItem("orbyn-planner.prefs")!)).toMatchObject({ weekDays: 7 });
+    expect(screen.getByRole("radio", { name: "7 days" })).toBeChecked();
+    await userEvent.click(screen.getByRole("radio", { name: "5 days" }));
+    expect(JSON.parse(localStorage.getItem("orbyn-planner.prefs")!)).toMatchObject({ weekDays: 5 });
     await userEvent.click(screen.getByRole("button", { name: "Calendars" }));
     expect(screen.getByRole("list", { name: "Calendars" })).toHaveTextContent("Personal");
     expect(screen.getByRole("button", { name: "Subscribe to a calendar" })).toBeInTheDocument();
@@ -371,5 +376,48 @@ describe("Today with events", () => {
     expect(screen.getByText(/3 events, 2 tasks/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Book club" }));
     expect(screen.getByRole("complementary", { name: "Event" })).toBeInTheDocument();
+  });
+});
+
+describe("Monday to Friday and the weekend", () => {
+  it("viewDays shows 7 days when today is a weekend day of the week being shown, and 5 otherwise", () => {
+    const week = (anchor: string, today: string, weekDays: 5 | 7 = 5, weekStart: "mon" | "sun" = "mon") => viewDays("week", anchor, weekStart, weekDays, today);
+    // Saturday 7 and Sunday 8 November 2026: the current week keeps its weekend.
+    expect(week("2026-11-07", "2026-11-07")).toHaveLength(7);
+    expect(week("2026-11-07", "2026-11-07")[0]).toBe("2026-11-02");
+    expect(week("2026-11-08", "2026-11-08")).toHaveLength(7);
+    expect(week("2026-11-04", "2026-11-07")).toHaveLength(7); // another day of the same week
+    // A weekday today, or another week, stays Monday to Friday.
+    expect(week("2026-11-06", "2026-11-06")).toHaveLength(5);
+    expect(week("2026-11-14", "2026-11-07")).toHaveLength(5);
+    expect(week("2026-10-31", "2026-11-07")).toHaveLength(5);
+    // The 7-day setting always shows 7, and a Sunday start keeps its own first day.
+    expect(week("2026-11-06", "2026-11-06", 7)).toHaveLength(7);
+    expect(week("2026-11-07", "2026-11-07", 5, "sun")[0]).toBe("2026-11-01");
+  });
+
+  it("the Week view includes today on a Saturday even with the 5-day setting", async () => {
+    localStorage.setItem("orbyn-planner.prefs", JSON.stringify({ weekStart: "mon", weekDays: 5 }));
+    // Saturday 7 November 2026.
+    const saturday = new Date(2026, 10, 7, 10, 0);
+    window.history.replaceState(null, "", "/calendar");
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("offline"))));
+    const store = new LocalStore({ persistence: new MemoryPersistence(), now: () => saturday, broadcast: false });
+    await store.ready;
+    const root = document.createElement("div");
+    root.id = "root";
+    document.body.appendChild(root);
+    render(
+      <ClockProvider value={() => saturday}>
+        <App store={store} />
+      </ClockProvider>,
+      { container: root },
+    );
+    expect(Array.from(document.querySelectorAll(".dh")).map((d) => d.textContent)).toEqual(["Mon 2", "Tue 3", "Wed 4", "Thu 5", "Fri 6", "Sat 7", "Sun 8"]);
+    expect(document.querySelector(".dh.today")).toHaveTextContent("Sat 7");
+    expect(screen.getByTestId("now").parentElement).toHaveAttribute("data-day", "2026-11-07");
+    // The next week is an ordinary Monday to Friday week.
+    await userEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(document.querySelectorAll(".dh")).toHaveLength(5);
   });
 });
