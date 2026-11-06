@@ -13,7 +13,7 @@ import { refKey } from "../store/outbox";
 import { storedOf } from "../store/records";
 import type { OutboxEntry, PlannerStore, RecordType, RemoteChange } from "../store/types";
 import { acceptable, stampFields, valuesOf, zoneOf, type Accepted, type Applied, type Stamp, type StampedFields, type ZoneCheck } from "./mapping";
-import { pinnedTokens, TokenExpired, type ZoneTokens } from "./tokens";
+import { pinnedTokens, type ZoneTokens } from "./tokens";
 
 /** Something that stops a sync with a reason the person can be told. */
 export class SyncError extends Error {
@@ -103,7 +103,7 @@ export async function runCycle(
     });
   };
 
-  const withEngine = async <T>(fn: (e: Engine) => T, restoreAtMs?: number): Promise<T> => {
+  const withEngine = async <T>(fn: (e: Engine) => T): Promise<T> => {
     alive();
     const result = await services.engine.run(
       session,
@@ -111,7 +111,6 @@ export async function runCycle(
         if (!e.sync) throw new SyncError("sync_unavailable", "This build can't sync: the engine's module isn't loaded.");
         return fn(e as Engine);
       },
-      { restoreAtMs },
     );
     alive();
     return result;
@@ -121,6 +120,16 @@ export async function runCycle(
    * The records an `Applied` changed, as the store should have them. `types` holds the record types the
    * server reported for a page (not authenticated: they are only checked against what the zone allows).
    */
+  /** The type of the local record with this id that belongs to the zone, if there is one. */
+  function localTypeOf(zone: string, id: string): string | undefined {
+    const s = store.getState();
+    for (const [type, list] of [["task", s.tasks], ["list", s.lists], ["event", s.events], ["calendar", s.calendars], ["project", s.projects]] as const) {
+      const found = (list as readonly { id: string; listId?: string; calendarId?: string }[]).find((r) => r.id === id);
+      if (found && zoneOf(type, found) === zone) return type;
+    }
+    return undefined;
+  }
+
   function collect(e: Engine, zone: string, applied: Applied, options: { retried?: boolean; types?: Map<string, string> } = {}): RemoteChange[] {
     const out: RemoteChange[] = [];
     const outbox = new Map(store.getState().outbox.map((o) => [refKey(o), o] as const));
@@ -128,8 +137,9 @@ export async function runCycle(
     for (const id of applied.changed) {
       const json = e.sync.record(zone, id);
       if (!json) continue;
-      let fields = valuesOf(parse<StampedFields>(json));
-      const type = acceptable(zone, id, fields, options.types?.get(id));
+      const record = parse<{ record_type: string; fields: StampedFields }>(json);
+      let fields = valuesOf(record.fields);
+      const type = acceptable(zone, id, record.record_type, fields, options.types?.get(id));
       if (!type) {
         rejected.push(id); // not what this zone may hold: quarantined, never applied
         continue;
@@ -145,7 +155,8 @@ export async function runCycle(
       out.push({ type, id, fields });
     }
     for (const id of applied.removed) {
-      const type = acceptable(zone, id, null, options.types?.get(id));
+      // The engine has no record to name a type for: the server's type for the page, or the local record's.
+      const type = acceptable(zone, id, options.types?.get(id) ?? localTypeOf(zone, id), null, options.types?.get(id));
       if (!type) {
         rejected.push(id);
         continue;
@@ -158,6 +169,8 @@ export async function runCycle(
     // Quarantine: what could not be opened or was rejected, less what has opened since.
     // A retry lists exactly what is still unopened; a fetch adds to what was waiting.
     const waiting = new Set(options.retried ? [] : (state.quarantined[zone] ?? []));
+    // What the engine could not open (or found invalid), from its own list, besides what this side rejected.
+    for (const q of parse<{ record_id: string; reason: string }[]>(e.sync.quarantined(zone))) waiting.add(q.record_id);
     for (const id of [...applied.quarantined, ...rejected]) waiting.add(id);
     for (const id of [...applied.changed, ...applied.removed, ...applied.evicted]) if (!rejected.includes(id)) waiting.delete(id);
     if (waiting.size > 0) state.quarantined[zone] = [...waiting];
@@ -178,10 +191,9 @@ export async function runCycle(
   // carries the time it was edited, and merging with what arrives decides field by field.
   const entries = store.getState().outbox.filter((o) => state.staged[refKey(o)] !== o.idempotencyKey && !state.failed[refKey(o)]?.startsWith(`${o.idempotencyKey}|`));
   if (entries.length > 0) {
-    const times = entries.flatMap((o) => Object.values(fieldTimesOf(o)).map((t) => Date.parse(t))).filter((t) => Number.isFinite(t));
     await withEngine((e) => {
       for (const entry of entries) stage(e, entry);
-    }, times.length > 0 ? Math.min(...times) : now());
+    });
     await save();
   }
 
@@ -229,7 +241,7 @@ export async function runCycle(
         return;
       }
       for (const group of staged) {
-        const stamp = parse<Stamp>(e.sync.tick(Date.parse(group.at) || now()));
+        const stamp = parse<Stamp>(e.sync.tickAt(Date.parse(group.at) || now(), now()));
         e.sync.stage(zone, entry.type, entry.id, JSON.stringify(stampFields(group.fields, stamp)));
       }
       state.zoneOf[key] = zone;
@@ -277,12 +289,7 @@ export async function runCycle(
         body = await api.changes(zone, since);
       } catch (error) {
         if (!tokens.isExpired(error)) throw error;
-        try {
-          await withEngine((e) => tokens.restart(e, zone));
-        } catch (stopped) {
-          if (stopped instanceof TokenExpired) throw new SyncError("token_expired", stopped.message);
-          throw stopped;
-        }
+        await withEngine((e) => tokens.restart(e, zone));
         continue; // restarted: fetch the zone again from the start
       }
       const types = new Map(body.records.map((r) => [r.record_id, r.record_type] as const));

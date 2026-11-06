@@ -359,19 +359,34 @@ describe("a device-only planner added to the account", () => {
   });
 });
 
-describe("what the server says a record is, and what a zone's own record looks like", () => {
-  it("a server type that isn't the one the zone and id imply is rejected (N4)", () => {
-    expect(acceptable("list:inbox", "t1", { listId: "inbox", title: "x" }, "task")).toBe("task");
-    expect(acceptable("list:inbox", "t1", { listId: "inbox", title: "x" }, "event")).toBeNull();
-    expect(acceptable("list:inbox", "t1", { listId: "inbox", title: "x" })).toBe("task"); // no server type: inferred
+describe("what the engine says a record is, and what a zone's own record looks like", () => {
+  const task = { listId: "inbox", title: "x" };
+
+  it("the engine's type must be one the zone may hold, and the server's type must agree with it (N4)", () => {
+    expect(acceptable("list:inbox", "t1", "task", task, "task")).toBe("task");
+    expect(acceptable("list:inbox", "t1", "task", task, "event")).toBeNull(); // the server says something else
+    expect(acceptable("list:inbox", "t1", "task", task)).toBe("task");
+    expect(acceptable("list:inbox", "t1", "event", { calendarId: "inbox" })).toBeNull(); // an event in a list zone
+    expect(acceptable("calendar:personal", "t1", "task", task)).toBeNull(); // a task in a calendar zone
+    expect(acceptable("project:p", "t1", "task", task)).toBeNull(); // a project zone holds only the project
+  });
+
+  it("the owner's id is only for the owner kind", () => {
+    expect(acceptable("list:inbox", "inbox", "task", { name: "x" })).toBeNull();
+    expect(acceptable("list:inbox", "t1", "list", { name: "x" })).toBeNull();
   });
 
   it("the zone's own record must look like a list: a task-shaped record with the owner's id is rejected", () => {
-    expect(acceptable("list:inbox", "inbox", { name: "Inbox", colour: "c1", isInbox: true })).toBe("list");
-    expect(acceptable("list:inbox", "inbox", { title: "A task wearing the list's id", listId: "inbox", done: false })).toBeNull();
-    expect(acceptable("list:inbox", "inbox", { name: "Inbox", listId: "inbox" })).toBeNull();
-    expect(acceptable("calendar:personal", "personal", { title: "An event", calendarId: "personal", start: "2026-11-07T10:00" })).toBeNull();
-    expect(acceptable("calendar:personal", "personal", { name: "Personal", colour: "c2" })).toBe("calendar");
+    expect(acceptable("list:inbox", "inbox", "list", { name: "Inbox", colour: "c1", isInbox: true })).toBe("list");
+    expect(acceptable("list:inbox", "inbox", "list", { title: "A task wearing the list's id", listId: "inbox", done: false })).toBeNull();
+    expect(acceptable("list:inbox", "inbox", "list", { name: "Inbox", listId: "inbox" })).toBeNull();
+    expect(acceptable("calendar:personal", "personal", "calendar", { title: "An event", calendarId: "personal", start: "2026-11-07T10:00" })).toBeNull();
+    expect(acceptable("calendar:personal", "personal", "calendar", { name: "Personal", colour: "c2" })).toBe("calendar");
+  });
+
+  it("a removal has no record: the type comes from the server or the local record", () => {
+    expect(acceptable("list:inbox", "t1", undefined, null)).toBeNull();
+    expect(acceptable("list:inbox", "t1", "task", null)).toBe("task");
   });
 });
 

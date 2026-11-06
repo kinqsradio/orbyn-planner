@@ -137,6 +137,12 @@ export class SyncEngine {
      */
     acceptEnvelopes(envelopes_json: string, devices_json: string): string;
     /**
+     * Like `applyChanges`, for a page fetched with `since` (empty for a fetch
+     * from the start). Required while a zone is fetched again after
+     * `tokenExpired`; a page fetched with another token is refused.
+     */
+    applyChangesFrom(zone: string, since: string | null | undefined, page_json: string, now: number): string;
+    /**
      * Applies one `ZoneChanges` page; returns what changed (`Applied`).
      */
     applyChanges(zone: string, page_json: string, now: number): string;
@@ -191,7 +197,13 @@ export class SyncEngine {
      */
     pinDevice(device_id: string, signing_key: string, agreement_key: string): void;
     /**
-     * A live record's `Fields`, or `undefined`.
+     * The zone's quarantined records, as `[{"record_id": ..., "reason": ...}]`
+     * with the reason `missing_zone_key`, `open_failed` or `invalid_record`.
+     * Never their bytes.
+     */
+    quarantined(zone: string): string;
+    /**
+     * A live record as `{"record_type": ..., "fields": Fields}`, or `undefined`.
      */
     record(zone: string, record_id: string): string | undefined;
     /**
@@ -211,6 +223,12 @@ export class SyncEngine {
      * The `RemoveDevice` body that removes `device_json`, signed by this device.
      */
     signRemoval(device_json: string): string;
+    /**
+     * How many records `restore` found with a newest stamp more than an hour
+     * ahead of its `now`. They were kept but did not move the clock; log a
+     * non-zero count.
+     */
+    skippedFutureStamps(): number;
     /**
      * The engine's state sealed under `wrap_secret`, bound to this device's
      * keys. Zone keys inside it never leave WebAssembly in the clear.
@@ -234,9 +252,21 @@ export class SyncEngine {
      */
     takeFromTrash(zone: string, record_id: string): string | undefined;
     /**
+     * A `Stamp` for an edit made at `edit_at` (milliseconds), which may be
+     * earlier than `now`: an edit queued while the app was closed. The clock's
+     * rules hold: the stamp is never earlier than the last one this device
+     * issued or saw. An `edit_at` after `now` is taken as `now`, silently.
+     */
+    tickAt(edit_at: number, now: number): string;
+    /**
      * A `Stamp` for a new edit at `now` (milliseconds).
      */
     tick(now: number): string;
+    /**
+     * Call on a `token_expired` answer to a fetch or an upload: the token is
+     * forgotten, so `token(zone)` is empty and the zone is fetched from the start.
+     */
+    tokenExpired(zone: string): void;
     /**
      * The zone's change token for `?since=`, or `undefined` to start from the beginning.
      */
@@ -336,6 +366,7 @@ export interface InitOutput {
     readonly syncengine_abandonUpload: (a: number, b: number, c: number, d: number) => void;
     readonly syncengine_acceptEnvelopes: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly syncengine_applyChanges: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
+    readonly syncengine_applyChangesFrom: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
     readonly syncengine_buildUpload: (a: number, b: number, c: number, d: number) => void;
     readonly syncengine_checkZones: (a: number, b: number, c: number, d: number) => void;
     readonly syncengine_confirmApproval: (a: number, b: number, c: number, d: number, e: number) => void;
@@ -348,18 +379,22 @@ export interface InitOutput {
     readonly syncengine_item: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly syncengine_joinApproval: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly syncengine_pinDevice: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
+    readonly syncengine_quarantined: (a: number, b: number, c: number, d: number) => void;
     readonly syncengine_record: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly syncengine_restore: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly syncengine_retryQuarantined: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly syncengine_rotateZoneKey: (a: number, b: number, c: number, d: number) => void;
     readonly syncengine_signRemoval: (a: number, b: number, c: number, d: number) => void;
+    readonly syncengine_skippedFutureStamps: (a: number) => number;
     readonly syncengine_snapshot: (a: number, b: number, c: number, d: number) => void;
     readonly syncengine_stage: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
     readonly syncengine_stageItem: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
     readonly syncengine_startApproval: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly syncengine_takeFromTrash: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly syncengine_tick: (a: number, b: number, c: number) => void;
+    readonly syncengine_tickAt: (a: number, b: number, c: number, d: number) => void;
     readonly syncengine_token: (a: number, b: number, c: number, d: number) => void;
+    readonly syncengine_tokenExpired: (a: number, b: number, c: number, d: number) => void;
     readonly syncengine_trash: (a: number, b: number, c: number, d: number) => void;
     readonly syncengine_uploadConflicted: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly syncengine_uploadSucceeded: (a: number, b: number, c: number, d: number, e: number, f: number) => void;

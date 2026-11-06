@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { StoredSession } from "../api/keyStore";
 import { createMemoryKeyStore, emptySyncState } from "../api/keyStore";
 import { FakeAuthCrypto, fakeSeal } from "../api/testing/FakeAuthCrypto";
@@ -141,6 +141,33 @@ describe("the engine's saved state", () => {
       await host().run(session, (e) => e.verifyDevices(list([own])));
       await reset(keys);
     });
+  });
+
+  it("logs how many records the restored engine found with a time more than an hour ahead", async () => {
+    const { keys, host, own } = await withTrusted();
+    const restored = crypto.engine.restore;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const flagged = {
+        ...crypto,
+        deviceKeys: crypto.deviceKeys,
+        engine: {
+          ...crypto.engine,
+          restore: (...args: Parameters<typeof restored>) => {
+            const engine = restored(...args);
+            return { ...engine, sync: { skippedFutureStamps: () => 3 } as never } as typeof engine;
+          },
+        },
+      };
+      const h = createEngineHost({ keys, crypto: () => flagged as never, wrapSecret: async () => wrap.slice(), wrapKeyPresent: async () => true, now: () => 0 });
+      await h.run(session, (e) => e.verifyDevices(list([own])));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("3 record(s)"));
+      warn.mockClear();
+      await host().run(session, (e) => e.verifyDevices(list([own]))); // an engine that reports none logs nothing
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("the notice is only shown while the wrapping key that sealed the quarantine exists", async () => {

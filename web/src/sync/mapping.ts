@@ -62,48 +62,40 @@ export function zoneParts(zone: string): { kind: string; owner: string } {
   return at < 0 ? { kind: zone, owner: "" } : { kind: zone.slice(0, at), owner: zone.slice(at + 1) };
 }
 
-/**
- * The record type of an id in a zone, which the engine doesn't return: the zone's own record (its id is
- * the zone's) is the list, project or calendar, and anything else in a list zone is a task and in a
- * calendar zone an event. The settings zone holds no planner records yet.
- */
-export function typeIn(zone: string, id: string): RecordType | null {
-  const { kind, owner } = zoneParts(zone);
-  if (kind === "list") return id === owner ? "list" : "task";
-  if (kind === "calendar") return id === owner ? "calendar" : "event";
-  if (kind === "project") return id === owner ? "project" : null;
-  return null;
-}
+/** The record types a zone may hold: its own record (the id is the zone owner's) and what lives inside it. */
+const ZONE_TYPES: Record<string, { owner: RecordType; inside: RecordType | null }> = {
+  list: { owner: "list", inside: "task" },
+  calendar: { owner: "calendar", inside: "event" },
+  project: { owner: "project", inside: null },
+};
 
-/**
- * Whether a record that arrived may be applied, checked strictly because the type is only inferred (the
- * engine returns none, and the server's `record_type` is not authenticated):
- *  - a list zone holds only its list (the record whose id is the zone's) and tasks of that list;
- *  - a calendar zone only its calendar and events of that calendar;
- *  - a project zone only its project;
- *  - an id equal to the zone owner's is only for the owner kind;
- *  - the server's record type, when there is one, must be the inferred one;
- *  - a task's `listId` and an event's `calendarId` must be the zone's owner;
- *  - the zone's own record (its id is the owner's) must have a name and none of a task's or event's fields.
- * A record that fails any of these is rejected and quarantined, never applied.
- *
- * TODO(engine#17): the engine will return the authenticated record type; use it here instead of inferring.
- */
 /** Fields only a task or an event has: the record that is the zone itself never carries them. */
 const OWNED_ONLY = ["listId", "calendarId", "done", "completedAt", "checklist", "start", "end", "allDay", "title"];
 
-export function acceptable(zone: string, id: string, fields: Record<string, unknown> | null, serverType?: string): RecordType | null {
-  const type = typeIn(zone, id);
-  if (!type) return null;
+/**
+ * Whether a record that arrived may be applied, and as what. The type is the engine's own (`record()` returns the
+ * authenticated `record_type`); it is checked against where the record is, and anything else is rejected and
+ * quarantined, never applied:
+ *  - a calendar zone holds only events and the calendar itself, a list zone only tasks and the list, a project zone only the project;
+ *  - a record whose id is the zone owner's is the owner kind, and only that;
+ *  - the server's `record_type` for the page, when there is one, must be the engine's;
+ *  - a task's `listId` and an event's `calendarId` must be the zone's owner;
+ *  - the zone's own record must have a name and none of a task's or event's fields.
+ * `type` is undefined for a removal, where the engine has no record: the server's type, or the local record's, stands in.
+ */
+export function acceptable(zone: string, id: string, type: string | undefined, fields: Record<string, unknown> | null, serverType?: string): RecordType | null {
+  const { kind, owner } = zoneParts(zone);
+  const allowed = ZONE_TYPES[kind];
+  if (!allowed || type === undefined) return null;
+  const isOwner = id === owner;
+  if (isOwner ? type !== allowed.owner : type !== allowed.inside) return null;
   if (serverType !== undefined && serverType !== type) return null;
-  const { owner } = zoneParts(zone);
   if (fields) {
     if (type === "task" && fields.listId !== owner) return null;
     if (type === "event" && fields.calendarId !== owner) return null;
-    // The zone's own record (its id is the owner's) must look like a list, calendar or project: a name, and nothing a task or event has.
-    if (id === owner && (typeof fields.name !== "string" || OWNED_ONLY.some((name) => name in fields))) return null;
+    if (isOwner && (typeof fields.name !== "string" || OWNED_ONLY.some((name) => name in fields))) return null;
   }
-  return type;
+  return type as RecordType;
 }
 
 /** Stamps every field of an edit with one stamp. */

@@ -3,7 +3,7 @@
 // Sync through the engine's real module against the mock record store: two paired devices, their stores
 // in memory, a server that versions records and refuses stale writes like the real one.
 import { describe, expect, it } from "vitest";
-import { runCycle, SyncError } from "./cycle";
+import { runCycle } from "./cycle";
 import { createSyncRig, type SyncRig, type TestDevice } from "./testing/rig";
 
 const sync = (_r: SyncRig, d: TestDevice) => runCycle(d.services, d.session, d.store);
@@ -158,23 +158,35 @@ describe("offline and failures", () => {
     expect(task.version).toBeGreaterThan(0);
   });
 
-  it("an expired change token stops the sync with a clear reason (no engine support for resetting it yet)", async () => {
+  it("an expired change token starts the zone over: it is fetched again from the start and nothing is lost or re-sent", async () => {
     const r = await createSyncRig();
     r.a.store.addTask({ title: "x" });
     await sync(r, r.a);
-    r.clock.now += 1;
-    // The server refuses every token for the zone: stands in for token_expired, which the pinned module can't recover from.
+    await sync(r, r.b);
+    r.a.store.addTask({ title: "new on A" });
+    await sync(r, r.a);
+    // The server refuses B's token once, as it would after the zone was purged past it.
     const real = r.engine.fetch;
+    let refused = 0;
+    const asked: string[] = [];
     r.engine.fetch = (async (url: string, init?: RequestInit) => {
-      if (String(url).includes("/changes?") && (init?.method ?? "GET") === "GET") {
-        return new Response(JSON.stringify({ code: "token_expired", message: "Too old." }), { status: 410, headers: { "content-type": "application/json" } });
+      if (/\/changes(\?|$)/.test(String(url)) && (init?.method ?? "GET") === "GET") {
+        asked.push(String(url));
+        if (String(url).includes("since=") && refused++ === 0) {
+          return new Response(JSON.stringify({ code: "token_expired", message: "Too old." }), { status: 410, headers: { "content-type": "application/json" } });
+        }
       }
       return real(url, init);
     }) as typeof fetch;
-    r.b.store.addTask({ title: "y" });
-    const error = await sync(r, r.b).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(SyncError);
-    expect((error as SyncError).code).toBe("token_expired");
+    r.b.store.addTask({ title: "unsent on B" });
+    await sync(r, r.b);
+    expect(refused).toBe(1);
+    expect(asked.some((u) => !u.includes("since="))).toBe(true); // fetched again from the start
+    expect(titles(r.b)).toEqual(["new on A", "unsent on B", "x"]);
+    r.engine.fetch = real;
+    await sync(r, r.a);
+    expect(titles(r.a)).toEqual(["new on A", "unsent on B", "x"]);
+    expect(r.b.store.getState().outbox).toEqual([]);
   });
 });
 
