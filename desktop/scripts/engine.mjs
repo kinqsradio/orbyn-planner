@@ -3,6 +3,34 @@
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1"]);
 
 /**
+ * Whether a URL hostname (as `new URL` normalises it) names this machine: localhost and any
+ * *.localhost name, all of 127.0.0.0/8, 0.0.0.0, ::1, :: and IPv4-mapped forms of those. A name
+ * that only resolves to loopback can't be caught here; whoever sets the engine URL controls that.
+ */
+export function isLocalHost(hostname) {
+  let host = hostname.toLowerCase().replace(/\.$/, "");
+  if (host.startsWith("[") && host.endsWith("]")) host = host.slice(1, -1);
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+  const v4 = (text) => {
+    const m = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(text);
+    if (!m) return false;
+    const [a, b, c, d] = m.slice(1).map(Number);
+    return a === 127 || (a === 0 && b === 0 && c === 0 && d === 0);
+  };
+  if (v4(host)) return true;
+  if (host === "::1" || host === "::") return true;
+  // IPv4-mapped, which URL writes in hex: ::ffff:7f00:1 is 127.0.0.1.
+  const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(host);
+  if (mapped) {
+    const hi = parseInt(mapped[1], 16);
+    const lo = parseInt(mapped[2], 16);
+    return v4(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
+  }
+  const dotted = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(host);
+  return dotted ? v4(dotted[1]) : false;
+}
+
+/**
  * Reads the engine URL, from ORBYN_ENGINE_URL or config.json, and refuses anything but an http(s)
  * origin. Plain http:// is refused too, except for localhost and 127.0.0.1 when `allowLocalHttp` is
  * set (development): a shipped app must not talk to its engine without TLS.
@@ -52,10 +80,19 @@ export function assertNoLocalAddress(csp) {
  * build that skips scripts/tauri.mjs fails closed. A release build (`dev` unset) is refused if
  * its policy would allow a local address; only a development build adds localhost.
  */
-export function contentSecurityPolicy(engineUrl, { dev = false, allowLocalHttp = dev } = {}) {
-  const connect = ["'self'", "ipc:", "http://ipc.localhost"];
+export function contentSecurityPolicy(engineUrl, { dev = false, allowLocalHttp = dev, windows = process.platform === "win32" } = {}) {
+  // Tauri's channel is ipc: on macOS and Linux. Only Windows (WebView2) serves it as
+  // http://ipc.localhost; elsewhere that is an ordinary origin that resolves to this machine.
+  const connect = ["'self'", "ipc:"];
+  if (windows) connect.push("http://ipc.localhost");
   if (engineUrl) {
     const engine = engineOrigin(engineUrl, { allowLocalHttp });
+    if (!dev && isLocalHost(new URL(engine.http).hostname)) {
+      throw new Error(
+        `A release build's engine must not be this machine (${engine.http}): ` +
+          "point ORBYN_ENGINE_URL (or desktop/config.json) at the real engine, or use `npm run dev`.",
+      );
+    }
     connect.push(engine.http, engine.socket);
   }
   // The dev server pushes updates over its own socket.
