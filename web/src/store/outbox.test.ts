@@ -23,17 +23,18 @@ describe("coalesce", () => {
     expect(write).toMatchObject({ op: "update", changedFields: { title: "b" }, idempotencyKey: "k2", createdAt: AT1 });
   });
 
-  it("folds later edits into the entry, latest value winning, keeping its key and creation time", () => {
+  it("folds later edits into the entry, latest value winning, with a new key and the first creation time", () => {
     const first = coalesce(undefined, update({ title: "b", notes: "n" }), AT1).write!;
     const entry = { ...first, seq: 7 };
     const { write } = coalesce(entry, update({ title: "c" }, "k9"), AT2);
-    expect(write).toEqual({ ...entry, changedFields: { title: "c", notes: "n" }, updatedAt: AT2 });
+    expect(write).toEqual({ ...entry, changedFields: { title: "c", notes: "n" }, idempotencyKey: "k9", updatedAt: AT2 });
   });
 
   it("an entry that is still a create stays a create, however it is edited or deleted", () => {
     const entry = { ...coalesce(undefined, create, AT1).write!, seq: 3 };
     const edited = coalesce(entry, update({ title: "b" }), AT2).write!;
-    expect(edited).toMatchObject({ op: "create", idempotencyKey: "k1", changedFields: { id: "t1", title: "b" } });
+    expect(edited).toMatchObject({ op: "create", changedFields: { id: "t1", title: "b" } });
+    expect(edited.idempotencyKey).not.toBe("k1");
     const deleted = coalesce({ ...edited, seq: 3 }, del, AT2).write!;
     expect(deleted).toMatchObject({ op: "create", changedFields: { title: "b", deletedAt: AT2 } });
   });
@@ -46,8 +47,14 @@ describe("coalesce", () => {
     expect(restored).toMatchObject({ op: "update", changedFields: { deletedAt: null } });
   });
 
-  it("a purge removes a pending create or update and leaves one delete entry", () => {
+  it("a purge of a record that never synced removes its entry and sends nothing", () => {
     const entry = { ...coalesce(undefined, create, AT1).write!, seq: 5 };
+    const out = coalesce(entry, purge, AT2);
+    expect(out).toEqual({ remove: 5 });
+  });
+
+  it("a purge after an update leaves one delete entry", () => {
+    const entry = { ...coalesce(undefined, update({ title: "b" }), AT1).write!, seq: 5 };
     const out = coalesce(entry, purge, AT2);
     expect(out.remove).toBe(5);
     expect(out.write).toMatchObject({ seq: 0, op: "delete", changedFields: {}, idempotencyKey: "k4" });
@@ -57,7 +64,8 @@ describe("coalesce", () => {
     const deleted = { ...coalesce(undefined, del, AT1).write!, seq: 6 };
     const out = coalesce(deleted, purge, AT2);
     expect(out.remove).toBeUndefined();
-    expect(out.write).toMatchObject({ seq: 6, op: "delete", changedFields: {}, idempotencyKey: "k3" });
+    // The purge is new content, so it takes the purge's key.
+    expect(out.write).toMatchObject({ seq: 6, op: "delete", changedFields: {}, idempotencyKey: "k4" });
   });
 
   it("a create for a record that already has an entry changes nothing", () => {
