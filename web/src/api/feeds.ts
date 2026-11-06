@@ -1,5 +1,17 @@
 import { MAX_FEED_BYTES } from "../lib/ics";
 
+/**
+ * The engine's wire types for POST /v1/feeds/fetch (orbyn-engine #9), typed by hand until its
+ * bindings reach `src/generated`; then these two are replaced by the generated ones.
+ */
+export interface FeedFetch {
+  url: string;
+}
+export interface FeedFetched {
+  status: number;
+  body: string;
+}
+
 /** Why the engine refused to fetch a feed. */
 export type FeedRefusal = "invalid_url" | "blocked_address" | "too_large" | "timeout" | "upstream_error";
 const REFUSALS: readonly FeedRefusal[] = ["invalid_url", "blocked_address", "too_large", "timeout", "upstream_error"];
@@ -44,7 +56,7 @@ export async function fetchFeedViaEngine(engine: string, url: string, fetchFn: t
   const response = await fetchFn(`${engine}/v1/feeds/fetch`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ url }),
+    body: JSON.stringify({ url } satisfies FeedFetch),
     cache: "no-store",
   });
   let body: unknown = null;
@@ -54,7 +66,7 @@ export async function fetchFeedViaEngine(engine: string, url: string, fetchFn: t
     // Not JSON: handled below.
   }
   if (!response.ok) throw new ApiError(codeOf(body), response.status, `The engine refused the feed (${response.status}).`);
-  const v = body as { status?: unknown; body?: unknown } | null;
+  const v = body as Partial<Record<keyof FeedFetched, unknown>> | null;
   if (typeof v?.status !== "number" || typeof v.body !== "string") throw new ApiError("upstream_error", response.status, "The engine gave an unexpected answer.");
   if (v.status < 200 || v.status >= 300) throw new ApiError("upstream_error", v.status, `The calendar’s server answered ${v.status}.`);
   if (new TextEncoder().encode(v.body).length > MAX_FEED_BYTES) throw new ApiError("too_large", response.status, "The calendar is too large.");
