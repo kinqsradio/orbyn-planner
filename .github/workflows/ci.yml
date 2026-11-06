@@ -132,9 +132,13 @@ jobs:
         working-directory: engine
         run: |
           # A fresh database: no volume from an earlier run, and no sign-in attempts counted against us.
+          set -euo pipefail
           docker compose down --volumes --remove-orphans
-          setup=$(docker compose run --rm server auth-setup | tail -1)
+          # auth-setup prints the value alone on stdout; a failure or anything else fails here.
+          setup=$(docker compose run --rm -T server auth-setup)
           echo "::add-mask::$setup"
+          [ -n "$setup" ] || { echo "auth-setup produced nothing"; exit 1; }
+          [ "$(printf '%s\n' "$setup" | wc -l)" -eq 1 ] || { echo "auth-setup printed more than one line"; exit 1; }
           ORBYN_AUTH_SETUP="$setup" docker compose up -d postgres migrate server worker
           docker compose exec -T postgres psql -U orbyn -d orbyn -c "delete from auth_attempts"
           for _ in $(seq 1 60); do
