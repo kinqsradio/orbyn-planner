@@ -1,16 +1,6 @@
+import type { FeedFetch } from "../generated/FeedFetch";
+import type { FeedFetched } from "../generated/FeedFetched";
 import { MAX_FEED_BYTES } from "../lib/ics";
-
-/**
- * The engine's wire types for POST /v1/feeds/fetch (orbyn-engine #9), typed by hand until its
- * bindings reach `src/generated`; then these two are replaced by the generated ones.
- */
-export interface FeedFetch {
-  url: string;
-}
-export interface FeedFetched {
-  status: number;
-  body: string;
-}
 
 /** Why the engine refused to fetch a feed. */
 export type FeedRefusal =

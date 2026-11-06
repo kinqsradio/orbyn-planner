@@ -1,0 +1,17 @@
+{
+  "name": "orbyn-planner-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "npm@11.4.0",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev": "node scripts/tauri.mjs dev",
+    "build": "node scripts/tauri.mjs build",
+    "icons": "tauri icon app-icon.svg --output src-tauri/icons",
+    "test": "node --test scripts/*.test.mjs"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.4"
+  }
+}

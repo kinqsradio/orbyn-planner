@@ -23,6 +23,18 @@ The UI talks to a `PlannerStore`. `LocalStore` keeps the records in IndexedDB, o
 
 ## Calendar feeds
 
-- **Time.** A feed event keeps its wall time and IANA zone; each occurrence is converted to the viewer's zone, so daylight-saving changes in either place land right. UTC (`Z`) UNTIL, EXDATE and RECURRENCE-ID values are converted into the series' zone before their date is taken. A start inside a skipped hour moves forward by the gap and keeps its written length. Expansions are cached per event and range.
+- **Time.** A feed event keeps its wall time and IANA zone; each occurrence is converted to the viewer's zone, so daylight-saving changes in either place land right. UTC (`Z`) UNTIL, EXDATE and RECURRENCE-ID values are converted into the series' zone before their date is taken. A start inside a skipped hour moves forward by the gap and keeps its written length. Expansions are cached per event, range and viewer zone.
 - **Repeats.** Only FREQ, INTERVAL, BYDAY (weekly), COUNT and UNTIL are read. Any other rule shows the first date only, with a note, and is listed under "Can't show these repeats" in Calendars; no dates are guessed.
-- **Fetching.** With `VITE_ENGINE_URL` set, the engine fetches feeds (`POST /v1/feeds/fetch`, `{url}` answered by `{status, body}`; refusals are `ApiError` codes `invalid_url`, `blocked_address`, `too_large`, `timeout`, `upstream_error`). Without it the web build fetches directly, which many servers refuse; the desktop app, whose page may not fetch other sites, says "Subscriptions need the Orbyn engine".
+- **Fetching.** With `VITE_ENGINE_URL` set, the engine fetches feeds (`POST /v1/feeds/fetch`, `{url}` answered by `{status, body}`; the request carries the session's bearer token, since the route needs a signed-in, trusted device; refusals are `ApiError` codes `invalid_url`, `blocked_address`, `too_large`, `timeout`, `upstream_error`, `unauthorized`, `device_not_trusted`, `too_many_attempts`, `feeds_unavailable`, `internal`). Signed out, or without an engine, the web build fetches directly, which many servers refuse; the desktop app, whose page may not fetch other sites, says "Sign in to subscribe to calendars" when signed out and "Subscriptions need the Orbyn engine" without one.
+
+## Desktop
+
+`desktop/` is a Tauri 2 shell with its own Cargo workspace; nothing else builds it. It opens one window on the web build (the dev server in development) and adds the standard menus and remembered window state. It exposes one command to the page, `open_link`, which opens an http(s) address in the system browser (through tauri-plugin-opener, whose own commands are not in any capability), so the page has no more power than in a browser.
+
+- **Navigation.** The window may show only the app's own pages (`tauri://localhost`, `http(s)://tauri.localhost`) and, in a debug build, the dev server on port 5173. Links to anywhere else, the engine included, are refused, and a request for a new window is denied.
+- **Content security policy.** Built from `desktop/config.json` (`engineUrl`) by `desktop/scripts/engine.mjs`: scripts only from the app, `connect-src` the app and the engine origin, no frames or objects.
+- **Platform.** `web/src/app/platform.ts` tells the desktop app from a browser by Tauri's injected `__TAURI_INTERNALS__`; the browser-only install hint in Settings is hidden in the desktop app.
+- **Links.** A link in notes or anywhere else opens in the system browser through `open_link`; the window never navigates to it.
+- **Engine address.** Production builds refuse a plain `http://` engine URL; development accepts it for localhost and 127.0.0.1 only. Feed subscriptions go through the engine (`POST /v1/feeds/fetch`), since the page's policy forbids fetching other sites.
+- **Not yet.** Code signing and notarisation, auto-update and background reminders.
+
