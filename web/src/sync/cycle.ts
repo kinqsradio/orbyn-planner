@@ -43,6 +43,8 @@ export interface CycleReport {
   devices: number;
   /** Zones that have changes waiting but no key on this device yet. */
   waitingForKeys: string[];
+  /** Zones waiting for a key when this is the only trusted device: no device of the account can open them. */
+  stranded: string[];
   /** Zones whose keys couldn't be sent to the other devices yet, so nothing is uploaded to them. */
   keysPending: string[];
   /** Records this device cannot open yet, in all zones. */
@@ -85,7 +87,7 @@ export async function runCycle(
   const { api, keys: keyStore } = services;
   const now = () => services.now();
   const state: SyncState = (await keyStore.loadSyncState()) ?? emptySyncState();
-  const report: CycleReport = { uploaded: 0, received: 0, devices: 0, waitingForKeys: [], keysPending: [], quarantined: 0, dropped: [], failed: [], skipped: [] };
+  const report: CycleReport = { uploaded: 0, received: 0, devices: 0, waitingForKeys: [], stranded: [], keysPending: [], quarantined: 0, dropped: [], failed: [], skipped: [] };
 
   const alive = () => {
     if (signal.aborted) throw new Aborted();
@@ -148,6 +150,8 @@ export async function runCycle(
         rejected.push(id);
         continue;
       }
+      // A create that was never acknowledged exists nowhere else: it is not a remote delete's to take, it is staged and sent.
+      if (outbox.get(refKey({ type, id }))?.op === "create") continue;
       // A record that moved to another list is deleted from the old zone and made in the new one: the delete mustn't win.
       if ((state.zoneOf[refKey({ type, id })] ?? zone) === zone) out.push({ type, id, fields: null });
     }
@@ -367,6 +371,11 @@ export async function runCycle(
         upload = await withEngine((e) => e.sync.buildUpload(zone));
       } catch (error) {
         if (!hasCode(error, "no_zone_key")) throw error;
+        if (serverZones.get(zone)?.deleted) {
+          // Deleted for the account (even one this device can't open): delete wins, the unsent changes go.
+          await dropZone(zone);
+          return true;
+        }
         if (!state.made[zone] && serverZones.has(zone)) {
           // It exists and another device holds its key: wait for the envelope, visibly.
           report.waitingForKeys.push(zone);
@@ -456,6 +465,11 @@ export async function runCycle(
   const current = new Map(store.getState().outbox.map((o) => [refKey(o), o.idempotencyKey] as const));
   for (const [key, value] of Object.entries(state.failed)) if (current.get(key) !== value.slice(0, value.indexOf("|"))) delete state.failed[key];
   report.failed = Object.entries(state.failed).map(([key, value]) => ({ type: key.slice(0, key.indexOf(":")) as RecordType, id: key.slice(key.indexOf(":") + 1), reason: value.slice(value.indexOf("|") + 1) }));
+  // A zone this device can't open, with no other trusted device to send its key, can't be opened anywhere.
+  if (![...verified].some((id) => id !== session.deviceId)) {
+    const closed = new Set([...report.waitingForKeys, ...Object.entries(state.quarantined).filter(([, ids]) => ids.length > 0).map(([zone]) => zone)]);
+    report.stranded = [...closed].filter((zone) => serverZones.has(zone) && !serverZones.get(zone)!.deleted && !state.made[zone]).sort();
+  }
   report.quarantined = Object.values(state.quarantined).reduce((n, ids) => n + ids.length, 0);
   if (transient === null) state.lastSyncedAt = new Date(now()).toISOString();
   await save();
@@ -467,4 +481,16 @@ const STORE_KEY = { task: "tasks", list: "lists", event: "events", calendar: "ca
 
 function hasCode(error: unknown, code: string): boolean {
   return error instanceof Error && error.message.startsWith(`${code}:`);
+}
+
+/**
+ * Deletes a zone for the whole account through the normal signed delete: for a zone no device can open, which
+ * would otherwise wait for a key that will never come. The next pass drops what this device still had for it.
+ */
+export async function removeZone(services: AuthServices, session: StoredSession, zone: string): Promise<void> {
+  const proof = await services.engine.run(session, (e) => {
+    if (!e.sync) throw new SyncError("sync_unavailable", "This build can't sync: the engine's module isn't loaded.");
+    return (e as Engine).sync.deleteZoneProof(zone);
+  });
+  await services.api.deleteZone(zone, JSON.parse(proof));
 }

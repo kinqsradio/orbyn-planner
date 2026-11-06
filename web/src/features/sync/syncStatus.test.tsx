@@ -3,10 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { SyncState } from "../../sync/controller";
 import { SyncProviderForTests } from "../../sync/testing/SyncProviderForTests";
+import { StrandedZones } from "./StrandedZones";
+import { OnlyDeviceNote } from "../auth/AccountSettings";
 import { SyncSettings } from "../settings/SyncSettings";
 import { useSyncStatus } from "./SyncLine";
 
-const base: SyncState = { phase: "idle", devices: 2, lastSyncedAt: "2026-11-07T10:00:00Z", quarantined: 0, waitingForKeys: [], keysPending: [], dropped: [], failed: [], skipped: [], error: null, leader: true, live: true };
+const base: SyncState = { phase: "idle", devices: 2, lastSyncedAt: "2026-11-07T10:00:00Z", quarantined: 0, waitingForKeys: [], stranded: [], keysPending: [], dropped: [], failed: [], skipped: [], error: null, leader: true, live: true };
 
 describe("the sync line follows real sync when it runs", () => {
   const status = (sync: SyncState | null, pending = 0) => renderHook(() => useSyncStatus(pending, sync)).result.current.status;
@@ -48,5 +50,47 @@ describe("Settings shows sync", () => {
       </SyncProviderForTests>,
     );
     expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe("a zone no device can open", () => {
+  const stranded = { ...base, devices: 1, waitingForKeys: ["list:trip"], stranded: ["list:trip"] };
+
+  it("is said plainly in Settings and can be removed for the account, and isn't also called merely waiting", async () => {
+    const removeStranded = vi.fn(async () => undefined);
+    render(
+      <SyncProviderForTests state={stranded} removeStranded={removeStranded}>
+        <SyncSettings />
+      </SyncProviderForTests>,
+    );
+    expect(screen.getByText("This list can’t be opened on any of your devices.")).toBeInTheDocument();
+    expect(screen.queryByText(/waiting for a key from another of your devices/)).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    expect(removeStranded).toHaveBeenCalledWith("list:trip");
+  });
+
+  it("shows on the lists page for lists only", () => {
+    render(
+      <SyncProviderForTests state={{ ...stranded, stranded: ["list:trip", "calendar:work"] }}>
+        <StrandedZones only="list" />
+      </SyncProviderForTests>,
+    );
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+  });
+
+  it("sign-out warns on the only trusted device, and not when there are others", () => {
+    const { unmount } = render(
+      <SyncProviderForTests state={stranded}>
+        <OnlyDeviceNote />
+      </SyncProviderForTests>,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("This is your only trusted device. Removing its planner here can’t be undone: lists only this device can open will be lost.");
+    unmount();
+    render(
+      <SyncProviderForTests state={base}>
+        <OnlyDeviceNote />
+      </SyncProviderForTests>,
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

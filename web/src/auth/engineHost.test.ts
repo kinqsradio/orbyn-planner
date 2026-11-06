@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { StoredSession } from "../api/keyStore";
-import { createMemoryKeyStore } from "../api/keyStore";
+import { createMemoryKeyStore, emptySyncState } from "../api/keyStore";
 import { FakeAuthCrypto, fakeSeal } from "../api/testing/FakeAuthCrypto";
 import type { Device } from "../generated/Device";
 import type { DeviceList } from "../generated/DeviceList";
@@ -108,6 +108,39 @@ describe("the engine's saved state", () => {
     expect(h.notice.get()).toBe(SNAPSHOT_UNREADABLE);
     h.notice.clear();
     expect(h.notice.get()).toBeNull();
+  });
+
+  describe("what the sync state said about the dropped engine goes with it", () => {
+    const stale = () => ({ ...emptySyncState(), zones: ["list:inbox"], staged: { "task:t1": "k1" }, stagedZone: { "task:t1": "list:inbox" }, keysSent: { "list:inbox": "a,b" }, made: { "list:inbox": true as const }, quarantined: { "list:inbox": ["r1"] }, zoneOf: { "task:t1": "list:inbox" } });
+    const reset = async (keys: Awaited<ReturnType<typeof withTrusted>>["keys"]) => {
+      const state = (await keys.loadSyncState())!;
+      expect({ staged: state.staged, stagedZone: state.stagedZone, keysSent: state.keysSent, made: state.made, quarantined: state.quarantined }).toEqual({ staged: {}, stagedZone: {}, keysSent: {}, made: {}, quarantined: {} });
+      expect(state.zones).toEqual(["list:inbox"]); // names the server knows anyway stay
+    };
+
+    it("an identity mismatch", async () => {
+      const { keys, host, own } = await withTrusted();
+      await keys.saveSyncState(stale());
+      await keys.saveIdentity({ accountId: session.accountId, deviceId: "00000000-0000-4000-8000-0000000000fe" });
+      await host().run(session, (e) => e.verifyDevices(list([own])));
+      await reset(keys);
+    });
+
+    it("a snapshot these keys can't open", async () => {
+      const { keys, host, own } = await withTrusted();
+      await keys.saveSyncState(stale());
+      await keys.saveSnapshot(fakeSeal(new Uint8Array(32).fill(9), "snapshot", new TextEncoder().encode("{}")));
+      await host().run(session, (e) => e.verifyDevices(list([own])));
+      await reset(keys);
+    });
+
+    it("a snapshot in a format this version doesn't read", async () => {
+      const { keys, host, own } = await withTrusted();
+      await keys.saveSyncState(stale());
+      await keys.saveSnapshot(fakeSeal(wrap, "snapshot", new TextEncoder().encode("not json")));
+      await host().run(session, (e) => e.verifyDevices(list([own])));
+      await reset(keys);
+    });
   });
 
   it("the notice is only shown while the wrapping key that sealed the quarantine exists", async () => {

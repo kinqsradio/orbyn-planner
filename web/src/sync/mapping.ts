@@ -83,11 +83,15 @@ export function typeIn(zone: string, id: string): RecordType | null {
  *  - a project zone only its project;
  *  - an id equal to the zone owner's is only for the owner kind;
  *  - the server's record type, when there is one, must be the inferred one;
- *  - a task's `listId` and an event's `calendarId` must be the zone's owner.
+ *  - a task's `listId` and an event's `calendarId` must be the zone's owner;
+ *  - the zone's own record (its id is the owner's) must have a name and none of a task's or event's fields.
  * A record that fails any of these is rejected and quarantined, never applied.
  *
  * TODO(engine#17): the engine will return the authenticated record type; use it here instead of inferring.
  */
+/** Fields only a task or an event has: the record that is the zone itself never carries them. */
+const OWNED_ONLY = ["listId", "calendarId", "done", "completedAt", "checklist", "start", "end", "allDay", "title"];
+
 export function acceptable(zone: string, id: string, fields: Record<string, unknown> | null, serverType?: string): RecordType | null {
   const type = typeIn(zone, id);
   if (!type) return null;
@@ -96,6 +100,8 @@ export function acceptable(zone: string, id: string, fields: Record<string, unkn
   if (fields) {
     if (type === "task" && fields.listId !== owner) return null;
     if (type === "event" && fields.calendarId !== owner) return null;
+    // The zone's own record (its id is the owner's) must look like a list, calendar or project: a name, and nothing a task or event has.
+    if (id === owner && (typeof fields.name !== "string" || OWNED_ONLY.some((name) => name in fields))) return null;
   }
   return type;
 }

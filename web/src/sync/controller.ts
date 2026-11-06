@@ -3,7 +3,7 @@ import { engineUrl } from "../api/engine";
 import type { AuthServices } from "../auth/services";
 import type { SyncServerMessage } from "../generated/SyncServerMessage";
 import type { PlannerStore } from "../store/types";
-import { Aborted, runCycle, SyncError, type CycleReport } from "./cycle";
+import { Aborted, removeZone, runCycle, SyncError, type CycleReport } from "./cycle";
 
 export type SyncPhase =
   /** Not syncing: signed out, an untrusted device, or no engine. */
@@ -25,6 +25,8 @@ export interface SyncState {
   quarantined: number;
   /** Zones with changes waiting for a key from another device. */
   waitingForKeys: string[];
+  /** Zones no device of the account can open: this is the only trusted device and it has no key for them. */
+  stranded: string[];
   /** Zones whose keys couldn't be sent to the other devices yet, so nothing is sent to them. */
   keysPending: string[];
   /** Lists or calendars deleted on another device while this one had changes for them: those changes were dropped. */
@@ -40,7 +42,7 @@ export interface SyncState {
   live: boolean;
 }
 
-const OFF: SyncState = { phase: "off", devices: 0, lastSyncedAt: null, quarantined: 0, waitingForKeys: [], keysPending: [], dropped: [], failed: [], skipped: [], error: null, leader: false, live: false };
+const OFF: SyncState = { phase: "off", devices: 0, lastSyncedAt: null, quarantined: 0, waitingForKeys: [], stranded: [], keysPending: [], dropped: [], failed: [], skipped: [], error: null, leader: false, live: false };
 
 /** The part of a WebSocket the controller uses. */
 export interface SocketLike {
@@ -127,8 +129,8 @@ export class SyncController {
     for (const l of this.listeners) l();
     if (this.state.leader) {
       try {
-        const { devices, lastSyncedAt, quarantined, phase, waitingForKeys, keysPending, dropped, failed, skipped, error } = this.state;
-        this.status?.postMessage({ devices, lastSyncedAt, quarantined, phase, waitingForKeys, keysPending, dropped, failed, skipped, error });
+        const { devices, lastSyncedAt, quarantined, phase, waitingForKeys, stranded, keysPending, dropped, failed, skipped, error } = this.state;
+        this.status?.postMessage({ devices, lastSyncedAt, quarantined, phase, waitingForKeys, stranded, keysPending, dropped, failed, skipped, error });
       } catch {
         // Other tabs just don't hear it.
       }
@@ -176,6 +178,15 @@ export class SyncController {
     this.releaseLock = null;
     this.state = OFF;
     for (const l of this.listeners) l();
+  }
+
+  /** Deletes a zone nobody can open for the whole account (the signed delete), then looks again. */
+  async removeStranded(zone: string): Promise<void> {
+    const session = this.services.tokens.getSession();
+    if (!session || this.stopped || !this.state.stranded.includes(zone)) return;
+    await removeZone(this.services, session, zone);
+    this.update({ stranded: this.state.stranded.filter((z) => z !== zone) });
+    this.syncNow();
   }
 
   /** Runs a pass now (or as soon as the one in progress ends). */
@@ -259,6 +270,7 @@ export class SyncController {
         lastSyncedAt: new Date(this.services.now()).toISOString(),
         quarantined: report.quarantined,
         waitingForKeys: report.waitingForKeys,
+        stranded: report.stranded,
         keysPending: report.keysPending,
         dropped,
         failed: report.failed,

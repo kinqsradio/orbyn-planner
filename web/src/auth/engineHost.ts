@@ -159,7 +159,10 @@ export function createEngineHost(deps: {
             } catch (e) {
               // Keep what couldn't be read. Only a genuine open failure (these keys do not open it) drops the live copy.
               await deps.keys.quarantineSnapshot(snapshot);
+              // Either way the engine that knew what was staged and which keys were sent is gone (a fresh one replaces it
+              // below), so those records of it are reset with it and the outbox is staged again.
               if (e instanceof Error && /^open_failed\b/.test(e.message)) await deps.keys.clearSnapshot();
+              else await deps.keys.resetEngineSide();
               await notice.announce();
             }
           }

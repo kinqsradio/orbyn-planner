@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { encodeBytes } from "../api/bytes";
 import { Aborted, runCycle } from "./cycle";
+import { acceptable } from "./mapping";
 import { createSyncRig, type SyncRig, type TestDevice } from "./testing/rig";
 
 const sync = (d: TestDevice, signal?: { aborted: boolean }) => runCycle(d.services, d.session, d.store, undefined, signal);
@@ -217,6 +218,7 @@ describe("record types are checked, not just inferred", () => {
     await plant(r, "calendar:personal", "task", "t-in-calendar", { id: "t-in-calendar", title: "Not an event", listId: "inbox" });
     await plant(r, "list:inbox", "event", "e-in-list", { id: "e-in-list", title: "Not a task", calendarId: "personal" });
     await plant(r, "list:inbox", "task", "inbox-as-task", { id: "inbox-as-task", title: "Pretends to be the list", listId: "inbox" }); // fine: a task
+    await plant(r, "list:inbox", "task", "inbox", { id: "inbox", title: "A task wearing the list's id", listId: "inbox", done: false }); // the owner's id, task-shaped
     await plant(r, "list:inbox", "task", "wrong-list", { id: "wrong-list", title: "Says another list", listId: "somewhere-else" });
     await sync(r.b);
     const report = await sync(r.a);
@@ -224,7 +226,7 @@ describe("record types are checked, not just inferred", () => {
     const have = titles(r.a);
     expect(have).toContain("Seed");
     expect(have).toContain("Pretends to be the list");
-    for (const bad of ["Not an event", "Not a task", "Says another list"]) expect(have).not.toContain(bad);
+    for (const bad of ["Not an event", "Not a task", "Says another list", "A task wearing the list's id"]) expect(have).not.toContain(bad);
     expect(r.a.store.getState().events.some((e) => e.id === "e-in-list")).toBe(false);
   });
 });
@@ -354,5 +356,41 @@ describe("a device-only planner added to the account", () => {
     expect(titles(r.b)).toEqual(["Charger", "Passport"]);
     expect(r.b.store.getState().lists.some((l) => l.id === trip.id)).toBe(true);
     expect(r.a.store.getState().outbox).toEqual([]);
+  });
+});
+
+describe("what the server says a record is, and what a zone's own record looks like", () => {
+  it("a server type that isn't the one the zone and id imply is rejected (N4)", () => {
+    expect(acceptable("list:inbox", "t1", { listId: "inbox", title: "x" }, "task")).toBe("task");
+    expect(acceptable("list:inbox", "t1", { listId: "inbox", title: "x" }, "event")).toBeNull();
+    expect(acceptable("list:inbox", "t1", { listId: "inbox", title: "x" })).toBe("task"); // no server type: inferred
+  });
+
+  it("the zone's own record must look like a list: a task-shaped record with the owner's id is rejected", () => {
+    expect(acceptable("list:inbox", "inbox", { name: "Inbox", colour: "c1", isInbox: true })).toBe("list");
+    expect(acceptable("list:inbox", "inbox", { title: "A task wearing the list's id", listId: "inbox", done: false })).toBeNull();
+    expect(acceptable("list:inbox", "inbox", { name: "Inbox", listId: "inbox" })).toBeNull();
+    expect(acceptable("calendar:personal", "personal", { title: "An event", calendarId: "personal", start: "2026-11-07T10:00" })).toBeNull();
+    expect(acceptable("calendar:personal", "personal", { name: "Personal", colour: "c2" })).toBe("calendar");
+  });
+});
+
+describe("a zone this device made is its own to key again", () => {
+  it("with no key anywhere for it, a zone on the server that this device made is re-keyed here instead of waiting (N5)", async () => {
+    const r = await createSyncRig();
+    r.a.store.addTask({ title: "Theirs" });
+    await sync(r.a);
+    const real = r.engine.fetch;
+    r.engine.fetch = (async (url: string, init?: RequestInit) => {
+      if (String(url).includes("/v1/keychain/envelopes") && (init?.method ?? "GET") === "GET") return new Response(JSON.stringify({ envelopes: [] }), { status: 200 });
+      return real(url, init);
+    }) as typeof fetch;
+    const state = (await r.b.keys.loadSyncState()) ?? undefined;
+    const { emptySyncState } = await import("../api/keyStore");
+    await r.b.keys.saveSyncState({ ...(state ?? emptySyncState()), made: { "list:inbox": true } }); // this device made it before
+    r.b.store.addTask({ title: "Mine" });
+    const report = await sync(r.b);
+    expect(report.waitingForKeys).not.toContain("list:inbox");
+    r.engine.fetch = real;
   });
 });

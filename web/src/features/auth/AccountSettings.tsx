@@ -1,3 +1,4 @@
+import { useSyncState } from "../../sync/SyncProvider";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ApiFailure } from "../../api/auth";
 import { authCryptoAvailable, SIGN_IN_UNAVAILABLE } from "../../api/authCrypto";
@@ -115,6 +116,13 @@ function ApproveDialog({ device, onClose, onDone }: { device: Device; onClose: (
   );
 }
 
+/** Known from the last pass: with one trusted device, nothing else holds the keys of what only it can open. */
+export function OnlyDeviceNote() {
+  const sync = useSyncState();
+  if (!sync || sync.phase === "off" || sync.devices > 1) return null;
+  return <p className="err" role="alert">This is your only trusted device. Removing its planner here can’t be undone: lists only this device can open will be lost.</p>;
+}
+
 /** Signing out asks what to do with this account's planner on this browser. Remove is the default. */
 function SignOutDialog({ onClose }: { onClose: () => void }) {
   const auth = useAuth()!;
@@ -126,7 +134,8 @@ function SignOutDialog({ onClose }: { onClose: () => void }) {
     <Modal label="Sign out" onClose={onClose}>
       <b className="card-title">Sign out</b>
       <p>Remove this account’s planner from this browser?</p>
-      <p className="t3 small">Remove deletes its lists, tasks and any changes not yet sent from this browser; your other devices keep theirs. Keep leaves them here, and they open again only when this same account signs in.</p>
+      <p className="t3 small">Remove deletes its lists, tasks and any changes not yet sent from this browser; your other devices keep theirs. Keep leaves them here, and they open again only when this same account signs in. It stays on this browser unencrypted.</p>
+      <OnlyDeviceNote />
       <div className="dialog-actions">
         <button type="button" className="ghost" onClick={onClose}>Cancel</button>
         <button type="button" className="ghost" onClick={() => go(false)}>Keep on this browser</button>

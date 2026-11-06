@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { IDBFactory } from "fake-indexeddb";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { forgetDeviceDataAnswers, deviceDataAnswer } from "../../store/deviceData";
 import { closeAllPlanners, plannerFor } from "../../store/planners";
 import { DeviceDataOffer } from "./DeviceDataOffer";
@@ -84,5 +84,36 @@ describe("adding this device's planner to the account", () => {
     first.unmount();
     render(<DeviceDataOffer accountId={B} />);
     expect(await screen.findByText(QUESTION)).toBeTruthy();
+  });
+
+  it("a failure after the copy and before the delete loses nothing: both have it, nothing is remembered, and trying again adds no duplicate", async () => {
+    await deviceHas("Survives a crash");
+    render(<DeviceDataOffer accountId={A} />);
+    const real = indexedDB.deleteDatabase.bind(indexedDB);
+    const spy = vi.spyOn(indexedDB, "deleteDatabase").mockImplementationOnce(() => {
+      throw new Error("the page went away");
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Add to account" }));
+    await screen.findByText("Couldn’t add it. Nothing was lost; try again.");
+    spy.mockRestore();
+    expect(deviceDataAnswer(A)).toBeNull();
+    // What a reload shows: the account has the copy, and the device still has the original.
+    const account = plannerFor(A);
+    await account.ready;
+    await account.flush();
+    expect(account.getState().tasks.map((t) => t.title)).toEqual(["Survives a crash"]);
+    expect(await titlesOf(null)).toEqual(["Survives a crash"]);
+    // The question comes back, and adding again does not duplicate.
+    cleanup();
+    closeAllPlanners();
+    render(<DeviceDataOffer accountId={A} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Add to account" }));
+    await waitFor(() => expect(deviceDataAnswer(A)).toBe("added"));
+    const again = plannerFor(A);
+    await again.ready;
+    expect(again.getState().tasks.map((t) => t.title)).toEqual(["Survives a crash"]);
+    expect(real).toBeDefined();
+    closeAllPlanners();
+    expect(await titlesOf(null)).toEqual([]);
   });
 });

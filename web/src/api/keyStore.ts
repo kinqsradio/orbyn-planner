@@ -39,6 +39,11 @@ export interface SyncState {
   lastSyncedAt: string | null;
 }
 
+/** What only the engine's snapshot can vouch for. Dropping or replacing the snapshot makes it untrue. */
+export function withoutEngineSide(state: SyncState): SyncState {
+  return { ...state, staged: {}, stagedZone: {}, keysSent: {}, made: {}, quarantined: {} };
+}
+
 export const emptySyncState = (): SyncState => ({ zones: [], zoneOf: {}, staged: {}, stagedZone: {}, keysSent: {}, made: {}, failed: {}, backoff: {}, quarantined: {}, lastSyncedAt: null });
 
 /** The account and device the stored keys belong to. */
@@ -64,7 +69,13 @@ export interface KeyStore {
   /** The sync engine's state, sealed by the module under the wrapping secret. Never stored unsealed. */
   loadSnapshot(): Promise<Uint8Array | null>;
   saveSnapshot(sealed: Uint8Array): Promise<void>;
+  /**
+   * Drops the snapshot. The sync state's engine-side parts (what was staged, which keys were sent or made) are reset in the
+   * same step, since the engine that knew them is gone: every outbox entry is then staged again from the outbox.
+   */
   clearSnapshot(): Promise<void>;
+  /** Resets the sync state's engine-side parts without touching the snapshot, for a snapshot that is about to be replaced. */
+  resetEngineSide(): Promise<void>;
   /** Which account and device the keys and the snapshot were made for. A session for another one finds them stale. */
   loadIdentity(): Promise<DeviceIdentity | null>;
   saveIdentity(identity: DeviceIdentity): Promise<void>;
@@ -169,13 +180,31 @@ export function createIdbKeyStore(factory: IDBFactory = indexedDB): KeyStore {
     });
   }
 
+  /** In one transaction: the snapshot (optionally) and the sync state's engine-side parts. */
+  async function resetAnd(dropSnapshot: boolean): Promise<void> {
+    const database = await open();
+    const tx = database.transaction(["snapshot", "sync"], "readwrite");
+    const done = new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("The write was aborted"));
+    });
+    const sync = tx.objectStore("sync");
+    const read = sync.get("current") as IDBRequest<SyncState | undefined>;
+    read.onsuccess = () => {
+      if (read.result) sync.put(withoutEngineSide(read.result), "current");
+    };
+    if (dropSnapshot) tx.objectStore("snapshot").delete("current");
+    await done;
+  }
+
   return {
     loadKeys: () => get<Uint8Array>("device"),
     saveKeys: (bytes) => put("device", bytes),
     clearKeys: () => remove("device"),
     loadSnapshot: () => get<Uint8Array>("snapshot"),
     saveSnapshot: (b) => put("snapshot", b),
-    clearSnapshot: () => remove("snapshot"),
+    clearSnapshot: () => resetAnd(true),
+    resetEngineSide: () => resetAnd(false),
     loadWrapKey: () => get<CryptoKey>("wrap"),
     saveWrapKey: (k) => put("wrap", k),
     loadSyncState: () => get<SyncState>("sync"),
@@ -243,7 +272,13 @@ export function createMemoryKeyStore(): KeyStore {
     clearKeys: async () => void (keys = null),
     loadSnapshot: async () => snapshot,
     saveSnapshot: async (b) => void (snapshot = b),
-    clearSnapshot: async () => void (snapshot = null),
+    clearSnapshot: async () => {
+      snapshot = null;
+      if (sync) sync = withoutEngineSide(sync);
+    },
+    resetEngineSide: async () => {
+      if (sync) sync = withoutEngineSide(sync);
+    },
     loadWrapKey: async () => wrap,
     saveWrapKey: async (k) => void (wrap = k),
     loadSyncState: async () => sync,
