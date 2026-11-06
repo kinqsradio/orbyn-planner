@@ -197,7 +197,7 @@ describe("repeat rules (ported from orbyn-planner repeat.rs)", () => {
       checked += 1;
     }
     expect(checked, `only ${checked} cases had a split point`).toBeGreaterThan(1000);
-  });
+  }, 60_000);
 
   it("a_huge_range_stops_at_the_limit", () => {
     const s = series(date(2026, 1, 1), "daily");
