@@ -60,7 +60,7 @@ describe("phone tab bar", () => {
     await userEvent.click(within(sheet).getByRole("link", { name: "Settings" }));
     expect(window.location.pathname).toBe("/settings");
     expect(screen.queryByRole("dialog", { name: "More" })).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 1, name: "Planning" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Planning" })).toBeInTheDocument();
   });
 
   it("closes with Escape and returns focus to More", async () => {

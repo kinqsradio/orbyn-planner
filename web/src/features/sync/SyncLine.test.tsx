@@ -94,6 +94,32 @@ describe("useSyncStatus", () => {
     expect(await screen.findByText("Connected")).toBeInTheDocument();
   });
 
+  it("never runs two checks at once, so focus changes cannot stack timer loops", async () => {
+    let release: (() => void) | undefined;
+    const fetchMock = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          release = () => resolve(ok());
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<Probe />);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      release?.();
+    });
+    expect(await screen.findByText("Connected")).toBeInTheDocument();
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  });
+
   it("keeps checking on a schedule and recovers after a failure", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const fetchMock = vi.fn().mockRejectedValueOnce(new Error("down")).mockImplementation(async () => ok());
