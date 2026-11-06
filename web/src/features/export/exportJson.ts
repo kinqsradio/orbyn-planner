@@ -1,4 +1,4 @@
-import type { CalendarEvent, PlannerCalendar, PlannerState, Project, Task, TaskList } from "../../store/types";
+import type { CalendarEvent, PlannerCalendar, PlannerState, Project, Tag, Task, TaskList } from "../../store/types";
 
 /** What the file says it is, so another program can tell it apart. */
 export const EXPORT_FORMAT = "orbyn-planner-export";
@@ -7,9 +7,9 @@ export const EXPORT_VERSION = 1;
 
 /**
  * Everything in the planner on this device, for the account that is open: lists, tasks, projects with their
- * sections, calendars and events, and what is in the trash (deleted tasks and events, kept 30 days). It holds
+ * sections, tags, calendars and events, and what is in the trash (deleted tasks, events and tags, kept 30 days). A task lists the ids of the tags it carries in `tags`, deleted ones included. It holds
  * no keys, tokens, sign-in details or sync state (the outbox of changes waiting to be sent is left out), and it
- * isn't encrypted. There are no tags in the planner yet, so there is nothing to export for them.
+ * isn't encrypted.
  */
 export interface PlannerExport {
   format: typeof EXPORT_FORMAT;
@@ -19,9 +19,10 @@ export interface PlannerExport {
   lists: TaskList[];
   tasks: Task[];
   projects: Project[];
+  tags: Tag[];
   calendars: PlannerCalendar[];
   events: CalendarEvent[];
-  trash: { tasks: Task[]; events: CalendarEvent[] };
+  trash: { tasks: Task[]; events: CalendarEvent[]; tags: Tag[] };
 }
 
 export class ExportError extends Error {
@@ -31,7 +32,7 @@ export class ExportError extends Error {
   }
 }
 
-type Content = Pick<PlannerState, "lists" | "tasks" | "projects" | "calendars" | "events">;
+type Content = Pick<PlannerState, "lists" | "tasks" | "projects" | "tags" | "calendars" | "events">;
 
 export function buildExport(state: Content, exportedAt: string): PlannerExport {
   const kept = <T extends { deletedAt: string | null }>(all: readonly T[]) => all.filter((r) => r.deletedAt === null);
@@ -43,9 +44,10 @@ export function buildExport(state: Content, exportedAt: string): PlannerExport {
     lists: [...state.lists],
     tasks: kept(state.tasks),
     projects: [...state.projects],
+    tags: kept(state.tags),
     calendars: [...state.calendars],
     events: kept(state.events),
-    trash: { tasks: trashed(state.tasks), events: trashed(state.events) },
+    trash: { tasks: trashed(state.tasks), events: trashed(state.events), tags: trashed(state.tags) },
   };
 }
 
@@ -63,7 +65,7 @@ export function readExport(text: string): PlannerExport {
   const version = d?.formatVersion;
   if (!d || d.format !== EXPORT_FORMAT || typeof version !== "number" || !Number.isInteger(version) || version < 1) throw new ExportError("This isn’t an Orbyn Planner export.");
   if (version > EXPORT_VERSION) throw new ExportError("This export is from a newer version of Orbyn Planner.");
-  const arrays = [d.lists, d.tasks, d.projects, d.calendars, d.events, d.trash?.tasks, d.trash?.events];
+  const arrays = [d.lists, d.tasks, d.projects, d.tags, d.calendars, d.events, d.trash?.tasks, d.trash?.events, d.trash?.tags];
   if (!arrays.every(Array.isArray)) throw new ExportError("This Orbyn Planner export is missing part of the planner.");
   return d as PlannerExport;
 }

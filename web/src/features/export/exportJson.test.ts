@@ -19,6 +19,10 @@ async function filledStore() {
   store.addEvent({ title: "Dentist", start: "2026-11-14T15:00", end: "2026-11-14T16:00", people: [{ email: "a@b.co", response: "accepted" }], repeat: repeatEvery("monthly") });
   const old = store.addEvent({ title: "Cancelled", start: "2026-11-15T09:00", end: "2026-11-15T10:00" });
   store.deleteEvent(old.id);
+  const work = store.addTag("Work", "c1");
+  const retired = store.addTag("Retired", "c2");
+  store.addTask({ title: "Tagged", tags: [work.id, retired.id] });
+  store.deleteTag(retired.id);
   store.addCalendar("Work", "c4");
   await store.flush();
   return store;
@@ -34,8 +38,11 @@ describe("the JSON export", () => {
 
     expect(back).toEqual(buildExport(state, "2026-11-07T10:00:00.000Z"));
     expect(back.formatVersion).toBe(EXPORT_VERSION);
-    expect(Object.keys(back).sort()).toEqual(["calendars", "events", "exportedAt", "format", "formatVersion", "lists", "projects", "tasks", "trash"]);
-    expect(back.tasks.map((t) => t.title).sort()).toEqual(["In the project", "Passport", "Weekly"]);
+    expect(Object.keys(back).sort()).toEqual(["calendars", "events", "exportedAt", "format", "formatVersion", "lists", "projects", "tags", "tasks", "trash"]);
+    expect(back.tasks.map((t) => t.title).sort()).toEqual(["In the project", "Passport", "Tagged", "Weekly"]);
+    expect(back.tags.map((t) => t.name)).toEqual(["Work"]);
+    expect(back.trash.tags.map((t) => t.name)).toEqual(["Retired"]); // deleted tags are in the trash, and the task keeps its field
+    expect(back.tasks.find((t) => t.title === "Tagged")!.tags).toHaveLength(2);
     expect(back.trash.tasks.map((t) => t.title)).toEqual(["Deleted one"]);
     expect(back.events.map((e) => e.title)).toEqual(["Dentist"]);
     expect(back.trash.events.map((e) => e.title)).toEqual(["Cancelled"]);
@@ -49,10 +56,10 @@ describe("the JSON export", () => {
   it.each([
     ["not JSON", "hello"],
     ["another kind of JSON", JSON.stringify({ tasks: [] })],
-    ["a newer version", JSON.stringify({ format: "orbyn-planner-export", formatVersion: EXPORT_VERSION + 1, lists: [], tasks: [], projects: [], calendars: [], events: [], trash: { tasks: [], events: [] } })],
-    ["version 0", JSON.stringify({ format: "orbyn-planner-export", formatVersion: 0, lists: [], tasks: [], projects: [], calendars: [], events: [], trash: { tasks: [], events: [] } })],
-    ["version -1", JSON.stringify({ format: "orbyn-planner-export", formatVersion: -1, lists: [], tasks: [], projects: [], calendars: [], events: [], trash: { tasks: [], events: [] } })],
-    ["version 0.5", JSON.stringify({ format: "orbyn-planner-export", formatVersion: 0.5, lists: [], tasks: [], projects: [], calendars: [], events: [], trash: { tasks: [], events: [] } })],
+    ["a newer version", JSON.stringify({ format: "orbyn-planner-export", formatVersion: EXPORT_VERSION + 1, lists: [], tasks: [], projects: [], tags: [], calendars: [], events: [], trash: { tasks: [], events: [], tags: [] } })],
+    ["version 0", JSON.stringify({ format: "orbyn-planner-export", formatVersion: 0, lists: [], tasks: [], projects: [], tags: [], calendars: [], events: [], trash: { tasks: [], events: [], tags: [] } })],
+    ["version -1", JSON.stringify({ format: "orbyn-planner-export", formatVersion: -1, lists: [], tasks: [], projects: [], tags: [], calendars: [], events: [], trash: { tasks: [], events: [], tags: [] } })],
+    ["version 0.5", JSON.stringify({ format: "orbyn-planner-export", formatVersion: 0.5, lists: [], tasks: [], projects: [], tags: [], calendars: [], events: [], trash: { tasks: [], events: [], tags: [] } })],
     ["a missing part", JSON.stringify({ format: "orbyn-planner-export", formatVersion: 1, lists: [] })],
   ])("refuses %s", (_name, text) => {
     expect(() => readExport(text)).toThrow(/Orbyn Planner/);

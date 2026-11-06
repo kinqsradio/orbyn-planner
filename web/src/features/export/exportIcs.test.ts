@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { newSeries, type Repeat } from "../../store/repeat";
-import type { CalendarEvent, PlannerCalendar, Task, TaskList } from "../../store/types";
+import type { CalendarEvent, PlannerCalendar, Tag, Task, TaskList } from "../../store/types";
 import { buildIcs, fold } from "./exportIcs";
 
 const NOW = new Date("2026-11-07T10:00:00Z");
@@ -12,7 +12,7 @@ const event = (over: Partial<CalendarEvent> = {}): CalendarEvent => ({
 });
 const task = (over: Partial<Task> = {}): Task => ({
   id: "t1", title: "Send the brief", notes: "", listId: "inbox", due: "2026-11-07T12:00", priority: "none", done: false, completedAt: null, deletedAt: null, checklist: [],
-  projectId: null, sectionId: null, repeat: null, reminder: null, completions: [], overrideOf: null, createdAt: "2026-11-01T00:00:00Z", updatedAt: "2026-11-01T00:00:00Z", ...over,
+  tags: [], projectId: null, sectionId: null, repeat: null, reminder: null, completions: [], overrideOf: null, createdAt: "2026-11-01T00:00:00Z", updatedAt: "2026-11-01T00:00:00Z", ...over,
 });
 const lists: TaskList[] = [{ id: "inbox", name: "Inbox", colour: "c1", isInbox: true }];
 const calendars: PlannerCalendar[] = [
@@ -25,6 +25,7 @@ interface Case {
   name: string;
   events?: CalendarEvent[];
   tasks?: Task[];
+  tags?: Tag[];
   has?: string[];
   lacks?: string[];
 }
@@ -47,6 +48,7 @@ const cases: Case[] = [
   },
   { name: "deleted events, and the events of a subscribed calendar, are left out", events: [event({ id: "gone", title: "Deleted", deletedAt: "2026-11-02T00:00:00Z" }), event({ id: "feed1", title: "Public holiday", calendarId: "feed", readOnly: true })], lacks: ["Deleted", "Public holiday", "BEGIN:VEVENT"] },
   { name: "a task with a due time is a VTODO with priority, its list as category and a reminder", tasks: [task({ priority: "high", reminder: 30 })], has: ["BEGIN:VTODO", "UID:t1@orbyn-planner", "DUE:20261107T120000", "SUMMARY:Send the brief", "CATEGORIES:Inbox", "PRIORITY:1", "STATUS:NEEDS-ACTION", "TRIGGER:-PT30M"] },
+  { name: "a task's tags join its list as categories, and a deleted tag is not one", tasks: [task({ tags: ["g1", "g2", "gone"] })], tags: [{ id: "g1", name: "Work", colour: "c1", deletedAt: null }, { id: "g2", name: "Q4, planning", colour: "c2", deletedAt: null }, { id: "gone", name: "Old", colour: "c3", deletedAt: "2026-11-01T00:00:00Z" }], has: [String.raw`CATEGORIES:Inbox,Work,Q4\, planning`] },
   { name: "a done task is COMPLETED with its time in UTC", tasks: [task({ due: "2026-11-07", done: true, completedAt: "2026-11-07T09:30:00.000Z" })], has: ["DUE;VALUE=DATE:20261107", "STATUS:COMPLETED", "COMPLETED:20261107T093000Z"] },
   { name: "a repeating task has DTSTART at the series start and an RRULE", tasks: [task({ due: "2026-11-21", repeat: newSeries("2026-11-07", never("weekly")) })], has: ["DTSTART;VALUE=DATE:20261107", "DUE;VALUE=DATE:20261121", "RRULE:FREQ=WEEKLY"] },
   { name: "an attendee address that could break the file is left out", events: [event({ people: [{ email: "a@b.com\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nSUMMARY:Injected", response: "none" }, { email: "ok@example.com", response: "none" }] })], has: ["ATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:ok@example.com"], lacks: ["Injected", "a@b.com"] },
@@ -56,8 +58,8 @@ const cases: Case[] = [
 ];
 
 describe("the .ics export", () => {
-  it.each(cases)("$name", ({ events = [], tasks = [], has = [], lacks = [] }) => {
-    const ics = buildIcs({ lists, calendars, events, tasks }, NOW);
+  it.each(cases)("$name", ({ events = [], tasks = [], tags = [], has = [], lacks = [] }) => {
+    const ics = buildIcs({ lists, calendars, events, tasks, tags }, NOW);
     const lines = unfolded(ics);
     expect(lines.slice(0, 4)).toEqual(["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Orbyn//Planner//EN", "CALSCALE:GREGORIAN"]);
     expect(lines.at(-2)).toBe("END:VCALENDAR");

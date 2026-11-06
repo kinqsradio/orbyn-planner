@@ -1,6 +1,6 @@
 import { addWall } from "../../lib/wall";
 import type { Day, Repeat, Series } from "../../store/repeat";
-import type { CalendarEvent, PlannerState, Priority, Response, Task } from "../../store/types";
+import type { CalendarEvent, PlannerState, Priority, Response, Tag, Task } from "../../store/types";
 
 const UID_HOST = "orbyn-planner";
 const BYDAY: Record<Day, string> = { mon: "MO", tue: "TU", wed: "WE", thu: "TH", fri: "FR", sat: "SA", sun: "SU" };
@@ -111,14 +111,16 @@ function vevent(e: CalendarEvent, stamp: string, all: readonly CalendarEvent[]):
   return lines;
 }
 
-function vtodo(t: Task, listName: string, stamp: string): string[] {
+function vtodo(t: Task, listName: string, tagNames: string[], stamp: string): string[] {
   const due = when(t.due!);
   const lines = ["BEGIN:VTODO", `UID:${t.id}@${UID_HOST}`, `DTSTAMP:${stamp}`];
   // A repeating task's DTSTART is the series start; its DUE is the current occurrence.
   if (t.repeat) lines.push(dateProp("DTSTART", when(atTime(t.repeat.start, t.due!))));
   lines.push(dateProp("DUE", due), `SUMMARY:${text(t.title)}`);
   if (t.notes) lines.push(`DESCRIPTION:${text(t.notes)}`);
-  if (listName) lines.push(`CATEGORIES:${text(listName)}`);
+  // The list and the tags the task carries are its categories.
+  const categories = [listName, ...tagNames].filter(Boolean);
+  if (categories.length > 0) lines.push(`CATEGORIES:${categories.map(text).join(",")}`);
   const priority = PRIORITY[t.priority];
   if (priority !== null) lines.push(`PRIORITY:${priority}`);
   if (t.done) lines.push("STATUS:COMPLETED", ...(t.completedAt ? [`COMPLETED:${utc(t.completedAt)}`] : []));
@@ -128,7 +130,7 @@ function vtodo(t: Task, listName: string, stamp: string): string[] {
   return lines;
 }
 
-type Content = Pick<PlannerState, "lists" | "tasks" | "events" | "calendars">;
+type Content = Pick<PlannerState, "lists" | "tasks" | "events" | "calendars"> & { tags?: readonly Tag[] };
 
 /**
  * The events of the person's own calendars as VEVENT, and the tasks with a due date as VTODO, with repeat rules
@@ -140,9 +142,10 @@ export function buildIcs(state: Content, now: Date): string {
   const subscribed = new Set(state.calendars.filter((c) => c.kind.type === "subscribed").map((c) => c.id));
   const events = state.events.filter((e) => e.deletedAt === null && !e.readOnly && !subscribed.has(e.calendarId));
   const lists = new Map(state.lists.map((l) => [l.id, l.name] as const));
+  const tags = new Map((state.tags ?? []).filter((g) => g.deletedAt === null).map((g) => [g.id, g.name] as const));
   const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Orbyn//Planner//EN", "CALSCALE:GREGORIAN"];
   for (const e of events) lines.push(...vevent(e, stamp, state.events));
-  for (const t of state.tasks) if (t.deletedAt === null && t.due) lines.push(...vtodo(t, lists.get(t.listId) ?? "", stamp));
+  for (const t of state.tasks) if (t.deletedAt === null && t.due) lines.push(...vtodo(t, lists.get(t.listId) ?? "", t.tags.flatMap((id) => tags.get(id) ?? []), stamp));
   lines.push("END:VCALENDAR");
   return `${lines.flatMap(fold).join("\r\n")}\r\n`;
 }
