@@ -188,3 +188,39 @@ describe("when storage fails", () => {
     expect(store.getState().persistence).toEqual({ status: "memory" });
   });
 });
+
+describe("the purge's clock check", () => {
+  it("is not fooled by a clock that jumped ahead and then stamped fresh records", async () => {
+    const env = setup();
+    const first = env.make();
+    await first.ready;
+    const old = first.addTask({ title: "binned long ago" });
+    first.deleteTask(old.id);
+    await first.flush();
+    env.advance(40); // the clock jumps (or the device sat unused)
+    const second = env.make();
+    await second.ready;
+    second.addTask({ title: "stamped with the jumped clock" }); // makes a fresh timestamp
+    await second.flush();
+    // A moment later, in the same session of the wrong clock, another tab opens.
+    const third = env.make();
+    await third.ready;
+    expect(third.getState().tasks.map((t) => t.title)).toContain("binned long ago");
+  });
+
+  it("still purges when older stamps show the clock has only moved on a little", async () => {
+    const env = setup();
+    const first = env.make();
+    await first.ready;
+    const old = first.addTask({ title: "old" });
+    first.deleteTask(old.id);
+    env.advance(31);
+    first.addTask({ title: "written a day before the next visit" });
+    await first.flush();
+    env.advance(0.5);
+    const second = env.make();
+    await second.ready;
+    await second.flush();
+    expect(second.getState().tasks.map((t) => t.title)).toEqual(["written a day before the next visit"]);
+  });
+});

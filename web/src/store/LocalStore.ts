@@ -34,6 +34,8 @@ export const INBOX_ID = "inbox";
 export const PERSONAL_CALENDAR_ID = "personal";
 export const CHANNEL_NAME = "orbyn-planner";
 const DAY_MS = 86_400_000;
+/** Stamps newer than this were made with the clock the purge is checking, so they prove nothing about it. */
+const CLOCK_CHECK_MS = 60_000;
 const KEY_OF = { task: "tasks", list: "lists", event: "events", calendar: "calendars", project: "projects" } as const;
 
 export interface LocalStoreOptions {
@@ -304,10 +306,15 @@ export class LocalStore implements PlannerStore {
   }
 
   /**
-   * Removes tasks deleted more than 30 days ago for good, leaving a delete entry in the outbox.
-   * It does nothing when this device's clock is more than a day past the newest record it holds: a
-   * clock set far ahead would otherwise wipe the whole Deleted list. After a long idle spell the
-   * purge simply waits for the next change that brings the newest timestamp up to date.
+   * Removes records deleted more than 30 days ago for good (a record never sent leaves no trace;
+   * one that was sent leaves a delete entry in the outbox).
+   *
+   * It does nothing when this device's clock is more than a day past the newest timestamp it can
+   * trust. A timestamp can be trusted only if this device did not just make it with the clock being
+   * checked, so anything stamped within the last minute is ignored: otherwise a clock jumped far
+   * ahead would stamp a fresh record, look up to date and wipe the whole Deleted list. Until sync
+   * exists the evidence is the device's own older stamps; once it does, the newest server time
+   * replaces them. After a long idle spell the purge waits for the next session after a change.
    */
   purgeDeleted(): number {
     const stamps = [
@@ -316,7 +323,8 @@ export class LocalStore implements PlannerStore {
       ...this.state.outbox.flatMap((e) => [e.createdAt, e.updatedAt]),
     ]
       .filter((s): s is string => s !== null)
-      .map((s) => new Date(s).getTime());
+      .map((s) => new Date(s).getTime())
+      .filter((t) => t <= this.now().getTime() - CLOCK_CHECK_MS);
     const newest = stamps.length ? Math.max(...stamps) : 0;
     if (this.now().getTime() - newest > DAY_MS) return 0;
     const cutoff = this.now().getTime() - RESTORE_DAYS * DAY_MS;
