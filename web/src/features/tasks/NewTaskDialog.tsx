@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { useNow } from "../../app/clock";
 import { useUi } from "../../app/ui";
+import { Portal } from "../../components/Portal";
 import { useDialog } from "../../components/useDialog";
 import { makeDue, parseDue } from "../../lib/dates";
 import { usePlanner, useStore } from "../../store/context";
@@ -38,6 +39,7 @@ export function NewTaskDialog() {
   };
 
   return (
+    <Portal>
     <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && ui.closeNewTask()}>
       <div ref={ref} className="authcard" style={{ width: 480 }} role="dialog" aria-modal="true" aria-label="New task" tabIndex={-1}>
         <b className="card-title">New task</b>
@@ -74,5 +76,6 @@ export function NewTaskDialog() {
         </form>
       </div>
     </div>
+    </Portal>
   );
 }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../components/Icon";
+import { Portal } from "../components/Portal";
 import { useDialog } from "../components/useDialog";
 import { CalendarPage } from "../features/calendar/CalendarPage";
 import { ListsPage } from "../features/lists/ListsPage";
@@ -72,14 +73,14 @@ function MoreSheet({ onClose }: { onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useDialog(ref, onClose);
   return (
-    <>
+    <Portal>
       <button type="button" className="more-backdrop" aria-label="Close" tabIndex={-1} onClick={onClose} />
       <div ref={ref} className="more-sheet" role="dialog" aria-modal="true" aria-label="More" tabIndex={-1}>
         {MORE.map((item) => (
           <NavLink key={item.path} item={item} onNavigate={onClose} />
         ))}
       </div>
-    </>
+    </Portal>
   );
 }
 

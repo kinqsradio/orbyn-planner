@@ -3,6 +3,7 @@ import { useNow } from "../../app/clock";
 import { useRouter } from "../../app/router";
 import { useUi } from "../../app/ui";
 import { Icon } from "../../components/Icon";
+import { Portal } from "../../components/Portal";
 import { useDialog } from "../../components/useDialog";
 import { formatDue } from "../../lib/dates";
 import { usePlanner, useStore } from "../../store/context";
@@ -109,6 +110,7 @@ export function SearchDialog() {
   const activeItem = flat[current];
 
   return (
+    <Portal>
     <div className="modal-back top" onMouseDown={(e) => e.target === e.currentTarget && ui.closeSearch()}>
       <div ref={ref} className="authcard" style={{ width: 620, padding: 10, gap: 4 }} role="dialog" aria-modal="true" aria-label="Search or add" tabIndex={-1} onKeyDown={onKeyDown}>
         <div className="field bare">
@@ -162,5 +164,6 @@ export function SearchDialog() {
         {q && sections.length === 0 && <p className="t3 search-hint">No match.</p>}
       </div>
     </div>
+    </Portal>
   );
 }
