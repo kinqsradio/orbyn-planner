@@ -104,3 +104,22 @@ describe("Tasks page", () => {
     expect(within(screen.getByRole("region", { name: "Done" })).getByRole("button", { name: "card" })).toBeInTheDocument();
   });
 });
+
+describe("quick add preview", () => {
+  it("shows what was read and can keep the text as typed", async () => {
+    const { field, store } = await openTasks();
+    await userEvent.type(field, "dentist friday 3pm !high");
+    expect(screen.getByText("dentist · due Fri 13 Nov 15:00 · High")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Keep as typed" }));
+    await userEvent.type(field, "{Enter}");
+    expect(store.getState().tasks[0]).toMatchObject({ title: "dentist friday 3pm !high", due: null, priority: "none" });
+  });
+
+  it("says nothing for plain words", async () => {
+    const { field } = await openTasks();
+    await userEvent.type(field, "wear sun hat");
+    expect(screen.queryByRole("checkbox", { name: "Keep as typed" })).not.toBeInTheDocument();
+    await userEvent.type(field, "{Enter}");
+    expect(await screen.findByRole("button", { name: "wear sun hat" })).toBeInTheDocument();
+  });
+});

@@ -33,6 +33,7 @@ export function SearchDialog() {
 
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
+  const [keep, setKeep] = useState(false);
   const q = query.trim();
 
   const sections = useMemo<Section[]>(() => {
@@ -53,7 +54,7 @@ export function SearchDialog() {
     const listSection: Section = { title: "Lists", items: matchedLists.map((l) => ({ kind: "list", id: `list-${l.id}`, list: l })) };
     let addSection: Section | null = null;
     if (!exact) {
-      const parsed = parseQuickAdd(q, now, lists);
+      const parsed = keep ? { title: q, due: null, listId: null, priority: "none" as const } : parseQuickAdd(q, now, lists);
       const bits = [
         parsed.due && `due ${formatDue(parsed.due, now)}`,
         parsed.listId && lists.find((l) => l.id === parsed.listId)?.name,
@@ -71,7 +72,7 @@ export function SearchDialog() {
     if (listSection.items.length) out.push(listSection);
     if (addSection && found) out.push(addSection);
     return out;
-  }, [q, tasks, lists, now]);
+  }, [q, tasks, lists, now, keep]);
 
   const flat = sections.flatMap((s) => s.items);
   const current = Math.min(active, Math.max(flat.length - 1, 0));
@@ -79,7 +80,7 @@ export function SearchDialog() {
   const pick = (item: Item | undefined) => {
     if (!item) return;
     if (item.kind === "add") {
-      const parsed = parseQuickAdd(q, now, lists);
+      const parsed = keep ? { title: q, due: null, listId: null, priority: "none" as const } : parseQuickAdd(q, now, lists);
       const task = store.addTask({ title: parsed.title, due: parsed.due, listId: parsed.listId ?? undefined, priority: parsed.priority });
       ui.closeSearch();
       ui.showToast(`Added “${task.title}”`);
@@ -151,6 +152,12 @@ export function SearchDialog() {
             </div>
           ))}
         </div>
+        {flat.some((i) => i.kind === "add") && (
+          <label className="check-row search-hint">
+            <input type="checkbox" className="check" checked={keep} onChange={(e) => setKeep(e.target.checked)} />
+            Keep as typed
+          </label>
+        )}
         {!q && <p className="t3 search-hint">Type to search, or add a task in plain words.</p>}
         {q && sections.length === 0 && <p className="t3 search-hint">No match.</p>}
       </div>

@@ -6,7 +6,7 @@ import { EmptyState, PageHeader } from "../../components/EmptyState";
 import { Icon } from "../../components/Icon";
 import { formatDue } from "../../lib/dates";
 import { usePlanner, useStore } from "../../store/context";
-import { parseQuickAdd } from "./quickAdd";
+import { describeParse, parseQuickAdd } from "./quickAdd";
 import { DUE_FILTERS, activeTasks, groupTasks, isOpen, matchesDue, sortByDue, type DueFilter } from "./selectors";
 import { Swatch, TaskRow, useTaskActions } from "./TaskRow";
 import type { Task } from "../../store/types";
@@ -19,20 +19,20 @@ export function QuickAddField() {
   const ui = useUi();
   const now = useNow();
   const [text, setText] = useState("");
-  const parsed = useMemo(() => parseQuickAdd(text, now, lists), [text, now, lists]);
-
-  const bits = [
-    parsed.due && formatDue(parsed.due, now),
-    parsed.listId && lists.find((l) => l.id === parsed.listId)?.name,
-    parsed.priority !== "none" && `${parsed.priority} priority`,
-  ].filter(Boolean);
+  const [keep, setKeep] = useState(false);
+  const typed = text.trim();
+  const parsed = useMemo(
+    () => (keep ? { title: typed, due: null, listId: null, priority: "none" as const } : parseQuickAdd(text, now, lists)),
+    [text, typed, keep, now, lists],
+  );
+  const preview = keep ? "" : describeParse(parsed, lists, now);
 
   return (
+    <div className="addbar">
     <form
-      className="addbar"
       onSubmit={(event) => {
         event.preventDefault();
-        if (!text.trim()) return;
+        if (!typed) return;
         const task = store.addTask({ title: parsed.title, due: parsed.due, listId: parsed.listId ?? undefined, priority: parsed.priority });
         ui.showToast(`Added “${task.title}”`);
         setText("");
@@ -46,8 +46,17 @@ export function QuickAddField() {
         disabled={!ready}
         onChange={(e) => setText(e.target.value)}
       />
-      <p className="hint" aria-live="polite">{text.trim() && bits.length > 0 ? bits.join(" · ") : ""}</p>
     </form>
+    <div className="hint-row">
+      <p className="hint" aria-live="polite">{preview}</p>
+      {(preview !== "" || keep) && (
+        <label className="check-row">
+          <input type="checkbox" className="check" checked={keep} onChange={(e) => setKeep(e.target.checked)} />
+          Keep as typed
+        </label>
+      )}
+    </div>
+    </div>
   );
 }
 

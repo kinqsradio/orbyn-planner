@@ -80,3 +80,11 @@ export function formatDue(due: string, now: Date): string {
   }
   return hasTime ? `${day} ${formatTime(date)}` : day;
 }
+
+/** "Fri 13 Nov 15:00", with the year when it is not this year. */
+export function formatDueLong(due: string, now: Date): string {
+  const { date, hasTime } = parseDue(due);
+  let out = `${WEEKDAYS[date.getDay()]!.slice(0, 3)} ${date.getDate()} ${MONTHS[date.getMonth()]!.slice(0, 3)}`;
+  if (date.getFullYear() !== now.getFullYear()) out += ` ${date.getFullYear()}`;
+  return hasTime ? `${out} ${formatTime(date)}` : out;
+}

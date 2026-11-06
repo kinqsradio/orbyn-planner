@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseQuickAdd } from "./quickAdd";
+import { describeParse, parseQuickAdd } from "./quickAdd";
 
 // Saturday 7 November 2026, 10:00 local.
 const NOW = new Date(2026, 10, 7, 10, 0);
@@ -121,7 +121,7 @@ describe("parseQuickAdd", () => {
     });
 
     it("tokens can come in any order", () => {
-      expect(parse("!low #errands 14 nov pick up parcel")).toEqual({
+      expect(parse("!low #errands pick up parcel 14 nov")).toEqual({
         title: "pick up parcel",
         due: "2026-11-14",
         listId: "err",
@@ -137,5 +137,76 @@ describe("parseQuickAdd", () => {
 
   it("uses only the first day and time", () => {
     expect(parse("trip friday saturday 9am 10am")).toMatchObject({ title: "trip saturday 10am", due: "2026-11-13T09:00" });
+  });
+
+  describe("ordinary words are not dates", () => {
+    const none = (text: string) => expect(parse(text)).toMatchObject({ title: text, due: null });
+
+    it("short weekdays and months in the middle of a sentence", () => {
+      none("wear sun hat");
+      none("march 5 miles");
+      none("may 3 people come");
+      none("read 1 may chapter");
+      none("sat nav broken");
+      none("watch mon trailer");
+    });
+
+    it("an ALL CAPS word is never a date", () => {
+      expect(parse("SAT prep sat")).toEqual({ title: "SAT prep", due: "2026-11-14", listId: null, priority: "none" });
+      none("MAY 5 reports");
+    });
+
+    it("they count at the end, or after on, due, by or every", () => {
+      expect(parse("dentist on sat")).toMatchObject({ title: "dentist", due: "2026-11-14" });
+      expect(parse("pay rent by 1 may")).toMatchObject({ title: "pay rent", due: "2027-05-01" });
+      expect(parse("tax due 14 nov")).toMatchObject({ title: "tax", due: "2026-11-14" });
+      expect(parse("gym every fri")).toMatchObject({ title: "gym every", due: "2026-11-13" });
+      expect(parse("lunch sun")).toMatchObject({ title: "lunch", due: "2026-11-08" });
+    });
+
+    it("a time, list or priority after the date still leaves it at the end", () => {
+      expect(parse("dentist 14 nov 3pm !high")).toMatchObject({ title: "dentist", due: "2026-11-14T15:00", priority: "high" });
+      expect(parse("dentist sat at 3pm #errands")).toMatchObject({ title: "dentist", due: "2026-11-14T15:00", listId: "err" });
+    });
+
+    it("full weekday names and tomorrow still work anywhere", () => {
+      expect(parse("friday dinner with Sam")).toMatchObject({ title: "dinner with Sam", due: "2026-11-13" });
+      expect(parse("call the sunday school tomorrow dad")).toMatchObject({ due: "2026-11-08" });
+    });
+  });
+
+  it("looks up to four years ahead for 29 February", () => {
+    expect(parse("leap day on 29 feb").due).toBe("2028-02-29");
+    expect(parse("leap day on 29 feb", new Date(2027, 5, 1)).due).toBe("2028-02-29");
+    expect(parse("leap day on 29 feb", new Date(2028, 2, 1)).due).toBe("2032-02-29");
+    expect(parse("nothing on 30 feb").due).toBeNull();
+  });
+
+  describe("words that are also property names", () => {
+    it("fix constructor bug", () => {
+      expect(parse("fix constructor bug")).toEqual({ title: "fix constructor bug", due: null, listId: null, priority: "none" });
+      expect(parse("toString and valueOf and __proto__ hasOwnProperty")).toMatchObject({ due: null, listId: null, priority: "none" });
+    });
+
+    it("!constructor is not a priority, and next constructor is not a weekday", () => {
+      expect(parse("fix it !constructor")).toEqual({ title: "fix it !constructor", due: null, listId: null, priority: "none" });
+      expect(parse("next constructor")).toMatchObject({ title: "next constructor", due: null });
+      expect(parse("fix #constructor")).toMatchObject({ title: "fix #constructor", listId: null });
+    });
+  });
+
+  describe("describeParse", () => {
+    it("summarises what was read", () => {
+      const r = parse("dentist friday 3pm #errands !high");
+      expect(describeParse(r, LISTS, NOW)).toBe("dentist · due Fri 13 Nov 15:00 · Errands · High");
+    });
+
+    it("is empty when the words are plain", () => {
+      expect(describeParse(parse("buy milk"), LISTS, NOW)).toBe("");
+    });
+
+    it("adds the year when it is not this year", () => {
+      expect(describeParse(parse("renew on 2 feb"), LISTS, NOW)).toBe("renew · due Tue 2 Feb 2027");
+    });
   });
 });
