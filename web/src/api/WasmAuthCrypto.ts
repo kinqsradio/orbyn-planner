@@ -23,6 +23,11 @@ export interface WasmDeviceSession {
 export interface WasmSyncEngine {
   free(): void;
   tick(now: number): string;
+  tickAt(editAt: number, now: number): string;
+  skippedFutureStamps(): number;
+  tokenExpired(zone: string): void;
+  applyChangesFrom(zone: string, since: string | undefined, pageJson: string, now: number): string;
+  quarantined(zone: string): string;
   stage(zone: string, recordType: string, recordId: string, fieldsJson: string): void;
   delete(zone: string, recordId: string): void;
   buildUpload(zone: string): string | undefined;
@@ -85,6 +90,11 @@ function wasmApprovals(engine: WasmSyncEngine): ApprovalEngine {
   return {
     sync: {
       tick: (now) => engine.tick(now),
+      tickAt: (editAt, now) => engine.tickAt(editAt, now),
+      skippedFutureStamps: () => engine.skippedFutureStamps(),
+      tokenExpired: (zone) => engine.tokenExpired(zone),
+      applyChangesFrom: (zone, since, page, now) => engine.applyChangesFrom(zone, since, page, now),
+      quarantined: (zone) => engine.quarantined(zone),
       stage: (zone, type, id, fields) => engine.stage(zone, type, id, fields),
       delete: (zone, id) => engine.delete(zone, id),
       buildUpload: (zone) => engine.buildUpload(zone) ?? undefined,

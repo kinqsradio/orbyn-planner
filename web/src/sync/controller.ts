@@ -33,6 +33,8 @@ export interface SyncState {
   keysPending: string[];
   /** Lists or calendars deleted on another device while this one had changes for them: those changes were dropped. */
   dropped: { zone: string; records: number }[];
+  /** Titles of records another device deleted while this one had unsent changes for them (kept in the 30-day trash). */
+  trashedEdits: string[];
   /** Changes that can't be sent (too large). */
   failed: { type: string; id: string; reason: string }[];
   /** Zones skipped for a while after a refusal. */
@@ -44,7 +46,7 @@ export interface SyncState {
   live: boolean;
 }
 
-const OFF: SyncState = { phase: "off", devices: 0, lastSyncedAt: null, quarantined: 0, waitingForKeys: [], stranded: [], needsApproval: false, keysPending: [], dropped: [], failed: [], skipped: [], error: null, leader: false, live: false };
+const OFF: SyncState = { phase: "off", devices: 0, lastSyncedAt: null, quarantined: 0, waitingForKeys: [], stranded: [], needsApproval: false, keysPending: [], dropped: [], trashedEdits: [], failed: [], skipped: [], error: null, leader: false, live: false };
 
 /** The part of a WebSocket the controller uses. */
 export interface SocketLike {
@@ -131,8 +133,8 @@ export class SyncController {
     for (const l of this.listeners) l();
     if (this.state.leader) {
       try {
-        const { devices, lastSyncedAt, quarantined, phase, waitingForKeys, stranded, needsApproval, keysPending, dropped, failed, skipped, error } = this.state;
-        this.status?.postMessage({ devices, lastSyncedAt, quarantined, phase, waitingForKeys, stranded, needsApproval, keysPending, dropped, failed, skipped, error });
+        const { devices, lastSyncedAt, quarantined, phase, waitingForKeys, stranded, needsApproval, keysPending, dropped, trashedEdits, failed, skipped, error } = this.state;
+        this.status?.postMessage({ devices, lastSyncedAt, quarantined, phase, waitingForKeys, stranded, needsApproval, keysPending, dropped, trashedEdits, failed, skipped, error });
       } catch {
         // Other tabs just don't hear it.
       }
@@ -266,6 +268,7 @@ export class SyncController {
       if (signal.aborted || this.stopped) return; // stopped meanwhile (a sign-out): the result is not used
       this.retry = 0;
       const dropped = [...this.state.dropped, ...report.dropped];
+      const trashedEdits = [...this.state.trashedEdits, ...report.trashedEdits];
       this.update({
         phase: "idle",
         devices: report.devices,
@@ -276,6 +279,7 @@ export class SyncController {
         needsApproval: report.needsApproval,
         keysPending: report.keysPending,
         dropped,
+        trashedEdits,
         failed: report.failed,
         skipped: report.skipped,
         error: null,

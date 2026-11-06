@@ -635,6 +635,55 @@ export class SyncEngine {
         }
     }
     /**
+     * Like `applyChanges`, for a page fetched with `since` (empty for a fetch
+     * from the start). Required while a zone is fetched again after
+     * `tokenExpired`; a page fetched with another token is refused.
+     * @param {string} zone
+     * @param {string | null | undefined} since
+     * @param {string} page_json
+     * @param {number} now
+     * @returns {string}
+     */
+    applyChangesFrom(zone, since, page_json, now) {
+        let deferred6_0;
+        let deferred6_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16) >>> 0;
+            const val4 = +now;
+            let ptr0, len0, ptr1, len1, ptr2, len2;
+            try {
+                ptr0 = passStringToWasm0(zone, wasm.__wbindgen_export5, wasm.__wbindgen_export6);
+                len0 = WASM_VECTOR_LEN;
+                ptr1 = isLikeNone(since) ? 0 : passStringToWasm0(since, wasm.__wbindgen_export5, wasm.__wbindgen_export6);
+                len1 = WASM_VECTOR_LEN;
+                ptr2 = passStringToWasm0(page_json, wasm.__wbindgen_export5, wasm.__wbindgen_export6);
+                len2 = WASM_VECTOR_LEN;
+            } catch (e) {
+                if (ptr2) { wasm.__wbindgen_export3(ptr2, len2 * 1, 1); }
+                if (ptr1) { wasm.__wbindgen_export3(ptr1, len1 * 1, 1); }
+                if (ptr0) { wasm.__wbindgen_export3(ptr0, len0 * 1, 1); }
+                throw e;
+            }
+            wasm.syncengine_applyChangesFrom(retptr, this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, val4);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+            var ptr5 = r0;
+            var len5 = r1;
+            if (r3) {
+                ptr5 = 0; len5 = 0;
+                throw takeFromExternrefTable0(r2);
+            }
+            deferred6_0 = ptr5;
+            deferred6_1 = len5;
+            return getStringFromWasm0(ptr5, len5);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export3(deferred6_0, deferred6_1, 1);
+        }
+    }
+    /**
      * Applies one `ZoneChanges` page; returns what changed (`Applied`).
      * @param {string} zone
      * @param {string} page_json
@@ -1080,7 +1129,40 @@ export class SyncEngine {
         }
     }
     /**
-     * A live record's `Fields`, or `undefined`.
+     * The zone's quarantined records, as `[{"record_id": ..., "reason": ...}]`
+     * with the reason `missing_zone_key`, `open_failed` or `invalid_record`.
+     * Never their bytes.
+     * @param {string} zone
+     * @returns {string}
+     */
+    quarantined(zone) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16) >>> 0;
+            const ptr0 = passStringToWasm0(zone, wasm.__wbindgen_export5, wasm.__wbindgen_export6);
+            const len0 = WASM_VECTOR_LEN;
+            wasm.syncengine_quarantined(retptr, this.__wbg_ptr, ptr0, len0);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+            var ptr2 = r0;
+            var len2 = r1;
+            if (r3) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(r2);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export3(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
+     * A live record as `{"record_type": ..., "fields": Fields}`, or `undefined`.
      * @param {string} zone
      * @param {string} record_id
      * @returns {string | undefined}
@@ -1250,6 +1332,16 @@ export class SyncEngine {
         }
     }
     /**
+     * How many records `restore` found with a newest stamp more than an hour
+     * ahead of its `now`. They were kept but did not move the clock; log a
+     * non-zero count.
+     * @returns {number}
+     */
+    skippedFutureStamps() {
+        const ret = wasm.syncengine_skippedFutureStamps(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
      * The engine's state sealed under `wrap_secret`, bound to this device's
      * keys. Zone keys inside it never leave WebAssembly in the clear.
      * @param {Uint8Array | number[]} wrap_secret
@@ -1411,6 +1503,39 @@ export class SyncEngine {
         }
     }
     /**
+     * A `Stamp` for an edit made at `edit_at` (milliseconds), which may be
+     * earlier than `now`: an edit queued while the app was closed. The clock's
+     * rules hold: the stamp is never earlier than the last one this device
+     * issued or saw. An `edit_at` after `now` is taken as `now`, silently.
+     * @param {number} edit_at
+     * @param {number} now
+     * @returns {string}
+     */
+    tickAt(edit_at, now) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16) >>> 0;
+            wasm.syncengine_tickAt(retptr, this.__wbg_ptr, edit_at, now);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+            var ptr1 = r0;
+            var len1 = r1;
+            if (r3) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(r2);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export3(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
      * A `Stamp` for a new edit at `now` (milliseconds).
      * @param {number} now
      * @returns {string}
@@ -1437,6 +1562,26 @@ export class SyncEngine {
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
             wasm.__wbindgen_export3(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * Call on a `token_expired` answer to a fetch or an upload: the token is
+     * forgotten, so `token(zone)` is empty and the zone is fetched from the start.
+     * @param {string} zone
+     */
+    tokenExpired(zone) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16) >>> 0;
+            const ptr0 = passStringToWasm0(zone, wasm.__wbindgen_export5, wasm.__wbindgen_export6);
+            const len0 = WASM_VECTOR_LEN;
+            wasm.syncengine_tokenExpired(retptr, this.__wbg_ptr, ptr0, len0);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            if (r1) {
+                throw takeFromExternrefTable0(r0);
+            }
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
         }
     }
     /**

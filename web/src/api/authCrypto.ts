@@ -83,6 +83,19 @@ export interface DevicePairing {
 export interface SyncApi {
   /** A `Stamp` for an edit at `now` (milliseconds). */
   tick(now: number): string;
+  /**
+   * A `Stamp` for an edit made at `editAt` (milliseconds), possibly earlier than `now`. Never earlier than the last stamp this
+   * device issued or saw; an `editAt` after `now` is taken as `now`.
+   */
+  tickAt(editAt: number, now: number): string;
+  /** How many records `restore` found with a newest stamp more than an hour ahead of its `now`: kept, but they did not move the clock. */
+  skippedFutureStamps(): number;
+  /** Call on a `token_expired` answer: the token is forgotten and the zone is fetched from the start (with `applyChangesFrom`). */
+  tokenExpired(zone: string): void;
+  /** Like `applyChanges`, for a page fetched with `since` (undefined for a fetch from the start). Required while a zone is fetched again after `tokenExpired`. */
+  applyChangesFrom(zone: string, since: string | undefined, pageJson: string, now: number): string;
+  /** The zone's quarantined records: `[{record_id, reason}]` with the reason `missing_zone_key`, `open_failed` or `invalid_record`. */
+  quarantined(zone: string): string;
   /** Stages already stamped `Fields` for a record. Throws `no_zone_key` while the zone has no key here. */
   stage(zone: string, recordType: string, recordId: string, fieldsJson: string): void;
   /** A signed delete of a record. */
@@ -97,7 +110,7 @@ export interface SyncApi {
   applyChanges(zone: string, pageJson: string, now: number): string;
   /** The zone's change token for `?since=`. */
   token(zone: string): string | undefined;
-  /** A live record's `Fields`. */
+  /** A live record as `{record_type, fields}`: the type is the engine's own (authenticated), not inferred. */
   record(zone: string, recordId: string): string | undefined;
   /** Compares one `ZoneList` page; returns `{stale, next}`. */
   checkZones(zonesJson: string): string;

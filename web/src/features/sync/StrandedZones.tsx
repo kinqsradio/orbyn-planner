@@ -64,6 +64,7 @@ export function StrandedZones({ only }: { only?: "list" }) {
       {asking && (
         <Modal label="Delete on every device" onClose={() => setAsking(null)}>
           <b className="card-title">Delete “{nameOf(asking)}” on every device? This can’t be undone.</b>
+          <p className="t3 small">Only do this if no other device of yours is signed in.</p>
           <div className="dialog-actions">
             <button type="button" className="ghost" data-autofocus onClick={() => setAsking(null)}>Cancel</button>
             <button type="button" className="btn danger" onClick={() => void remove(asking)}>Delete</button>

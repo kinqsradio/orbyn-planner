@@ -3,7 +3,7 @@
 // Sync through the engine's real module against the mock record store: two paired devices, their stores
 // in memory, a server that versions records and refuses stale writes like the real one.
 import { describe, expect, it } from "vitest";
-import { runCycle, SyncError } from "./cycle";
+import { runCycle } from "./cycle";
 import { createSyncRig, type SyncRig, type TestDevice } from "./testing/rig";
 
 const sync = (_r: SyncRig, d: TestDevice) => runCycle(d.services, d.session, d.store);
@@ -158,23 +158,139 @@ describe("offline and failures", () => {
     expect(task.version).toBeGreaterThan(0);
   });
 
-  it("an expired change token stops the sync with a clear reason (no engine support for resetting it yet)", async () => {
+  it("an expired change token starts the zone over: it is fetched again from the start and nothing is lost or re-sent", async () => {
     const r = await createSyncRig();
     r.a.store.addTask({ title: "x" });
     await sync(r, r.a);
-    r.clock.now += 1;
-    // The server refuses every token for the zone: stands in for token_expired, which the pinned module can't recover from.
+    await sync(r, r.b);
+    r.a.store.addTask({ title: "new on A" });
+    await sync(r, r.a);
+    // The server refuses B's token once, as it would after the zone was purged past it.
     const real = r.engine.fetch;
+    let refused = 0;
+    let expired = 0;
+    const asked: string[] = [];
     r.engine.fetch = (async (url: string, init?: RequestInit) => {
-      if (String(url).includes("/changes?") && (init?.method ?? "GET") === "GET") {
+      if (/\/changes(\?|$)/.test(String(url)) && (init?.method ?? "GET") === "GET") {
+        asked.push(String(url));
+        if (String(url).includes("since=") && refused++ === 0) {
+          expired++;
+          return new Response(JSON.stringify({ code: "token_expired", message: "Too old." }), { status: 410, headers: { "content-type": "application/json" } });
+        }
+      }
+      return real(url, init);
+    }) as typeof fetch;
+    r.b.store.addTask({ title: "unsent on B" });
+    await sync(r, r.b);
+    expect(expired).toBe(1);
+    expect(asked.some((u) => !u.includes("since="))).toBe(true); // fetched again from the start
+    expect(titles(r.b)).toEqual(["new on A", "unsent on B", "x"]);
+    r.engine.fetch = real;
+    await sync(r, r.a);
+    expect(titles(r.a)).toEqual(["new on A", "unsent on B", "x"]);
+    expect(r.b.store.getState().outbox).toEqual([]);
+  });
+});
+
+describe("an upload refused for an expired token", () => {
+  it("starts the zone over and sends the edit on the next pass, once", async () => {
+    const r = await createSyncRig();
+    r.a.store.addTask({ title: "Seed" });
+    await sync(r, r.a);
+    await sync(r, r.b);
+    await sync(r, r.a); // A now holds a change token for the zone
+    r.a.store.addTask({ title: "Edited once the token expired" });
+    const real = r.engine.fetch;
+    let refused = 0;
+    r.engine.fetch = (async (url: string, init?: RequestInit) => {
+      if (init?.method === "POST" && /\/v1\/zones\/[^/]+\/changes$/.test(String(url)) && refused++ === 0) {
         return new Response(JSON.stringify({ code: "token_expired", message: "Too old." }), { status: 410, headers: { "content-type": "application/json" } });
       }
       return real(url, init);
     }) as typeof fetch;
-    r.b.store.addTask({ title: "y" });
-    const error = await sync(r, r.b).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(SyncError);
-    expect((error as SyncError).code).toBe("token_expired");
+    const asked: string[] = [];
+    const wrapped = r.engine.fetch;
+    r.engine.fetch = (async (url: string, init?: RequestInit) => {
+      if ((init?.method ?? "GET") === "GET" && /\/v1\/zones\/list%3Ainbox\/changes/.test(String(url))) asked.push(String(url));
+      return wrapped(url, init);
+    }) as typeof fetch;
+    await sync(r, r.a); // the upload is refused: the zone is started over
+    await sync(r, r.a); // fetched again from the start (no since), then the edit goes up
+    expect(asked.some((u) => !u.includes("since="))).toBe(true);
+    await sync(r, r.b);
+    expect(titles(r.b)).toEqual(["Edited once the token expired", "Seed"]);
+    expect(r.a.store.getState().outbox).toEqual([]);
+  });
+});
+
+describe("a refetch after an expired token doesn't trash this device's own unsent changes", () => {
+  const trashOf = (d: TestDevice, zone: string) => d.services.engine.run(d.session, (e) => Object.keys(JSON.parse(e.sync!.trash(zone)) as Record<string, unknown>));
+
+  it("an unsent create whose upload was refused for an expired token is re-staged, reaches B and isn't trashed", async () => {
+    const r = await createSyncRig();
+    r.a.store.addTask({ title: "Seed" });
+    await sync(r, r.a);
+    await sync(r, r.b);
+    const created = r.a.store.addTask({ title: "Created, upload refused" });
+    const real = r.engine.fetch;
+    let refused = 0;
+    r.engine.fetch = (async (url: string, init?: RequestInit) => {
+      if (init?.method === "POST" && /\/v1\/zones\/[^/]+\/changes$/.test(String(url)) && refused++ === 0) {
+        return new Response(JSON.stringify({ code: "token_expired", message: "Too old." }), { status: 410, headers: { "content-type": "application/json" } });
+      }
+      return real(url, init);
+    }) as typeof fetch;
+    await sync(r, r.a); // abandonUpload, tokenExpired: the zone is fetched again from the start next
+    await sync(r, r.a);
+    await sync(r, r.b);
+    expect(titles(r.b)).toEqual(["Created, upload refused", "Seed"]);
+    expect(titles(r.a)).toContain("Created, upload refused");
+    expect(await trashOf(r.a, "list:inbox")).not.toContain(created.id);
+    expect(r.a.store.getState().outbox).toEqual([]);
+  });
+
+  it("a record that was on the server and is now gone keeps its unsent edit in the 30-day trash: delete wins, nothing is re-uploaded, the person is told", async () => {
+    const r = await createSyncRig({ third: true });
+    const task = r.a.store.addTask({ title: "Held", notes: "original notes" });
+    await sync(r, r.a);
+    await sync(r, r.b);
+    r.b.store.addTask({ title: "From B so A fetches" });
+    await sync(r, r.b);
+    await sync(r, r.a);
+    r.clock.now += 1000;
+    r.a.store.updateTask(task.id, { title: "Held, edited offline" });
+    // The server purged the record (and the tombstone), and refuses the token this device holds.
+    const account = [...r.engine.accounts.values()][0]!;
+    const zone = account.records!.zones.get("list:inbox")!;
+    zone.records.delete(task.id);
+    zone.changedAt.delete(task.id);
+    zone.sequence += 1;
+    const real = r.engine.fetch;
+    let expired = 0;
+    r.engine.fetch = (async (url: string, init?: RequestInit) => {
+      if (/\/changes(\?|$)/.test(String(url)) && (init?.method ?? "GET") === "GET" && String(url).includes("since=") && expired++ === 0) {
+        return new Response(JSON.stringify({ code: "token_expired", message: "Too old." }), { status: 410, headers: { "content-type": "application/json" } });
+      }
+      return real(url, init);
+    }) as typeof fetch;
+    // The zone's upload is refused this pass, so the outbox can't be cleared as "sent": the entry has to go with the record.
+    r.network.refuseUploads.set("list:inbox", { status: 403, code: "forbidden" });
+    const report = await sync(r, r.a);
+    expect(report.trashedEdits).toEqual(["Held, edited offline"]); // "‘<title>’ was deleted on another device…"
+    expect(titles(r.a)).not.toContain("Held, edited offline"); // gone from the screen
+    expect(await trashOf(r.a, "list:inbox")).toContain(task.id); // kept for 30 days, edits included
+    expect(r.a.store.getState().outbox.some((o) => o.id === task.id)).toBe(false); // dropped in the same step, not uploaded
+    expect((await r.a.keys.loadSyncState())?.staged[`task:${task.id}`]).toBeUndefined();
+    r.network.refuseUploads.clear();
+    r.clock.now += 3_600_000; // past the backoff
+    await sync(r, r.a);
+    await sync(r, r.b);
+    await sync(r, r.c); // a device that never held the record
+    // The record is not re-uploaded, so a device that never held it never sees it (B held it from before; the server's purge
+    // would expire B's token in practice, and B would drop it the same way).
+    for (const d of [r.a, r.c]) expect(d.store.getState().tasks.some((t) => t.id === task.id)).toBe(false);
+    expect(zone.records.has(task.id)).toBe(false); // and nothing, not even a fragment of it, was put back on the server
+    expect(await trashOf(r.a, "list:inbox")).toContain(task.id);
   });
 });
 

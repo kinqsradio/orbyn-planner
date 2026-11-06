@@ -13,7 +13,7 @@ import { refKey } from "../store/outbox";
 import { storedOf } from "../store/records";
 import type { OutboxEntry, PlannerStore, RecordType, RemoteChange } from "../store/types";
 import { acceptable, stampFields, valuesOf, zoneOf, type Accepted, type Applied, type Stamp, type StampedFields, type ZoneCheck } from "./mapping";
-import { pinnedTokens, TokenExpired, type ZoneTokens } from "./tokens";
+import { pinnedTokens, type ZoneTokens } from "./tokens";
 
 /** Something that stops a sync with a reason the person can be told. */
 export class SyncError extends Error {
@@ -53,6 +53,8 @@ export interface CycleReport {
   quarantined: number;
   /** Lists or calendars deleted on another device while this one had changes for them: those changes were dropped. */
   dropped: { zone: string; records: number }[];
+  /** Titles of records another device deleted while this one had unsent changes for them: the changes stay in the 30-day trash. */
+  trashedEdits: string[];
   /** Changes that can't be sent (too large), left out of uploads. */
   failed: { type: RecordType; id: string; reason: string }[];
   /** Zones skipped for a while after the server refused an upload. */
@@ -89,7 +91,7 @@ export async function runCycle(
   const { api, keys: keyStore } = services;
   const now = () => services.now();
   const state: SyncState = (await keyStore.loadSyncState()) ?? emptySyncState();
-  const report: CycleReport = { uploaded: 0, received: 0, devices: 0, waitingForKeys: [], stranded: [], needsApproval: false, keysPending: [], quarantined: 0, dropped: [], failed: [], skipped: [] };
+  const report: CycleReport = { uploaded: 0, received: 0, devices: 0, waitingForKeys: [], stranded: [], needsApproval: false, keysPending: [], quarantined: 0, dropped: [], trashedEdits: [], failed: [], skipped: [] };
 
   const alive = () => {
     if (signal.aborted) throw new Aborted();
@@ -105,7 +107,7 @@ export async function runCycle(
     });
   };
 
-  const withEngine = async <T>(fn: (e: Engine) => T, restoreAtMs?: number): Promise<T> => {
+  const withEngine = async <T>(fn: (e: Engine) => T): Promise<T> => {
     alive();
     const result = await services.engine.run(
       session,
@@ -113,7 +115,6 @@ export async function runCycle(
         if (!e.sync) throw new SyncError("sync_unavailable", "This build can't sync: the engine's module isn't loaded.");
         return fn(e as Engine);
       },
-      { restoreAtMs },
     );
     alive();
     return result;
@@ -123,6 +124,25 @@ export async function runCycle(
    * The records an `Applied` changed, as the store should have them. `types` holds the record types the
    * server reported for a page (not authenticated: they are only checked against what the zone allows).
    */
+  /** The type of the local record with this id that belongs to the zone, if there is one. */
+  function localTypeOf(zone: string, id: string): string | undefined {
+    const s = store.getState();
+    for (const [type, list] of [["task", s.tasks], ["list", s.lists], ["event", s.events], ["calendar", s.calendars], ["project", s.projects]] as const) {
+      const found = (list as readonly { id: string; listId?: string; calendarId?: string }[]).find((r) => r.id === id);
+      if (found && zoneOf(type, found) === zone) return type;
+    }
+    return undefined;
+  }
+
+  /** Records removed by someone else's delete whose unsent outbox entries must go with them. */
+  const dropped: { type: RecordType; id: string }[] = [];
+
+  /** What the person calls a local record, for a notice. */
+  function titleOf(type: RecordType, id: string): string {
+    const found = (store.getState()[STORE_KEY[type]] as readonly { id: string; title?: string; name?: string }[]).find((r) => r.id === id);
+    return found?.title ?? found?.name ?? "An item";
+  }
+
   function collect(e: Engine, zone: string, applied: Applied, options: { retried?: boolean; types?: Map<string, string> } = {}): RemoteChange[] {
     const out: RemoteChange[] = [];
     const outbox = new Map(store.getState().outbox.map((o) => [refKey(o), o] as const));
@@ -130,8 +150,9 @@ export async function runCycle(
     for (const id of applied.changed) {
       const json = e.sync.record(zone, id);
       if (!json) continue;
-      let fields = valuesOf(parse<StampedFields>(json));
-      const type = acceptable(zone, id, fields, options.types?.get(id));
+      const record = parse<{ record_type: string; fields: StampedFields }>(json);
+      let fields = valuesOf(record.fields);
+      const type = acceptable(zone, id, record.record_type, fields, options.types?.get(id));
       if (!type) {
         rejected.push(id); // not what this zone may hold: quarantined, never applied
         continue;
@@ -147,19 +168,34 @@ export async function runCycle(
       out.push({ type, id, fields });
     }
     for (const id of applied.removed) {
-      const type = acceptable(zone, id, null, options.types?.get(id));
+      // The engine has no record to name a type for: the server's type for the page, or the local record's.
+      const type = acceptable(zone, id, options.types?.get(id) ?? localTypeOf(zone, id), null, options.types?.get(id));
       if (!type) {
         rejected.push(id);
         continue;
       }
       // A create that was never acknowledged exists nowhere else: it is not a remote delete's to take, it is staged and sent.
       if (outbox.get(refKey({ type, id }))?.op === "create") continue;
+      // Delete wins over edits, everywhere: a record that was on the server and is now gone (another device deleted it, or a
+      // refetch found it purged) stays in the engine's 30-day trash with this device's unsent edits, and its outbox entry is
+      // dropped with the record, not uploaded. The person is told. (An unsent create is different: the server never had it,
+      // so it is skipped above and goes up.)
+      const waiting = outbox.get(refKey({ type, id }));
+      if (waiting && applied.trashed.includes(id) && !(waiting.op === "delete" && Object.keys(waiting.changedFields).length === 0)) {
+        report.trashedEdits.push(titleOf(type, id));
+        // Its outbox entry goes in the same step as the record: left, the next pass would stage its partial fields and
+        // recreate a fragment of the deleted record. (An entry whose upload landed and was answered is a create here too: the
+        // record was on the server, so it is deleted like any other. A hard delete is the person's own and is left alone.)
+        dropped.push({ type, id });
+      }
       // A record that moved to another list is deleted from the old zone and made in the new one: the delete mustn't win.
       if ((state.zoneOf[refKey({ type, id })] ?? zone) === zone) out.push({ type, id, fields: null });
     }
     // Quarantine: what could not be opened or was rejected, less what has opened since.
     // A retry lists exactly what is still unopened; a fetch adds to what was waiting.
     const waiting = new Set(options.retried ? [] : (state.quarantined[zone] ?? []));
+    // What the engine could not open (or found invalid), from its own list, besides what this side rejected.
+    for (const q of parse<{ record_id: string; reason: string }[]>(e.sync.quarantined(zone))) waiting.add(q.record_id);
     for (const id of [...applied.quarantined, ...rejected]) waiting.add(id);
     for (const id of [...applied.changed, ...applied.removed, ...applied.evicted]) if (!rejected.includes(id)) waiting.delete(id);
     if (waiting.size > 0) state.quarantined[zone] = [...waiting];
@@ -172,6 +208,18 @@ export async function runCycle(
     alive();
     report.received += changes.length;
     await store.applyRemote(changes);
+    if (dropped.length > 0) {
+      const gone = dropped.splice(0);
+      const entries = store
+        .getState()
+        .outbox.filter((o) => gone.some((g) => g.type === o.type && g.id === o.id) && !(o.op === "delete" && Object.keys(o.changedFields).length === 0))
+        .map((o) => ({ type: o.type, id: o.id, idempotencyKey: o.idempotencyKey }));
+      await store.acknowledge(entries);
+      for (const g of gone) {
+        delete state.staged[refKey(g)];
+        delete state.stagedZone[refKey(g)];
+      }
+    }
   }
 
   // 0. Stage the outbox ------------------------------------------------------------------------------------
@@ -180,10 +228,9 @@ export async function runCycle(
   // carries the time it was edited, and merging with what arrives decides field by field.
   const entries = store.getState().outbox.filter((o) => state.staged[refKey(o)] !== o.idempotencyKey && !state.failed[refKey(o)]?.startsWith(`${o.idempotencyKey}|`));
   if (entries.length > 0) {
-    const times = entries.flatMap((o) => Object.values(fieldTimesOf(o)).map((t) => Date.parse(t))).filter((t) => Number.isFinite(t));
     await withEngine((e) => {
       for (const entry of entries) stage(e, entry);
-    }, times.length > 0 ? Math.min(...times) : now());
+    });
     await save();
   }
 
@@ -231,7 +278,7 @@ export async function runCycle(
         return;
       }
       for (const group of staged) {
-        const stamp = parse<Stamp>(e.sync.tick(Date.parse(group.at) || now()));
+        const stamp = parse<Stamp>(e.sync.tickAt(Date.parse(group.at) || now(), now()));
         e.sync.stage(zone, entry.type, entry.id, JSON.stringify(stampFields(group.fields, stamp)));
       }
       state.zoneOf[key] = zone;
@@ -248,12 +295,23 @@ export async function runCycle(
   // A device that was approved again (it lost its saved state and holds no keys) is in the trusted set already, so the
   // set didn't change. Its approval did: every trusted device then sends it every zone key it holds, not just the approver.
   state.approvals ??= {};
+  state.resentAt ??= {};
   let reapproved = false;
   for (const d of devices.devices) {
     if (d.state !== "trusted" || d.id === session.deviceId) continue;
     const marker = d.approval_id ?? d.approval_signature ?? "";
-    if (state.approvals[d.id] !== undefined && state.approvals[d.id] !== marker) reapproved = true;
-    state.approvals[d.id] = marker;
+    const seen = state.approvals[d.id];
+    if (seen === undefined) {
+      state.approvals[d.id] = marker;
+    } else if (seen !== marker) {
+      // At most once per ten minutes per device, so a server that changes the value on every poll can't make every pass resend
+      // every key. A throttled change is not recorded, so it is acted on once the ten minutes are up.
+      if (now() - (state.resentAt[d.id] ?? 0) >= RESEND_EVERY_MS) {
+        reapproved = true;
+        state.resentAt[d.id] = now();
+        state.approvals[d.id] = marker;
+      }
+    }
   }
   if (reapproved) state.keysSent = {};
   const envelopes = await api.keyEnvelopes();
@@ -292,9 +350,10 @@ export async function runCycle(
         if (!tokens.isExpired(error)) throw error;
         try {
           await withEngine((e) => tokens.restart(e, zone));
-        } catch (stopped) {
-          if (stopped instanceof TokenExpired) throw new SyncError("token_expired", stopped.message);
-          throw stopped;
+        } catch (again) {
+          // Started over and refused again: there is nothing more to do now, and saying so beats a raw engine code.
+          if (hasCode(again, "expired_again")) throw new SyncError("token_expired", "The server keeps refusing this device's place in a list or calendar, even when it starts over. Try again later.");
+          throw again;
         }
         continue; // restarted: fetch the zone again from the start
       }
@@ -412,6 +471,14 @@ export async function runCycle(
         await withEngine((e) => e.sync.uploadSucceeded(zone, JSON.stringify(result)));
         report.uploaded += body.changes.length;
       } catch (error) {
+        if (tokens.isExpired(error)) {
+          // The server no longer knows the place this device uploaded from: start the zone over, and fetch it again next.
+          await withEngine((e) => {
+            e.sync.abandonUpload(zone);
+            tokens.restart(e, zone);
+          });
+          return false;
+        }
         if (error instanceof ApiFailure && error.code === "zone_not_found") {
           // This device has the key but the zone was never made (a crash between): make it, and send again.
           serverZones.set(zone, await api.createZone(zone));
@@ -484,7 +551,9 @@ export async function runCycle(
   // server's list show no other trusted device can nobody hold a key, and a zone it can't open is stranded.
   const othersInView = [...verified].some((id) => id !== session.deviceId);
   const othersOnServer = devices.devices.some((d) => d.state === "trusted" && d.id !== session.deviceId);
-  if (!othersInView && othersOnServer) {
+  if (!othersInView && (othersOnServer || state.reset)) {
+    // A device whose saved state was reset says so until it has been approved again once, whatever the server's list shows: a
+    // server that hides the others must not be able to make this look like the account's only device.
     report.needsApproval = true;
     report.waitingForKeys = [];
   } else if (!othersInView && !othersOnServer) {
@@ -497,6 +566,9 @@ export async function runCycle(
   if (transient !== null) throw transient;
   return report;
 }
+
+/** A device whose approval changed gets the keys again at most this often (unless an approval completed on this device). */
+const RESEND_EVERY_MS = 10 * 60 * 1000;
 
 const STORE_KEY = { task: "tasks", list: "lists", event: "events", calendar: "calendars", project: "projects" } as const satisfies Record<RecordType, string>;
 
