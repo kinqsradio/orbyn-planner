@@ -3,7 +3,6 @@
 // Sync through the engine's real module against the mock record store: two paired devices, their stores
 // in memory, a server that versions records and refuses stale writes like the real one.
 import { describe, expect, it } from "vitest";
-import { ApiFailure } from "../api/auth";
 import { runCycle, SyncError } from "./cycle";
 import { createSyncRig, type SyncRig, type TestDevice } from "./testing/rig";
 
@@ -146,18 +145,17 @@ describe("offline and failures", () => {
   it("a lost answer replays instead of writing twice", async () => {
     const r = await createSyncRig();
     r.a.store.addTask({ title: "Once" });
-    // The answer to the first upload is lost: the request reaches the server, the response doesn't get back.
-    const real = r.engine.fetch;
-    let lost = false;
-    r.a.services.api = r.a.services.api; // (the services fetch is the rig's; wrap through the network flag below)
-    const original = r.engine.fetch;
-    void real;
-    void original;
-    await sync(r, r.a);
-    await sync(r, r.a);
+    r.network.loseAnswer = true; // the first upload reaches the server; the answer doesn't come back
+    await expect(sync(r, r.a)).rejects.toThrow();
+    expect(r.a.store.getState().outbox.length).toBeGreaterThan(0); // not cleared: it was never acknowledged
+    await sync(r, r.a); // the same batch, the same operation id: the server answers from its record of it
+    expect(r.a.store.getState().outbox).toEqual([]);
+    const zone = [...[...r.engine.accounts.values()][0]!.records!.zones.values()].find((z) => z.name === "list:inbox")!;
+    expect(zone.operations.size).toBeGreaterThan(0);
     await sync(r, r.b);
     expect(titles(r.b)).toEqual(["Once"]);
-    void lost;
+    const task = [...zone.records.values()].find((x) => x.record_type === "task")!;
+    expect(task.version).toBeGreaterThan(0);
   });
 
   it("an expired change token stops the sync with a clear reason (no engine support for resetting it yet)", async () => {
@@ -177,7 +175,6 @@ describe("offline and failures", () => {
     const error = await sync(r, r.b).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(SyncError);
     expect((error as SyncError).code).toBe("token_expired");
-    void ApiFailure;
   });
 });
 

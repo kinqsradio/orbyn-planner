@@ -225,7 +225,9 @@ export async function runCycle(services: AuthServices, session: StoredSession, s
         serverZones.set(zone, await api.createZone(zone));
         await withEngine((e) => e.sync.createZoneKey(zone));
         created = true;
-        state.keysFor = "";
+        // The other devices get the key before the first record goes up: a notice that reaches them first
+        // would find a zone they can't open.
+        await sendKeys(zone);
         continue;
       }
       if (upload === undefined) {
@@ -253,20 +255,22 @@ export async function runCycle(services: AuthServices, session: StoredSession, s
     }
   }
 
+  async function sendKeys(zone: string): Promise<void> {
+    const put = await withEngine((e) => {
+      try {
+        return e.sync.envelopesFor(zone, JSON.stringify(devices));
+      } catch (error) {
+        if (hasCode(error, "no_zone_key")) return null;
+        throw error;
+      }
+    });
+    if (put && parse<{ envelopes: unknown[] }>(put).envelopes.length > 0) await api.putKeyEnvelopes(parse(put));
+  }
+
   // 6. Keys this device owes the others ------------------------------------------------------------------
   const owes = [...verified].sort().join(",");
   if (state.keysFor !== owes && state.zones.length > 0) {
-    for (const zone of state.zones) {
-      const put = await withEngine((e) => {
-        try {
-          return e.sync.envelopesFor(zone, JSON.stringify(devices));
-        } catch (error) {
-          if (hasCode(error, "no_zone_key")) return null;
-          throw error;
-        }
-      });
-      if (put && parse<{ envelopes: unknown[] }>(put).envelopes.length > 0) await api.putKeyEnvelopes(parse(put));
-    }
+    for (const zone of state.zones) await sendKeys(zone);
     state.keysFor = owes;
   }
 

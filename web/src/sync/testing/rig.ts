@@ -27,17 +27,22 @@ export interface SyncRig {
   /** Another store over the same stored data: what a reload of the device shows. */
   reload(d: TestDevice): Promise<LocalStore>;
   /** Makes the network refuse (a thrown fetch) while `down` is true. */
-  network: { down: boolean };
+  network: { down: boolean; /** The next upload reaches the server but its answer is lost. */ loseAnswer: boolean };
 }
 
 /** Two trusted devices of one account on the mock server, with the real module and each pinning the other. Tests only. */
 export async function createSyncRig(): Promise<SyncRig> {
   const crypto = realAuthCrypto();
   const clock = { now: Date.UTC(2026, 10, 7, 10, 0, 0) };
-  const network = { down: false };
+  const network = { down: false, loseAnswer: false };
   const engine = createMockEngine(() => clock.now);
   const fetchFn = (async (url: string, init?: RequestInit) => {
     if (network.down) throw new TypeError("Failed to fetch");
+    if (network.loseAnswer && init?.method === "POST" && String(url).endsWith("/changes")) {
+      network.loseAnswer = false;
+      await engine.fetch(url, init);
+      throw new TypeError("Failed to fetch");
+    }
     return engine.fetch(url, init);
   }) as typeof fetch;
 

@@ -3,6 +3,7 @@ import { ApiFailure } from "../../api/auth";
 import { authCryptoAvailable, SIGN_IN_UNAVAILABLE } from "../../api/authCrypto";
 import { cryptoLoad } from "../../api/realCrypto";
 import { CryptoProblem } from "./CryptoProblem";
+import { SyncSettings } from "../settings/SyncSettings";
 import { Icon } from "../../components/Icon";
 import { Portal } from "../../components/Portal";
 import { useDialog } from "../../components/useDialog";
@@ -248,6 +249,7 @@ function SignedInAccount() {
           </li>
         ))}
       </ul>
+      <SyncSettings />
       <div className="account-actions">
         <button type="button" className="ghost" onClick={() => void auth.signOut()}>Sign out</button>
         <button type="button" className="ghost" onClick={() => void load()}>Refresh</button>

@@ -19,6 +19,7 @@ import { StoreProvider, usePlanner } from "../store/context";
 import type { PlannerStore } from "../store/types";
 import { Toast } from "../components/Toast";
 import { useNow } from "./clock";
+import { SyncProvider } from "../sync/SyncProvider";
 import { useExternalLinks } from "./links";
 import { UiProvider, useUi } from "./ui";
 import { AuthProvider } from "../auth/AuthProvider";
@@ -173,9 +174,11 @@ export function App({ store, auth }: { store?: PlannerStore; auth?: AuthServices
         <PrefsProvider>
           <AuthProvider services={auth ?? null}>
             <AuthGate>
-              <RouterProvider>
-                <Shell />
-              </RouterProvider>
+              <SyncProvider>
+                <RouterProvider>
+                  <Shell />
+                </RouterProvider>
+              </SyncProvider>
             </AuthGate>
           </AuthProvider>
         </PrefsProvider>
