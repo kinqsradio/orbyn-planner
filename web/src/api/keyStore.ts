@@ -12,6 +12,27 @@ export interface StoredSession {
   name: string;
 }
 
+/**
+ * What the sync layer keeps beside the engine's snapshot (which holds the zone keys, sealed). Plain data
+ * with no secrets: names and ids the server sees anyway. Cleared with the device.
+ */
+export interface SyncState {
+  /** Zones this device writes to or reads, by name. */
+  zones: string[];
+  /** The zone each record was last synced to, by "type:id", so a record that moves lists is moved in the store. */
+  zoneOf: Record<string, string>;
+  /** Outbox entries already staged in the engine, by "type:id" -> idempotency key, so an entry is never staged twice. */
+  staged: Record<string, string>;
+  /** The trusted devices the zone keys were last sent to (sorted ids joined), so a new device gets them. */
+  keysFor: string;
+  /** Records the engine could not open yet, by zone, for Settings. */
+  quarantined: Record<string, number>;
+  /** ISO time of the last complete sync. */
+  lastSyncedAt: string | null;
+}
+
+export const emptySyncState = (): SyncState => ({ zones: [], zoneOf: {}, staged: {}, keysFor: "", quarantined: {}, lastSyncedAt: null });
+
 /** The account and device the stored keys belong to. */
 export interface DeviceIdentity {
   accountId: string;
@@ -39,6 +60,8 @@ export interface KeyStore {
   /** Which account and device the keys and the snapshot were made for. A session for another one finds them stale. */
   loadIdentity(): Promise<DeviceIdentity | null>;
   saveIdentity(identity: DeviceIdentity): Promise<void>;
+  loadSyncState(): Promise<SyncState | null>;
+  saveSyncState(state: SyncState): Promise<void>;
   /**
    * Keeps a snapshot that could not be read, sealed as it was, so it isn't lost. The first one kept
    * is pinned (it is the original, with the zone keys) and never pushed out; an identical blob is
@@ -72,9 +95,9 @@ export function createIdbKeyStore(factory: IDBFactory = indexedDB): KeyStore {
   let db: Promise<IDBDatabase> | null = null;
   const open = () =>
     (db ??= new Promise<IDBDatabase>((resolve, reject) => {
-      const req = factory.open(KEY_DB_NAME, 3);
+      const req = factory.open(KEY_DB_NAME, 4);
       req.onupgradeneeded = () => {
-        for (const name of ["device", "session", "snapshot", "wrap", "identity", "quarantine"]) {
+        for (const name of ["device", "session", "snapshot", "wrap", "identity", "quarantine", "sync"]) {
           if (!req.result.objectStoreNames.contains(name)) req.result.createObjectStore(name);
         }
       };
@@ -140,6 +163,8 @@ export function createIdbKeyStore(factory: IDBFactory = indexedDB): KeyStore {
     clearSnapshot: () => remove("snapshot"),
     loadWrapKey: () => get<CryptoKey>("wrap"),
     saveWrapKey: (k) => put("wrap", k),
+    loadSyncState: () => get<SyncState>("sync"),
+    saveSyncState: (st) => put("sync", st),
     loadIdentity: () => get<DeviceIdentity>("identity"),
     saveIdentity: (i) => put("identity", i),
     quarantineSnapshot: quarantine,
@@ -152,6 +177,7 @@ export function createIdbKeyStore(factory: IDBFactory = indexedDB): KeyStore {
       await remove("snapshot");
       await remove("wrap");
       await remove("identity");
+      await remove("sync");
       // The quarantine is sealed under the wrapping key just removed: nothing could open it again.
       const database = await open();
       const tx = database.transaction("quarantine", "readwrite");
@@ -173,6 +199,7 @@ export function createMemoryKeyStore(): KeyStore {
   let snapshot: Uint8Array | null = null;
   let wrap: CryptoKey | null = null;
   let identity: DeviceIdentity | null = null;
+  let sync: SyncState | null = null;
   const quarantined: Uint8Array[] = [];
   let session: StoredSession | null = null;
   return {
@@ -184,6 +211,8 @@ export function createMemoryKeyStore(): KeyStore {
     clearSnapshot: async () => void (snapshot = null),
     loadWrapKey: async () => wrap,
     saveWrapKey: async (k) => void (wrap = k),
+    loadSyncState: async () => sync,
+    saveSyncState: async (st) => void (sync = st),
     loadIdentity: async () => identity,
     saveIdentity: async (i) => void (identity = i),
     quarantineSnapshot: async (b) => {
@@ -197,6 +226,7 @@ export function createMemoryKeyStore(): KeyStore {
       snapshot = null;
       wrap = null;
       identity = null;
+      sync = null;
       quarantined.length = 0;
     },
     loadSession: async () => session,

@@ -1,3 +1,4 @@
+import type { Acknowledged } from "./persistence";
 import type { Repeat, Series } from "./repeat";
 
 export type Priority = "none" | "low" | "medium" | "high";
@@ -160,6 +161,13 @@ export interface PlannerState {
   persistence: PersistenceState;
 }
 
+/** A record as the server (through the engine) has it, in the stored shape. */
+export interface RemoteChange {
+  type: RecordType;
+  id: string;
+  fields: Record<string, unknown> | null;
+}
+
 export interface NewTask {
   title: string;
   notes?: string;
@@ -225,6 +233,14 @@ export interface PlannerStore {
   pendingChanges(): number;
   /** The store's clock, as an ISO time: what stamps its changes. */
   nowIso(): string;
+  /** Clears outbox entries the server acknowledged; an entry edited since it was sent stays. */
+  acknowledge(sent: Acknowledged[]): Promise<void>;
+  /**
+   * Applies records that arrived from the server as the engine merged them, through the store's patch
+   * path (so the screen and the other tabs update) without making outbox entries. A record with `fields`
+   * is created or updated; one with `fields: null` is removed.
+   */
+  applyRemote(changes: RemoteChange[]): Promise<void>;
 
   addTask(input: NewTask): Task;
   updateTask(id: string, patch: TaskPatch): void;

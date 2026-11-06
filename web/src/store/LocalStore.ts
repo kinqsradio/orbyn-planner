@@ -1,7 +1,7 @@
 import { repeatFields } from "./eventRecord";
 import { applyFields, sectionFields, storedOf, viewOf } from "./records";
 import { coalesce, refKey, type AnyRecord, type Patch, type Ref } from "./outbox";
-import { defaultPersistence, type ApplyResult, type Persistence } from "./persistence";
+import { defaultPersistence, type Acknowledged, type ApplyResult, type Persistence } from "./persistence";
 import { inOrder, keyBetween } from "./order";
 import { newSeries, validate } from "./repeat";
 import { completeRepeating } from "./taskRepeat";
@@ -25,6 +25,7 @@ import {
   type PlannerState,
   type PlannerStore,
   type RecordType,
+  type RemoteChange,
   type Task,
   type TaskList,
   type TaskPatch,
@@ -116,6 +117,31 @@ export class LocalStore implements PlannerStore {
 
   nowIso(): string {
     return this.now().toISOString();
+  }
+
+  async acknowledge(sent: Acknowledged[]): Promise<void> {
+    if (sent.length === 0) return;
+    await this.flush(); // writes made so far are in storage, so the comparison below sees them
+    const result = await this.persistence.acknowledge(sent);
+    this.reconcile(result);
+    this.channel?.postMessage({ tab: this.tab, refs: sent.map((s) => ({ type: s.type, id: s.id })) });
+  }
+
+  async applyRemote(changes: RemoteChange[]): Promise<void> {
+    this.assertReady();
+    const inputs: PatchInput[] = [];
+    for (const c of changes) {
+      const here = this.current(c.type, c.id);
+      if (c.fields === null) {
+        if (here) inputs.push({ type: c.type, id: c.id, op: "purge", local: true });
+      } else if (here) {
+        inputs.push({ type: c.type, id: c.id, op: "update", fields: c.fields, local: true });
+      } else {
+        inputs.push({ type: c.type, id: c.id, op: "create", record: viewOf(c.type, { id: c.id, ...c.fields } as unknown as AnyRecord), local: true });
+      }
+    }
+    if (inputs.length > 0) this.commit(inputs);
+    await this.flush();
   }
 
   pendingChanges(): number {

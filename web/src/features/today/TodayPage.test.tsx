@@ -88,7 +88,7 @@ describe("Today when storage fails", () => {
     const quota = new DOMException("full", "QuotaExceededError");
     const memory = new MemoryPersistence();
     const store = new LocalStore({
-      persistence: { durable: true, setHandlers: () => undefined, load: () => memory.load(), read: (r) => memory.read(r), apply: () => Promise.reject(quota) },
+      persistence: { durable: true, setHandlers: () => undefined, load: () => memory.load(), read: (r) => memory.read(r), acknowledge: (s) => memory.acknowledge(s), apply: () => Promise.reject(quota) },
       now: () => NOW,
       broadcast: false,
     });

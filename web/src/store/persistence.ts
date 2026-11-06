@@ -17,6 +17,13 @@ export interface ApplyResult {
   outbox: { type: RecordType; id: string; entry: OutboxEntry | null }[];
 }
 
+/** An outbox entry that reached the server: cleared only if it is still the version that was sent. */
+export interface Acknowledged {
+  type: RecordType;
+  id: string;
+  idempotencyKey: string;
+}
+
 export interface PersistenceHandlers {
   /** Another tab wants to upgrade the database; this connection has been closed. */
   onVersionChange?: () => void;
@@ -35,6 +42,11 @@ export interface Persistence {
   apply(batch: PatchBatch): Promise<ApplyResult>;
   /** The current state of some records, after another tab changed them. */
   read(refs: Ref[]): Promise<ApplyResult>;
+  /**
+   * Clears outbox entries the server has acknowledged. An entry edited since it was sent has a new
+   * idempotency key and stays, so a change made while an upload was out is never lost.
+   */
+  acknowledge(sent: Acknowledged[]): Promise<ApplyResult>;
   setHandlers(handlers: PersistenceHandlers): void;
 }
 
@@ -100,6 +112,17 @@ export class MemoryPersistence implements Persistence {
         this.outbox.set(key, entry);
       }
       result.outbox.push({ type: p.type, id: p.id, entry });
+    }
+    return result;
+  }
+
+  async acknowledge(sent: Acknowledged[]): Promise<ApplyResult> {
+    const result: ApplyResult = { records: [], outbox: [] };
+    for (const a of sent) {
+      const key = refKey(a);
+      const existing = this.outbox.get(key);
+      if (existing && existing.idempotencyKey === a.idempotencyKey) this.outbox.delete(key);
+      result.outbox.push({ type: a.type, id: a.id, entry: this.outbox.get(key) ?? null });
     }
     return result;
   }
@@ -244,6 +267,28 @@ export class IdbPersistence implements Persistence {
         }
       };
       run(0);
+    });
+  }
+
+  async acknowledge(sent: Acknowledged[]): Promise<ApplyResult> {
+    const db = await this.open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction("outbox", "readwrite");
+      const result: ApplyResult = { records: [], outbox: [] };
+      const outbox = tx.objectStore("outbox");
+      for (const a of sent) {
+        outbox.index("record").get([a.type, a.id]).onsuccess = (e) => {
+          const existing = (e.target as IDBRequest<OutboxEntry | undefined>).result;
+          if (existing && existing.idempotencyKey === a.idempotencyKey) {
+            outbox.delete(existing.seq);
+            result.outbox.push({ type: a.type, id: a.id, entry: null });
+          } else {
+            result.outbox.push({ type: a.type, id: a.id, entry: existing ?? null });
+          }
+        };
+      }
+      tx.oncomplete = () => resolve(result);
+      tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("The write was aborted"));
     });
   }
 

@@ -1,5 +1,5 @@
 import type { DeviceKeys } from "../authCrypto";
-import type { OrbynWasmModule } from "../WasmAuthCrypto";
+import type { OrbynWasmModule, WasmSyncEngine } from "../WasmAuthCrypto";
 
 /** A stand-in for the orbyn-wasm module that only records which function was called (tests). */
 export function WasmAuthCrypto_forTests(): { module: OrbynWasmModule; log: string[] } {
@@ -23,8 +23,8 @@ export function WasmAuthCrypto_forTests(): { module: OrbynWasmModule; log: strin
     finishLogin: () => (log.push("finishLogin"), new Uint8Array()),
     DeviceKeys: { create: () => (log.push("DeviceKeys.create"), keys), import: () => (log.push("DeviceKeys.import"), keys) },
     SyncEngine: {
-      create: () => (log.push("SyncEngine.create"), engine()),
-      restore: () => (log.push("SyncEngine.restore"), engine()),
+      create: () => (log.push("SyncEngine.create"), engine() as unknown as WasmSyncEngine),
+      restore: () => (log.push("SyncEngine.restore"), engine() as unknown as WasmSyncEngine),
     },
     normalizeEmail: (e) => (log.push("normalizeEmail"), e.trim().toLowerCase()),
   };
