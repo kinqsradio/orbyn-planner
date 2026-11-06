@@ -411,3 +411,8 @@ button.pillx { border: 0; }
 .feed-status { display: flex; gap: 8px; align-items: baseline; padding: 0 0 8px 14px; font-size: 12px; flex-wrap: wrap; }
 .red-text { color: var(--red); font-weight: 500; }
 .kv label { font-size: inherit; color: inherit; }
+.repeat-picker { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+.repeat-custom { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+.repeat-custom .ctl { align-items: center; color: var(--t3); }
+.inp.narrow { width: 64px; }
+.pill[aria-pressed="true"] { background: var(--btn); color: var(--btnt); }

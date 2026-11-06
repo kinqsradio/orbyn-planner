@@ -33,7 +33,9 @@ interface Ui {
   listId: string | null;
   selectList: (id: string) => void;
   newTaskOpen: boolean;
-  openNewTask: () => void;
+  /** Where a new task starts out, when opened from a project. */
+  newTaskDefaults: { projectId?: string | null; sectionId?: string | null };
+  openNewTask: (defaults?: { projectId?: string | null; sectionId?: string | null }) => void;
   closeNewTask: () => void;
   searchOpen: boolean;
   openSearch: () => void;
@@ -54,6 +56,7 @@ export function UiProvider({ children }: { children: ReactNode }) {
   const [listId, setListId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [newTaskOpen, setNewTaskOpen] = useState(false);
+  const [newTaskDefaults, setNewTaskDefaults] = useState<{ projectId?: string | null; sectionId?: string | null }>({});
   const [toast, setToast] = useState<ToastState | null>(null);
 
   const showToast = useCallback((message: string, undo?: () => void, options?: { focusUndo?: boolean }) => {
@@ -85,7 +88,11 @@ export function UiProvider({ children }: { children: ReactNode }) {
       listId,
       selectList: setListId,
       newTaskOpen,
-      openNewTask: () => setNewTaskOpen(true),
+      newTaskDefaults,
+      openNewTask: (defaults) => {
+        setNewTaskDefaults(defaults ?? {});
+        setNewTaskOpen(true);
+      },
       closeNewTask: () => setNewTaskOpen(false),
       searchOpen,
       openSearch: () => setSearchOpen(true),
@@ -94,7 +101,7 @@ export function UiProvider({ children }: { children: ReactNode }) {
       showToast,
       dismissToast,
     }),
-    [taskId, eventKey, newEventDate, calendarsOpen, listId, newTaskOpen, searchOpen, toast, showToast, dismissToast],
+    [newTaskDefaults, taskId, eventKey, newEventDate, calendarsOpen, listId, newTaskOpen, searchOpen, toast, showToast, dismissToast],
   );
   return <UiContext.Provider value={value}>{children}</UiContext.Provider>;
 }

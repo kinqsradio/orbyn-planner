@@ -96,7 +96,7 @@ export function TasksPage() {
     <>
       <PageHeader title="Tasks" sub={view === "board" ? "Board" : `${openCount} open`}>
         <Link to="/completed" className="ghost">Completed and deleted</Link>
-        <button type="button" className="btn" onClick={ui.openNewTask}>
+        <button type="button" className="btn" onClick={() => ui.openNewTask()}>
           <Icon name="plus" small />
           Add a task
         </button>

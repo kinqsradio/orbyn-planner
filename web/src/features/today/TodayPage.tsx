@@ -96,7 +96,7 @@ export function TodayPage() {
     <>
       <PageHeader title={greeting(now)} sub={`${dayName} ${now.getDate()} ${MONTHS[now.getMonth()]} · ${summary}`}>
         <SyncLine status={status} onRetry={retry} waiting={waiting} />
-        <button type="button" className="btn" onClick={ui.openNewTask}>
+        <button type="button" className="btn" onClick={() => ui.openNewTask()}>
           <Icon name="plus" small />
           New task
         </button>

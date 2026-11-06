@@ -1,19 +1,20 @@
 import { useNow } from "../../app/clock";
 import { useUi } from "../../app/ui";
 import { formatTime, parseDue } from "../../lib/dates";
-import { usePlanner, useStore } from "../../store/context";
+import { usePlanner } from "../../store/context";
 import type { Task } from "../../store/types";
 import { dueText, needsAction } from "./selectors";
+import { useComplete } from "./useComplete";
 
 export function Swatch({ colour }: { colour: string }) {
   return <span className="sw" style={{ background: `var(--${colour})` }} aria-hidden="true" />;
 }
 
 export function useTaskActions(task: Task) {
-  const store = useStore();
   const ui = useUi();
+  const complete = useComplete();
   return {
-    toggle: (done: boolean) => store.setDone(task.id, done),
+    toggle: (done: boolean) => complete(task, done),
     open: () => ui.openTask(task.id),
   };
 }
