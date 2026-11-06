@@ -1,13 +1,13 @@
-import { coalesce, refKey, type PatchBatch, type Ref } from "./outbox";
-import type { OutboxEntry, RecordType, Task, TaskList } from "./types";
+import { coalesce, refKey, type AnyRecord, type PatchBatch, type Ref } from "./outbox";
+import type { CalendarEvent, OutboxEntry, PlannerCalendar, RecordType, Task, TaskList } from "./types";
 
 export interface Snapshot {
   tasks: Task[];
   lists: TaskList[];
+  events: CalendarEvent[];
+  calendars: PlannerCalendar[];
   outbox: OutboxEntry[];
 }
-
-type AnyRecord = Task | TaskList;
 
 /** The records a write or a read touched, as they now are in storage, and their outbox entries. */
 export interface ApplyResult {
@@ -37,7 +37,8 @@ export interface Persistence {
   setHandlers(handlers: PersistenceHandlers): void;
 }
 
-const storeOf = (type: RecordType) => (type === "task" ? "tasks" : "lists");
+const STORE_OF: Record<RecordType, "tasks" | "lists" | "events" | "calendars"> = { task: "tasks", list: "lists", event: "events", calendar: "calendars" };
+const storeOf = (type: RecordType) => STORE_OF[type];
 
 /** Keeps everything in memory. Used where IndexedDB does not exist, and in tests. */
 export class MemoryPersistence implements Persistence {
@@ -59,6 +60,8 @@ export class MemoryPersistence implements Persistence {
     return {
       tasks: all.filter(([k]) => k.startsWith("task:")).map(([, v]) => v as Task),
       lists: all.filter(([k]) => k.startsWith("list:")).map(([, v]) => v as TaskList),
+      events: all.filter(([k]) => k.startsWith("event:")).map(([, v]) => v as CalendarEvent),
+      calendars: all.filter(([k]) => k.startsWith("calendar:")).map(([, v]) => v as PlannerCalendar),
       outbox: [...this.outbox.values()].sort((a, b) => a.seq - b.seq),
     };
   }
@@ -85,6 +88,7 @@ export class MemoryPersistence implements Persistence {
       }
       result.records.push({ type: p.type, id: p.id, record });
 
+      if (p.local) continue;
       const existing = this.outbox.get(key);
       const change = coalesce(existing, p, batch.at);
       if (change.remove !== undefined) this.outbox.delete(key);
@@ -107,9 +111,10 @@ export class MemoryPersistence implements Persistence {
 }
 
 const DB_NAME = "orbyn-planner";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 type Rec = AnyRecord & Record<string, unknown>;
+const ALL_STORES = ["tasks", "lists", "events", "calendars", "outbox"];
 
 /** One IndexedDB object store per record type, and an outbox keyed by an auto-incrementing number. */
 export class IdbPersistence implements Persistence {
@@ -126,8 +131,9 @@ export class IdbPersistence implements Persistence {
       const req = indexedDB.open(DB_NAME, DB_VERSION);
       req.onupgradeneeded = (event) => {
         const db = req.result;
-        if (!db.objectStoreNames.contains("tasks")) db.createObjectStore("tasks", { keyPath: "id" });
-        if (!db.objectStoreNames.contains("lists")) db.createObjectStore("lists", { keyPath: "id" });
+        for (const name of ["tasks", "lists", "events", "calendars"]) {
+          if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: "id" });
+        }
         // Version 1 keyed the outbox by a number made in memory, which two tabs would reuse.
         if (event.oldVersion > 0 && event.oldVersion < 2 && db.objectStoreNames.contains("outbox")) db.deleteObjectStore("outbox");
         if (!db.objectStoreNames.contains("outbox")) {
@@ -156,10 +162,12 @@ export class IdbPersistence implements Persistence {
   async load(): Promise<Snapshot> {
     const db = await this.open();
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(["tasks", "lists", "outbox"], "readonly");
-      const out: Snapshot = { tasks: [], lists: [], outbox: [] };
+      const tx = db.transaction(ALL_STORES, "readonly");
+      const out: Snapshot = { tasks: [], lists: [], events: [], calendars: [], outbox: [] };
       tx.objectStore("tasks").getAll().onsuccess = (e) => (out.tasks = (e.target as IDBRequest<Task[]>).result);
       tx.objectStore("lists").getAll().onsuccess = (e) => (out.lists = (e.target as IDBRequest<TaskList[]>).result);
+      tx.objectStore("events").getAll().onsuccess = (e) => (out.events = (e.target as IDBRequest<CalendarEvent[]>).result);
+      tx.objectStore("calendars").getAll().onsuccess = (e) => (out.calendars = (e.target as IDBRequest<PlannerCalendar[]>).result);
       tx.objectStore("outbox").getAll().onsuccess = (e) => (out.outbox = (e.target as IDBRequest<OutboxEntry[]>).result.sort((a, b) => a.seq - b.seq));
       tx.oncomplete = () => resolve(out);
       tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("The read was aborted"));
@@ -169,7 +177,7 @@ export class IdbPersistence implements Persistence {
   async apply(batch: PatchBatch): Promise<ApplyResult> {
     const db = await this.open();
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(["tasks", "lists", "outbox"], "readwrite");
+      const tx = db.transaction(ALL_STORES, "readwrite");
       const result: ApplyResult = { records: [], outbox: [] };
       tx.oncomplete = () => resolve(result);
       tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("The write was aborted"));
@@ -185,6 +193,7 @@ export class IdbPersistence implements Persistence {
 
         const foldOutbox = (record: AnyRecord | null) => {
           result.records.push({ type: p.type, id: p.id, record });
+          if (p.local) return run(i + 1);
           byRecord.get([p.type, p.id]).onsuccess = (e) => {
             const existing = (e.target as IDBRequest<OutboxEntry | undefined>).result;
             const change = coalesce(existing, p, batch.at);
@@ -238,7 +247,7 @@ export class IdbPersistence implements Persistence {
   async read(refs: Ref[]): Promise<ApplyResult> {
     const db = await this.open();
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(["tasks", "lists", "outbox"], "readonly");
+      const tx = db.transaction(ALL_STORES, "readonly");
       const result: ApplyResult = { records: [], outbox: [] };
       for (const r of refs) {
         tx.objectStore(storeOf(r.type)).get(r.id).onsuccess = (e) =>

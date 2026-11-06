@@ -21,6 +21,12 @@ The UI talks to a `PlannerStore`. `LocalStore` keeps the records in IndexedDB, o
 - **Failures are shown.** A failed or full write, or a database that will not open, sets the store's persistence state to `failed` with a reason; the sync line then reads "Couldn’t save on this device" and nothing claims the changes are saved. A failed open does not fall back to memory. Memory alone is used only where IndexedDB does not exist, and then the line reads "Not saved on this device".
 - **Checklist order.** Steps carry a fractional order key (`web/src/store/order.ts`, a port of the engine's `order.rs`), so inserting a step changes no other, and steps sort by key then id.
 
+## Calendar feeds
+
+- **Time.** A feed event keeps its wall time and IANA zone; each occurrence is converted to the viewer's zone, so daylight-saving changes in either place land right. UTC (`Z`) UNTIL, EXDATE and RECURRENCE-ID values are converted into the series' zone before their date is taken. A start inside a skipped hour moves forward by the gap and keeps its written length. Expansions are cached per event, range and viewer zone.
+- **Repeats.** Only FREQ, INTERVAL, BYDAY (weekly), COUNT and UNTIL are read. Any other rule shows the first date only, with a note, and is listed under "Can't show these repeats" in Calendars; no dates are guessed.
+- **Fetching.** With `VITE_ENGINE_URL` set, the engine fetches feeds (`POST /v1/feeds/fetch`, `{url}` answered by `{status, body}`; the request carries the session's bearer token, since the route needs a signed-in, trusted device; refusals are `ApiError` codes `invalid_url`, `blocked_address`, `too_large`, `timeout`, `upstream_error`, `unauthorized`, `device_not_trusted`, `too_many_attempts`, `feeds_unavailable`, `internal`). Signed out, or without an engine, the web build fetches directly, which many servers refuse; the desktop app, whose page may not fetch other sites, says "Sign in to subscribe to calendars" when signed out and "Subscriptions need the Orbyn engine" without one.
+
 ## Desktop
 
 `desktop/` is a Tauri 2 shell with its own Cargo workspace; nothing else builds it. It opens one window on the web build (the dev server in development) and adds the standard menus and remembered window state. It exposes one command to the page, `open_link`, which opens an http(s) address in the system browser (through tauri-plugin-opener, whose own commands are not in any capability), so the page has no more power than in a browser.

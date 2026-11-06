@@ -51,7 +51,7 @@ describe("LocalStore", () => {
   it("keeps one outbox entry per record, folding edits into it", async () => {
     const store = setup().make();
     await store.ready;
-    expect(store.pendingChanges()).toBe(1); // the Inbox
+    expect(store.pendingChanges()).toBe(2); // the Inbox and the first calendar
     const task = store.addTask({ title: "a" });
     store.updateTask(task.id, { title: "b" });
     store.updateTask(task.id, { notes: "n" });
@@ -60,13 +60,13 @@ describe("LocalStore", () => {
     store.updateList(list.id, { name: "Chores" });
     await store.flush();
     const entries = store.getState().outbox;
-    expect(entries.map((e) => `${e.type}:${e.op}`).sort()).toEqual(["list:create", "list:create", "task:create"]);
-    expect(store.pendingChanges()).toBe(3);
+    expect(entries.map((e) => `${e.type}:${e.op}`).sort()).toEqual(["calendar:create", "list:create", "list:create", "task:create"]);
+    expect(store.pendingChanges()).toBe(4);
     const entry = entries.find((e) => e.id === task.id)!;
     expect(entry.changedFields).toMatchObject({ title: "b", notes: "n", deletedAt: expect.any(String) });
     expect(entry.idempotencyKey).toBeTruthy();
     expect(entries.find((e) => e.id === list.id)!.changedFields).toMatchObject({ name: "Chores" });
-    expect(new Set(entries.map((e) => e.seq)).size).toBe(3);
+    expect(new Set(entries.map((e) => e.seq)).size).toBe(4);
     expect(entries.every((e) => e.seq > 0)).toBe(true);
   });
 
@@ -124,7 +124,7 @@ describe("LocalStore", () => {
     await second.ready;
     expect(second.getState().tasks.map((t) => t.title)).toEqual(["kept"]);
     expect(second.getState().lists).toHaveLength(1);
-    expect(second.pendingChanges()).toBe(2);
+    expect(second.pendingChanges()).toBe(3);
   });
 
   it("refuses writes before it has loaded", () => {

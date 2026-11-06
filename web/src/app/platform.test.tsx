@@ -3,6 +3,13 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { detectPlatform, isDesktop } from "./platform";
+import { PrefsProvider } from "./prefs";
+
+const Settings = () => (
+  <PrefsProvider>
+    <SettingsPage />
+  </PrefsProvider>
+);
 
 afterEach(() => {
   delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
@@ -25,7 +32,7 @@ describe("detectPlatform", () => {
 
 describe("the install hint", () => {
   const openPlanning = async () => {
-    render(<SettingsPage />);
+    render(<Settings />);
     await userEvent.click(screen.getByRole("button", { name: "Planning" }));
   };
 
@@ -35,11 +42,11 @@ describe("the install hint", () => {
   });
 
   it("is hidden in the desktop app, and nothing else on the page changes", async () => {
-    const web = render(<SettingsPage />);
+    const web = render(<Settings />);
     const before = web.container.innerHTML.replace(/<p class="t3 small install-hint">.*?<\/p>/, "");
     web.unmount();
     (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
-    const desktop = render(<SettingsPage />);
+    const desktop = render(<Settings />);
     expect(screen.queryByText(/coming as a desktop app/)).not.toBeInTheDocument();
     expect(desktop.container.innerHTML).toBe(before);
   });

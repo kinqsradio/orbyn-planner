@@ -20,6 +20,11 @@ import { Toast } from "../components/Toast";
 import { useNow } from "./clock";
 import { useExternalLinks } from "./links";
 import { UiProvider, useUi } from "./ui";
+import { PrefsProvider } from "./prefs";
+import { CalendarsDialog } from "../features/calendar/CalendarsDialog";
+import { EventPanel } from "../features/calendar/EventPanel";
+import { NewEventDialog } from "../features/calendar/NewEventDialog";
+import { useSubscriptionRefresh } from "../features/calendar/subscriptions";
 import { TodayPage } from "../features/today/TodayPage";
 import { MORE, NAV, SETTINGS, TABS, type NavItem } from "./nav";
 import { Link, RouterProvider, useRouter } from "./router";
@@ -93,6 +98,7 @@ function Shell() {
   const { tasks } = usePlanner();
   const now = useNow();
   const due = dueCount(tasks, now);
+  useSubscriptionRefresh();
   const page = PAGES[path === "/" ? "/today" : path] ?? PAGES["/today"]!;
   const inMore = MORE.some((item) => item.path === path);
 
@@ -118,9 +124,10 @@ function Shell() {
         </nav>
       </aside>
       <main id="content" ref={main} tabIndex={-1} className="sheet">
-        <div className={ui.taskId ? "sheet-grid has-panel" : "sheet-grid"}>
+        <div className={ui.taskId || ui.eventKey ? "sheet-grid has-panel" : "sheet-grid"}>
           <div className="sheet-main">{page()}</div>
           <TaskPanel />
+          <EventPanel />
         </div>
       </main>
       <nav aria-label="Tabs" className="tabbar">
@@ -141,6 +148,8 @@ function Shell() {
       </nav>
       {more && <MoreSheet onClose={() => setMore(false)} />}
       {ui.newTaskOpen && <NewTaskDialog />}
+      {ui.newEventDate !== null && <NewEventDialog />}
+      {ui.calendarsOpen && <CalendarsDialog />}
       {ui.searchOpen && <SearchDialog />}
       <Toast />
     </div>
@@ -153,9 +162,11 @@ export function App({ store }: { store?: PlannerStore }) {
   return (
     <StoreProvider store={own}>
       <UiProvider>
-        <RouterProvider>
-          <Shell />
-        </RouterProvider>
+        <PrefsProvider>
+          <RouterProvider>
+            <Shell />
+          </RouterProvider>
+        </PrefsProvider>
       </UiProvider>
     </StoreProvider>
   );

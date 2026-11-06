@@ -1,7 +1,8 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import html from "../../index.html?raw";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PrefsProvider } from "./prefs";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { applyChoice, chooseTheme, readStoredChoice, THEME_KEY, watchSystemTheme } from "./theme";
 
@@ -28,7 +29,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("theme", () => {
   it("persists the choice and sets data-theme", async () => {
     stubSystem(false);
-    render(<SettingsPage />);
+    render(<PrefsProvider><SettingsPage /></PrefsProvider>);
     await userEvent.click(screen.getByRole("radio", { name: "Dim" }));
     expect(document.documentElement.dataset.theme).toBe("dim");
     expect(localStorage.getItem(THEME_KEY)).toBe("dim");
@@ -59,8 +60,8 @@ describe("theme", () => {
 
   it("offers System, Light, Dark and Dim", () => {
     stubSystem(false);
-    render(<SettingsPage />);
-    expect(screen.getAllByRole("radio").map((r) => r.textContent)).toEqual(["System", "Light", "Dark", "Dim"]);
+    render(<PrefsProvider><SettingsPage /></PrefsProvider>);
+    expect(within(screen.getByRole("radiogroup", { name: "Theme" })).getAllByRole("radio").map((r) => r.textContent)).toEqual(["System", "Light", "Dark", "Dim"]);
     expect(screen.getByRole("radio", { name: "System" })).toBeChecked();
   });
 });

@@ -1,10 +1,12 @@
-import type { OutboxEntry, RecordType, Task, TaskList } from "./types";
+import type { CalendarEvent, OutboxEntry, PlannerCalendar, RecordType, Task, TaskList } from "./types";
+
+export type AnyRecord = Task | TaskList | CalendarEvent | PlannerCalendar;
 
 /** One change to one record: a create carries the record, an update or delete only the fields that changed. */
 export type Patch =
-  | { type: RecordType; id: string; op: "create"; record: Task | TaskList; key: string }
-  | { type: RecordType; id: string; op: "update" | "delete"; fields: Record<string, unknown>; key: string }
-  | { type: RecordType; id: string; op: "purge"; key: string };
+  | { type: RecordType; id: string; op: "create"; record: AnyRecord; key: string; local?: boolean }
+  | { type: RecordType; id: string; op: "update" | "delete"; fields: Record<string, unknown>; key: string; local?: boolean }
+  | { type: RecordType; id: string; op: "purge"; key: string; local?: boolean };
 
 export interface PatchBatch {
   /** ISO time of the change. */
