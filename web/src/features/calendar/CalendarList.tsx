@@ -3,7 +3,7 @@ import { formatTime } from "../../lib/dates";
 import { usePlanner, useStore } from "../../store/context";
 import { LIST_COLOURS, type ListColour, type PlannerCalendar } from "../../store/types";
 import { Swatch } from "../tasks/TaskRow";
-import { refreshCalendar } from "./subscriptions";
+import { FeedError, feedAddress, refreshCalendar } from "./subscriptions";
 
 const COLOUR_NAMES: Record<ListColour, string> = { c1: "Blue", c2: "Green", c3: "Purple", c4: "Orange" };
 
@@ -100,12 +100,14 @@ export function CalendarForms({ onDone }: { onDone?: () => void }) {
   const [mode, setMode] = useState<null | "new" | "subscribe">(null);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
+  const [problem, setProblem] = useState<string | null>(null);
   const colour = LIST_COLOURS[calendars.length % LIST_COLOURS.length]!;
 
   const reset = () => {
     setMode(null);
     setName("");
     setUrl("");
+    setProblem(null);
   };
 
   return (
@@ -125,6 +127,12 @@ export function CalendarForms({ onDone }: { onDone?: () => void }) {
             if (!title || (mode === "subscribe" && !url.trim())) return;
             if (mode === "new") store.addCalendar(title, colour);
             else {
+              try {
+                feedAddress(url);
+              } catch (error) {
+                setProblem(error instanceof FeedError ? error.message : "That link doesn’t work.");
+                return;
+              }
               const calendar = store.addSubscription(title, colour, url.trim());
               void refreshCalendar(store, calendar);
             }
@@ -136,7 +144,8 @@ export function CalendarForms({ onDone }: { onDone?: () => void }) {
           {mode === "subscribe" && (
             <>
               <label htmlFor="cal-url">Subscribe by link</label>
-              <input id="cal-url" className="field" type="url" placeholder="https://example.com/holidays.ics" value={url} onChange={(e) => setUrl(e.target.value)} />
+              <input id="cal-url" className="field" type="url" placeholder="https://example.com/holidays.ics" value={url} onChange={(e) => setUrl(e.target.value)} aria-describedby={problem ? "cal-url-problem" : undefined} />
+              {problem && <p id="cal-url-problem" className="err" role="alert">{problem}</p>}
             </>
           )}
           <div className="dialog-actions">

@@ -6,6 +6,7 @@ import {
   newSeries,
   nextOnOrAfter,
   occurrences,
+  occurrencesWith,
   repeatEvery,
   skip,
   splitAt,
@@ -230,5 +231,73 @@ describe("repeat helpers", () => {
     expect(first.skipped).toEqual([date(2026, 11, 9)]);
     expect(following.skipped).toEqual([date(2026, 11, 23)]);
     expect(following.repeat.weekdays).toEqual(["mon"]);
+  });
+});
+
+describe("range checks and years before 100", () => {
+  it("accepts only whole numbers in the engine's ranges", () => {
+    const base = repeatEvery("daily");
+    for (const interval of [1.5, 65536, -1, Number.NaN]) {
+      expect(code(() => newSeries("2026-01-01", { ...base, interval }))).toMatch(/IntervalOutOfRange|ZeroInterval/);
+    }
+    expect(code(() => newSeries("2026-01-01", { ...base, interval: 65535 }))).toBeNull();
+    for (const value of [0.5, 4294967296, -3]) {
+      expect(code(() => newSeries("2026-01-01", { ...base, end: { type: "count", value } }))).toMatch(/CountOutOfRange|ZeroCount/);
+    }
+    expect(code(() => newSeries("2026-01-01", { ...base, end: { type: "count", value: 4294967295 } }))).toBeNull();
+  });
+
+  it("does not read years 0 to 99 as 1900 to 1999", () => {
+    const s = newSeries("0050-02-27", repeatEvery("daily"));
+    expect(occurrences(s, "0050-02-27", "0050-03-02")).toEqual(["0050-02-27", "0050-02-28", "0050-03-01", "0050-03-02"]);
+    // Year 0 is a leap year in the proleptic calendar the engine uses.
+    expect(occurrences(newSeries("0000-02-29", repeatEvery("yearly")), "0000-01-01", "0008-12-31")).toEqual(["0000-02-29", "0004-02-29", "0008-02-29"]);
+  });
+});
+
+describe("jumping to the start of the range", () => {
+  it("gives the same dates as walking from the start, for any rule", () => {
+    let seed = 12345n;
+    const MASK = (1n << 64n) - 1n;
+    const next = (): bigint => {
+      seed = (seed + 0x9e3779b97f4a7c15n) & MASK;
+      let z = seed;
+      z = ((z ^ (z >> 30n)) * 0xbf58476d1ce4e5b9n) & MASK;
+      z = ((z ^ (z >> 27n)) * 0x94d049bb133111ebn) & MASK;
+      return z ^ (z >> 31n);
+    };
+    const below = (n: number) => Number(next() % BigInt(n));
+    const plus = (d: string, n: number) => {
+      const t = new Date(Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10) + n));
+      return date(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate());
+    };
+    const frequencies: Frequency[] = ["daily", "weekly", "monthly", "yearly"];
+    const days: Day[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+    for (let i = 0; i < 400; i++) {
+      const start = plus(date(2020, 1, 1), below(2000));
+      const frequency = frequencies[below(4)]!;
+      const repeat = repeatEvery(frequency);
+      repeat.interval = 1 + below(frequency === "monthly" ? 20 : 4);
+      if (frequency === "weekly" && below(2) === 0) repeat.weekdays = Array.from({ length: 1 + below(3) }, () => days[below(7)]!);
+      const kind = below(3);
+      repeat.end = kind === 0 ? { type: "never" } : kind === 1 ? { type: "count", value: 1 + below(400) } : { type: "until", value: plus(start, 30 + below(3000)) };
+      const series = newSeries(start, repeat);
+      const from = plus(start, below(2500) - 20);
+      const to = plus(from, below(200));
+      expect(occurrencesWith(series, from, to, true), JSON.stringify({ series, from, to })).toEqual(occurrencesWith(series, from, to, false));
+      const probe = nextOnOrAfter(series, from);
+      expect(probe).toBe(occurrencesWith(series, from, plus(from, 4000), false)[0] ?? null);
+    }
+  });
+
+  it("a range far from the start is cheap: a daily series asked about 400 years on", () => {
+    const s = newSeries("2026-01-01", repeatEvery("daily"));
+    expect(occurrences(s, "2426-01-01", "2426-01-03")).toEqual(["2426-01-01", "2426-01-02", "2426-01-03"]);
+  });
+
+  it("still stops after 200,000 periods", () => {
+    const s = newSeries("2026-01-01", repeatEvery("daily"));
+    // Period 200,000 would be in year 2573; nothing falls after the last period the walk looks at.
+    expect(occurrences(s, "2600-01-01", "2600-01-05")).toEqual([]);
   });
 });

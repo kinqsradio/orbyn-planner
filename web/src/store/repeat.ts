@@ -61,7 +61,11 @@ export type RepeatErrorCode =
   | "EndsBeforeStart"
   | "WeekdaysNotWeekly"
   | "NotAnOccurrence"
-  | "SplitAtFirst";
+  | "SplitAtFirst"
+  /** The interval is not a whole number from 1 to 65535, the range the engine accepts. */
+  | "IntervalOutOfRange"
+  /** The count is not a whole number from 1 to 4294967295. */
+  | "CountOutOfRange";
 
 const MESSAGES: Record<RepeatErrorCode, string> = {
   ZeroInterval: "repeat every 1 or more",
@@ -70,6 +74,8 @@ const MESSAGES: Record<RepeatErrorCode, string> = {
   WeekdaysNotWeekly: "weekdays only apply to weekly repeats",
   NotAnOccurrence: "that date is not part of this repeat",
   SplitAtFirst: "this is the first time it repeats: edit the whole series instead",
+  IntervalOutOfRange: "repeat every 1 to 65535",
+  CountOutOfRange: "a repeat can end after 1 to 4294967295 times",
 };
 
 export class RepeatError extends Error {
@@ -85,9 +91,12 @@ const parse = (date: string): { y: number; m: number; d: number } => {
   const [y = 1970, m = 1, d = 1] = date.split("-").map(Number);
   return { y, m, d };
 };
+/** Days since 1970-01-01. Years 0 to 99 would be read as 1900 to 1999 by Date.UTC, so the year is set separately. */
 const toDays = (date: string): number => {
   const { y, m, d } = parse(date);
-  return Math.round(Date.UTC(y, m - 1, d) / DAY_MS);
+  const t = new Date(0);
+  t.setUTCFullYear(y, m - 1, d);
+  return Math.round(t.getTime() / DAY_MS);
 };
 const pad = (n: number, width: number) => String(n).padStart(width, "0");
 const format = (y: number, m: number, d: number) => `${pad(y, 4)}-${pad(m, 2)}-${pad(d, 2)}`;
@@ -106,8 +115,8 @@ export const dayOf = (date: string): Day => DAYS[mondayZeroOffset(date)]!;
 /** The date when the day exists, null when that month lacks it, undefined when the year is out of range. */
 function onDay(year: number, month: number, day: number): string | null | undefined {
   if (year < -9999 || year > 9999) return undefined;
-  const t = new Date(Date.UTC(year, month - 1, day));
-  if (year >= 0 && year < 100) t.setUTCFullYear(year);
+  const t = new Date(0);
+  t.setUTCFullYear(year, month - 1, day);
   if (t.getUTCMonth() !== month - 1 || t.getUTCDate() !== day) return null;
   return format(year, month, day);
 }
@@ -120,8 +129,10 @@ export function repeatEvery(frequency: Frequency): Repeat {
 export function validate(series: Series): void {
   const r = series.repeat;
   if (r.interval === 0) throw new RepeatError("ZeroInterval");
+  if (!Number.isInteger(r.interval) || r.interval < 1 || r.interval > 65535) throw new RepeatError("IntervalOutOfRange");
   if (r.weekdays.length > 0 && r.frequency !== "weekly") throw new RepeatError("WeekdaysNotWeekly");
   if (r.end.type === "count" && r.end.value === 0) throw new RepeatError("ZeroCount");
+  if (r.end.type === "count" && (!Number.isInteger(r.end.value) || r.end.value < 1 || r.end.value > 4294967295)) throw new RepeatError("CountOutOfRange");
   if (r.end.type === "until" && r.end.value < series.start) throw new RepeatError("EndsBeforeStart");
 }
 
@@ -132,11 +143,67 @@ export function newSeries(start: string, repeat: Repeat): Series {
   return series;
 }
 
-/** Calls `visit` with each occurrence in order, ignoring skips, until it returns false or the rule ends. */
-function walk(series: Series, visit: (date: string) => boolean): void {
+/** Where a walk may begin: the period to start at, and how many occurrences the earlier periods gave. */
+interface Plan {
+  step: number;
+  emitted: number;
+}
+
+/**
+ * A safe place to start a walk that only wants dates from `from` on: a period or more before the
+ * first date at or after it, with the number of occurrences the skipped periods would have emitted
+ * (needed only for a count end). The walk then gives the same dates as one from the start.
+ */
+function planFrom(series: Series, from: string): Plan {
   const r = series.repeat;
   const interval = Math.max(r.interval, 1);
-  let emitted = 0;
+  const start = series.start;
+  const counted = r.end.type === "count";
+  const none: Plan = { step: 0, emitted: 0 };
+  if (from <= start) return none;
+  const { y: sy, m: sm, d: sd } = parse(start);
+  const { y: fy, m: fm } = parse(from);
+  switch (r.frequency) {
+    case "daily": {
+      const step = Math.max(0, Math.floor((toDays(from) - toDays(start)) / interval) - 1);
+      return { step, emitted: step };
+    }
+    case "weekly": {
+      const monday = toDays(start) - mondayZeroOffset(start);
+      const weeks = Math.floor((toDays(from) - monday) / 7);
+      const step = Math.max(0, Math.floor(weeks / interval) - 1);
+      if (step === 0) return none;
+      const offsets = [...new Set(r.weekdays.length === 0 ? [mondayZeroOffset(start)] : r.weekdays.map((w) => DAYS.indexOf(w)))];
+      const firstWeek = offsets.filter((o) => monday + o >= toDays(start)).length;
+      return { step, emitted: firstWeek + (step - 1) * offsets.length };
+    }
+    case "monthly": {
+      // A whole year or more is skipped; the months of that run are counted when a count end needs them.
+      const months = (fy - sy) * 12 + (fm - sm);
+      const step = Math.max(0, Math.floor(months / interval) - 13);
+      let emitted = 0;
+      if (counted) {
+        for (let i = 0; i < step; i++) {
+          const total = sm - 1 + i * interval;
+          if (onDay(sy + Math.floor(total / 12), (((total % 12) + 12) % 12) + 1, sd)) emitted += 1;
+        }
+      }
+      return { step, emitted };
+    }
+    case "yearly": {
+      const step = Math.max(0, Math.floor((fy - sy) / interval) - 1);
+      let emitted = 0;
+      if (counted) for (let i = 0; i < step; i++) if (onDay(sy + i * interval, sm, sd)) emitted += 1;
+      return { step, emitted };
+    }
+  }
+}
+
+/** Calls `visit` with each occurrence in order, ignoring skips, until it returns false or the rule ends. */
+function walk(series: Series, visit: (date: string) => boolean, plan: Plan = { step: 0, emitted: 0 }): void {
+  const r = series.repeat;
+  const interval = Math.max(r.interval, 1);
+  let emitted = plan.emitted;
   const emit = (date: string): boolean => {
     if (r.end.type === "until" && date > r.end.value) return false;
     if (r.end.type === "count" && emitted >= r.end.value) return false;
@@ -146,7 +213,7 @@ function walk(series: Series, visit: (date: string) => boolean): void {
   const start = series.start;
   const { y: startYear, m: startMonth, d: startDay } = parse(start);
 
-  for (let step = 0; step < MAX_STEPS; step++) {
+  for (let step = plan.step; step < MAX_STEPS; step++) {
     const n = step * interval;
     let keepGoing: boolean;
     switch (r.frequency) {
@@ -198,12 +265,21 @@ const isSkipped = (series: Series, date: string) => series.skipped.includes(date
 
 /** Every occurrence from `from` to `to`, both included, skipping removed dates, at most MAX_OCCURRENCES. */
 export function occurrences(series: Series, from: string, to: string): string[] {
+  return occurrencesWith(series, from, to, true);
+}
+
+/** `occurrences`, with the jump to the range's start switched on or off (tests compare the two). */
+export function occurrencesWith(series: Series, from: string, to: string, jump: boolean): string[] {
   const out: string[] = [];
-  walk(series, (date) => {
-    if (date > to) return false;
-    if (date >= from && !isSkipped(series, date)) out.push(date);
-    return out.length < MAX_OCCURRENCES;
-  });
+  walk(
+    series,
+    (date) => {
+      if (date > to) return false;
+      if (date >= from && !isSkipped(series, date)) out.push(date);
+      return out.length < MAX_OCCURRENCES;
+    },
+    jump ? planFrom(series, from) : undefined,
+  );
   return out;
 }
 
@@ -216,7 +292,7 @@ export function nextOnOrAfter(series: Series, date: string): string | null {
       return false;
     }
     return true;
-  });
+  }, planFrom(series, date));
   return found;
 }
 
