@@ -321,6 +321,18 @@ describe("Calendars", () => {
     expect(within(panel).queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
   });
 
+  it("the subscribe form refuses an http:// link", async () => {
+    const store = await open();
+    await userEvent.click(screen.getByRole("button", { name: "Calendars" }));
+    const dialog = screen.getByRole("dialog", { name: "Calendars" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Subscribe to a calendar" }));
+    await userEvent.type(within(dialog).getByLabelText("Name"), "Holidays");
+    await userEvent.type(within(dialog).getByLabelText("Subscribe by link"), "http://example.com/h.ics");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Subscribe" }));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Use an https:// link");
+    expect(store.getState().calendars).toHaveLength(1);
+  });
+
   it("a feed that blocks the browser shows a red Retry and says why", async () => {
     let allow = false;
     const store = await open({

@@ -1,6 +1,12 @@
-import { addDays, makeDue, parseDue } from "./dates";
-import { newSeries, type Day, type Frequency, type Repeat, type Series } from "../store/repeat";
+import { DAYS, newSeries, type Day, type Frequency, type Repeat, type Series } from "../store/repeat";
+import { addWall, daysBetween } from "./wall";
+import { makeDue } from "./dates";
+import { resolveZone, zonedInstant } from "./zones";
 import type { FeedEvent } from "../store/types";
+
+/** The most events one feed may hold, and the most bytes it may be, before it is refused. */
+export const MAX_EVENTS = 5000;
+export const MAX_FEED_BYTES = 5 * 1024 * 1024;
 
 export class IcsError extends Error {
   constructor(message: string) {
@@ -45,45 +51,75 @@ function lines(text: string): Line[] {
 const unescapeText = (s: string) => s.replace(/\\([nN,;\\])/g, (_, c: string) => (c === "n" || c === "N" ? "\n" : c));
 
 interface When {
-  /** `YYYY-MM-DD` or `YYYY-MM-DDTHH:mm`, local. */
+  /** `YYYY-MM-DD` or `YYYY-MM-DDTHH:mm`, in the viewer's local time. */
   value: string;
   allDay: boolean;
+  /** Days the date moved when its zone was converted (a late evening in one zone is the next morning in another). */
+  dayShift: number;
 }
 
-/** DATE and DATE-TIME values. A TZID is treated as local time; a trailing Z (UTC) is converted to local. */
-function parseWhen(value: string, params: Record<string, string> = {}): When | null {
+/**
+ * DATE and DATE-TIME values, as local time. A trailing Z (UTC) and a TZID (an IANA name, or a
+ * common Windows one) are converted to the viewer's time zone; a TZID that is not known is read as
+ * floating local time and `notes` says so. Times with no zone are floating.
+ */
+function parseWhen(value: string, params: Record<string, string>, notes: Set<string>): When | null {
   const m = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?(Z)?)?$/.exec(value.trim());
   if (!m) return null;
   const [, y, mo, d, h, mi, , z] = m;
-  if (h === undefined || params.VALUE === "DATE") return { value: `${y}-${mo}-${d}`, allDay: true };
+  if (h === undefined || params.VALUE === "DATE") return { value: `${y}-${mo}-${d}`, allDay: true, dayShift: 0 };
+  const wall = `${y}-${mo}-${d}T${h}:${mi}`;
+  let instant: Date | null = null;
   if (z) {
-    const local = new Date(Date.UTC(+y!, +mo! - 1, +d!, +h, +mi!));
-    return { value: makeDue(local, true), allDay: false };
+    instant = new Date(0);
+    instant.setUTCFullYear(+y!, +mo! - 1, +d!);
+    instant.setUTCHours(+h, +mi!, 0, 0);
+  } else if (params.TZID) {
+    const zone = resolveZone(params.TZID);
+    if (zone) instant = zonedInstant(zone, +y!, +mo!, +d!, +h, +mi!);
+    else notes.add(`The time zone “${params.TZID}” isn’t known here, so times are shown as written.`);
   }
-  return { value: `${y}-${mo}-${d}T${h}:${mi}`, allDay: false };
+  if (!instant) return { value: wall, allDay: false, dayShift: 0 };
+  const local = makeDue(instant, true);
+  return { value: local, allDay: false, dayShift: daysBetween(wall, local) };
 }
 
 const BY_DAY: Record<string, Day> = { MO: "mon", TU: "tue", WE: "wed", TH: "thu", FR: "fri", SA: "sat", SU: "sun" };
 const FREQ: Record<string, Frequency> = { DAILY: "daily", WEEKLY: "weekly", MONTHLY: "monthly", YEARLY: "yearly" };
+const WHOLE = /^\d{1,10}$/;
 
-/** The rule's basic parts: FREQ, INTERVAL, BYDAY (weekly), COUNT, UNTIL. Anything else makes the event a one-off. */
-function parseRule(value: string): Repeat | null {
+/**
+ * The rule's basic parts: FREQ, INTERVAL, BYDAY (weekly), COUNT, UNTIL. Anything else, or a number
+ * that is not a whole number in the engine's range, makes the rule unsupported (null).
+ */
+function parseRule(value: string, dayShift: number, notes: Set<string>): Repeat | null {
   const parts = Object.fromEntries(value.split(";").map((p) => p.split("=") as [string, string]));
   const frequency = FREQ[parts.FREQ ?? ""];
   if (!frequency) return null;
-  const unsupported = ["BYMONTHDAY", "BYMONTH", "BYSETPOS", "BYYEARDAY", "BYWEEKNO", "BYHOUR", "BYMINUTE", "BYSECOND"];
-  if (unsupported.some((k) => k in parts)) return null;
-  const repeat: Repeat = { frequency, interval: Math.max(parseInt(parts.INTERVAL ?? "1", 10) || 1, 1), weekdays: [], end: { type: "never" } };
+  const unsupported = ["BYMONTHDAY", "BYMONTH", "BYSETPOS", "BYYEARDAY", "BYWEEKNO", "BYHOUR", "BYMINUTE", "BYSECOND", "BYEASTER", "WKST"];
+  if (unsupported.some((k) => k in parts && !(k === "WKST" && parts[k] === "MO"))) return null;
+  let interval = 1;
+  if (parts.INTERVAL !== undefined) {
+    if (!WHOLE.test(parts.INTERVAL)) return null;
+    interval = Number(parts.INTERVAL);
+    if (interval < 1 || interval > 65535) return null;
+  }
+  const repeat: Repeat = { frequency, interval, weekdays: [], end: { type: "never" } };
   if (parts.BYDAY) {
     if (frequency !== "weekly") return null;
     const days = parts.BYDAY.split(",").map((d) => BY_DAY[d]);
     if (days.some((d) => d === undefined)) return null; // "first Monday" style rules are not supported
-    repeat.weekdays = days as Day[];
+    repeat.weekdays = (days as Day[]).map((d) => DAYS[(((DAYS.indexOf(d) + dayShift) % 7) + 7) % 7]!);
   }
-  if (parts.COUNT) repeat.end = { type: "count", value: parseInt(parts.COUNT, 10) };
-  else if (parts.UNTIL) {
-    const until = parseWhen(parts.UNTIL);
-    if (until) repeat.end = { type: "until", value: until.value.slice(0, 10) };
+  if (parts.COUNT !== undefined) {
+    if (!WHOLE.test(parts.COUNT)) return null;
+    const count = Number(parts.COUNT);
+    if (count < 1 || count > 4294967295) return null;
+    repeat.end = { type: "count", value: count };
+  } else if (parts.UNTIL !== undefined) {
+    const until = parseWhen(parts.UNTIL, {}, notes);
+    if (!until) return null;
+    repeat.end = { type: "until", value: until.value.slice(0, 10) };
   }
   return repeat;
 }
@@ -99,32 +135,32 @@ function durationMinutes(value: string): number | null {
 interface Raw {
   uid: string;
   recurrenceId: string | null;
+  cancelled: boolean;
   event: FeedEvent;
-  skipped: string[];
 }
+
+const NOT_SUPPORTED = "Repeat not supported: this event is shown once, on its first date.";
 
 function toEvent(props: Line[]): Raw | null {
   const get = (name: string) => props.find((p) => p.name === name);
-  if (get("STATUS")?.value.toUpperCase() === "CANCELLED") return null;
+  const notes = new Set<string>();
+  const cancelled = get("STATUS")?.value.toUpperCase() === "CANCELLED";
   const dtstart = get("DTSTART");
-  const start = dtstart && parseWhen(dtstart.value, dtstart.params);
+  const start = dtstart && parseWhen(dtstart.value, dtstart.params, notes);
   if (!dtstart || !start) return null;
 
   let end: string;
   const dtend = get("DTEND");
-  const parsedEnd = dtend && parseWhen(dtend.value, dtend.params);
+  const parsedEnd = dtend && parseWhen(dtend.value, dtend.params, notes);
   const duration = get("DURATION") ? durationMinutes(get("DURATION")!.value) : null;
   if (start.allDay) {
     // An all-day DTEND is the day after the last day.
-    const last = parsedEnd ? addDays(parseDue(parsedEnd.value.slice(0, 10)).date, -1) : null;
-    const dayCount = duration !== null ? Math.max(Math.ceil(duration / 1440) - 1, 0) : 0;
-    const fallback = addDays(parseDue(start.value).date, dayCount);
-    const candidate = last ? makeDue(last, false) : makeDue(fallback, false);
-    end = candidate < start.value ? start.value : candidate;
+    const last = parsedEnd ? addWall(parsedEnd.value.slice(0, 10), -1) : addWall(start.value, duration !== null ? Math.max(Math.ceil(duration / 1440) - 1, 0) : 0);
+    end = last < start.value ? start.value : last;
   } else if (parsedEnd) {
     end = parsedEnd.value.length === 10 ? `${parsedEnd.value}T00:00` : parsedEnd.value;
   } else if (duration !== null) {
-    end = makeDue(new Date(parseDue(start.value).date.getTime() + duration * 60_000), true);
+    end = addWall(start.value, 0, duration);
   } else {
     end = start.value;
   }
@@ -134,31 +170,35 @@ function toEvent(props: Line[]): Raw | null {
   const rrule = get("RRULE");
   const skipped = props
     .filter((p) => p.name === "EXDATE")
-    .flatMap((p) => p.value.split(",").map((v) => parseWhen(v, p.params)?.value.slice(0, 10)))
+    .flatMap((p) => p.value.split(",").map((v) => parseWhen(v, p.params, notes)?.value.slice(0, 10)))
     .filter((d): d is string => Boolean(d));
   if (rrule) {
-    const rule = parseRule(rrule.value);
+    const rule = parseRule(rrule.value, start.dayShift, notes);
+    let ok = false;
     if (rule) {
       try {
         series = { ...newSeries(start.value.slice(0, 10), rule), skipped: [...new Set(skipped)].sort() };
+        ok = true;
       } catch {
         series = null;
       }
     }
+    if (!ok) notes.add(NOT_SUPPORTED);
   }
 
   const recurrence = get("RECURRENCE-ID");
+  const description = unescapeText(get("DESCRIPTION")?.value ?? "");
   return {
     uid: get("UID")?.value ?? "",
-    recurrenceId: recurrence ? (parseWhen(recurrence.value, recurrence.params)?.value.slice(0, 10) ?? null) : null,
-    skipped,
+    recurrenceId: recurrence ? (parseWhen(recurrence.value, recurrence.params, notes)?.value.slice(0, 10) ?? null) : null,
+    cancelled,
     event: {
       title: unescapeText(get("SUMMARY")?.value ?? "").trim() || "(No title)",
       allDay: start.allDay,
       start: start.value,
       end,
       place: unescapeText(get("LOCATION")?.value ?? ""),
-      notes: unescapeText(get("DESCRIPTION")?.value ?? ""),
+      notes: [description, ...notes].filter(Boolean).join("\n\n"),
       series,
     },
   };
@@ -166,9 +206,11 @@ function toEvent(props: Line[]): Raw | null {
 
 /**
  * Reads the events of an iCalendar feed. Supports DTSTART, DTEND or DURATION, SUMMARY, LOCATION,
- * DESCRIPTION, all-day dates, UTC times (converted to local), TZID times (read as local), basic
- * RRULEs (FREQ, INTERVAL, BYDAY on weekly rules, COUNT, UNTIL), EXDATE and RECURRENCE-ID overrides.
- * A rule it cannot express leaves the event as a one-off on its first date.
+ * DESCRIPTION, all-day dates, UTC times and TZID times (IANA and common Windows names), converted
+ * to the viewer's time, basic RRULEs (FREQ, INTERVAL, BYDAY on weekly rules, COUNT, UNTIL), EXDATE,
+ * and RECURRENCE-ID overrides, cancelled ones included. A rule it cannot express leaves a read-only
+ * event on its first date with a "Repeat not supported" note. Nested components such as VALARM are
+ * ignored. A feed with more than MAX_EVENTS events is refused.
  */
 export function parseIcs(text: string): FeedEvent[] {
   const all = lines(text);
@@ -177,22 +219,41 @@ export function parseIcs(text: string): FeedEvent[] {
   }
   const raws: Raw[] = [];
   let current: Line[] | null = null;
+  let nested = 0;
+  let seen = 0;
   for (const line of all) {
-    if (line.name === "BEGIN" && line.value.toUpperCase() === "VEVENT") current = [];
-    else if (line.name === "END" && line.value.toUpperCase() === "VEVENT") {
-      const raw = current && toEvent(current);
+    const kind = line.value.toUpperCase();
+    if (current === null) {
+      if (line.name === "BEGIN" && kind === "VEVENT") {
+        if (++seen > MAX_EVENTS) throw new IcsError(`This calendar has more than ${MAX_EVENTS} events`);
+        current = [];
+      }
+    } else if (nested > 0) {
+      // Inside a VALARM or another component of the event: its lines are not the event's.
+      if (line.name === "BEGIN") nested += 1;
+      else if (line.name === "END") nested -= 1;
+    } else if (line.name === "BEGIN") {
+      nested = 1;
+    } else if (line.name === "END" && kind === "VEVENT") {
+      const raw = toEvent(current);
       if (raw) raws.push(raw);
       current = null;
-    } else if (current) current.push(line);
-  }
-
-  // An override replaces one date of its series: take that date out of the series.
-  for (const o of raws.filter((r) => r.recurrenceId)) {
-    const master = raws.find((r) => r.uid === o.uid && !r.recurrenceId && r.event.series);
-    if (master?.event.series && !master.event.series.skipped.includes(o.recurrenceId!)) {
-      master.event.series = { ...master.event.series, skipped: [...master.event.series.skipped, o.recurrenceId!].sort() };
+    } else {
+      current.push(line);
     }
   }
-  return raws.map((r) => r.event);
-}
 
+  // An override replaces one date of its series: take that date out of the series. A cancelled
+  // override only does that; it adds no event.
+  const events: FeedEvent[] = [];
+  for (const o of raws) {
+    if (o.recurrenceId) {
+      const master = raws.find((r) => r.uid === o.uid && !r.recurrenceId && r.event.series);
+      if (master?.event.series && !master.event.series.skipped.includes(o.recurrenceId)) {
+        master.event.series = { ...master.event.series, skipped: [...master.event.series.skipped, o.recurrenceId].sort() };
+      }
+    }
+  }
+  for (const r of raws) if (!r.cancelled) events.push(r.event);
+  return events;
+}

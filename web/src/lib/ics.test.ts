@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { IcsError, parseIcs } from "./ics";
+import { IcsError, MAX_EVENTS, parseIcs } from "./ics";
 
 const wrap = (...events: string[]) => ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Test//EN", ...events, "END:VCALENDAR"].join("\r\n");
 const vevent = (...props: string[]) => ["BEGIN:VEVENT", ...props, "END:VEVENT"].join("\r\n");
@@ -25,11 +25,6 @@ describe("parseIcs", () => {
   it("accepts LF line endings and folds with a tab", () => {
     const [e] = parseIcs("BEGIN:VCALENDAR\nBEGIN:VEVENT\nDTSTART:20261107T090000\nSUMMARY:Tab\n\tbed\nEND:VEVENT\nEND:VCALENDAR\n");
     expect(e!.title).toBe("Tabbed");
-  });
-
-  it("treats a TZID time as local time", () => {
-    const [e] = parseIcs(wrap(vevent("DTSTART;TZID=Europe/London:20261107T150000", "DTEND;TZID=Europe/London:20261107T153000", "SUMMARY:Dentist")));
-    expect(e).toMatchObject({ start: "2026-11-07T15:00", end: "2026-11-07T15:30" });
   });
 
   it("converts UTC times to local time", () => {
@@ -107,5 +102,62 @@ describe("parseIcs", () => {
 
   it("refuses text that is not a calendar", () => {
     expect(() => parseIcs("<html>Not found</html>")).toThrow(IcsError);
+  });
+
+  it("a cancelled date of a series takes that date out and adds no event", () => {
+    const events = parseIcs(
+      wrap(
+        vevent("UID:s", "DTSTART:20261102T090000", "RRULE:FREQ=WEEKLY", "SUMMARY:Stand-up"),
+        vevent("UID:s", "RECURRENCE-ID:20261109T090000", "STATUS:CANCELLED", "DTSTART:20261109T090000", "SUMMARY:Stand-up"),
+        vevent("UID:other", "DTSTART:20261110T090000", "STATUS:CANCELLED", "SUMMARY:Gone"),
+      ),
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0]!.series!.skipped).toEqual(["2026-11-09"]);
+  });
+
+  it("a rule it cannot repeat is a read-only event on its first date with a note", () => {
+    const [e] = parseIcs(wrap(vevent("DTSTART:20261102T090000", "RRULE:FREQ=MONTHLY;BYDAY=1MO", "SUMMARY:First Monday", "DESCRIPTION:Bring the plan")));
+    expect(e).toMatchObject({ series: null, start: "2026-11-02T09:00" });
+    expect(e!.notes).toBe("Bring the plan\n\nRepeat not supported: this event is shown once, on its first date.");
+  });
+
+  it("COUNT and INTERVAL must be whole numbers in range, or the rule is not supported", () => {
+    const rules = ["COUNT=0", "COUNT=abc", "COUNT=1.5", "COUNT=4294967296", "INTERVAL=0", "INTERVAL=65536", "INTERVAL=2.5", "INTERVAL=-1", "INTERVAL=99999999999999"];
+    for (const rule of rules) {
+      const [e] = parseIcs(wrap(vevent("DTSTART:20261102T090000", `RRULE:FREQ=DAILY;${rule}`, "SUMMARY:x")));
+      expect(e!.series, rule).toBeNull();
+      expect(e!.notes, rule).toContain("Repeat not supported");
+    }
+    const [ok] = parseIcs(wrap(vevent("DTSTART:20261102T090000", "RRULE:FREQ=DAILY;COUNT=4294967295;INTERVAL=65535", "SUMMARY:x")));
+    expect(ok!.series!.repeat).toMatchObject({ interval: 65535, end: { type: "count", value: 4294967295 } });
+  });
+
+  it("ignores what is inside a VALARM", () => {
+    const [e] = parseIcs(
+      wrap(
+        [
+          "BEGIN:VEVENT",
+          "DTSTART:20261107T090000",
+          "SUMMARY:Real title",
+          "DESCRIPTION:Real notes",
+          "BEGIN:VALARM",
+          "ACTION:DISPLAY",
+          "DESCRIPTION:Reminder text",
+          "SUMMARY:Alarm title",
+          "TRIGGER:-PT15M",
+          "END:VALARM",
+          "LOCATION:Room 3",
+          "END:VEVENT",
+        ].join("\r\n"),
+      ),
+    );
+    expect(e).toMatchObject({ title: "Real title", notes: "Real notes", place: "Room 3" });
+  });
+
+  it("refuses a feed with too many events", () => {
+    const many = Array.from({ length: MAX_EVENTS + 1 }, (_, i) => vevent(`UID:${i}`, "DTSTART:20261107T090000", "SUMMARY:x"));
+    expect(() => parseIcs(wrap(...many))).toThrow(/more than 5000 events/);
+    expect(parseIcs(wrap(...many.slice(0, MAX_EVENTS)))).toHaveLength(MAX_EVENTS);
   });
 });
