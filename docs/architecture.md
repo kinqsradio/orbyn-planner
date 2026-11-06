@@ -72,7 +72,7 @@ The **End to end** job in `.github/workflows/ci.yml` runs it on every pull reque
 1. builds the engine's Docker image (`docker compose build`);
 2. removes any volume (`docker compose down --volumes`), so the database is made fresh for the run, and makes `ORBYN_AUTH_SETUP` with `orbyn auth-setup` inside the image (masked in the log);
 3. starts `postgres`, `migrate`, `server` and `worker`, deletes the rows of `auth_attempts` (already empty on a fresh database; it keeps a repeated run on a reused one under the sign-up limit), and waits up to two minutes for `/health`;
-4. runs `npx vitest run src/e2e` with `ORBYN_E2E_ENGINE=http://127.0.0.1:8080`;
+4. runs `npx vitest run src/e2e --no-file-parallelism` with `ORBYN_E2E_ENGINE=http://127.0.0.1:8080` (one file at a time: run in parallel against one engine, pairings occasionally time out; the cause is not yet known);
 5. on failure, uploads `docker compose logs` as the `e2e-compose-logs` artifact; always, stops the stack and removes its volume.
 
 To run the same thing locally, check the engine out at the pinned commit (`git -C ../orbyn-engine worktree add --detach /tmp/engine-pin $(node -p "require('./src/generated/wasm/manifest.json').engine")`, from `web/`), then:
@@ -86,7 +86,7 @@ ORBYN_AUTH_SETUP="$SETUP" docker compose up -d postgres migrate server worker
 docker compose exec -T postgres psql -U orbyn -d orbyn -c "delete from auth_attempts"
 curl -fsS http://127.0.0.1:8080/health
 cd <planner>/web
-ORBYN_E2E_ENGINE=http://127.0.0.1:8080 npx vitest run src/e2e
+ORBYN_E2E_ENGINE=http://127.0.0.1:8080 npx vitest run src/e2e --no-file-parallelism
 docker compose down --volumes                       # in the engine checkout
 ```
 

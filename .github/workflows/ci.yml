@@ -148,7 +148,7 @@ jobs:
           echo "the engine did not become healthy"
           exit 1
       - name: End-to-end tests
-        run: npx vitest run src/e2e
+        run: npx vitest run src/e2e --no-file-parallelism
         env:
           ORBYN_E2E_ENGINE: http://127.0.0.1:8080
       - name: Compose logs
