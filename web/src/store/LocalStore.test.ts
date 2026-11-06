@@ -80,7 +80,7 @@ describe("LocalStore", () => {
     expect(store.getState().tasks[0]!.deletedAt).toBeNull();
   });
 
-  it("purges tasks deleted more than 30 days ago, leaving one delete entry", async () => {
+  it("purges tasks deleted more than 30 days ago; one never synced leaves nothing to send", async () => {
     const env = setup();
     const first = env.make();
     await first.ready;
@@ -97,9 +97,8 @@ describe("LocalStore", () => {
     await second.ready;
     await second.flush();
     expect(second.getState().tasks.map((t) => t.title)).toEqual(["recent", "fresh"]);
-    const entries = second.getState().outbox.filter((e) => e.id === old.id);
-    expect(entries).toHaveLength(1);
-    expect(entries[0]).toMatchObject({ op: "delete", changedFields: {} });
+    // "old" was created and deleted on this device and never synced.
+    expect(second.getState().outbox.filter((e) => e.id === old.id)).toHaveLength(0);
   });
 
   it("does not purge when the clock is far ahead of the newest record", async () => {
