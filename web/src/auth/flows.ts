@@ -69,25 +69,48 @@ export async function signUp(services: AuthServices, input: { name: string; emai
   }
 }
 
+/** This browser holds the keys of another account. Signing in to this one would remove them, so the person must agree first. */
+export class KeysForAnotherAccount extends Error {
+  constructor(
+    /** The other account's email with most of it hidden, or null if none was recorded. */
+    readonly maskedEmail: string | null,
+  ) {
+    super(
+      maskedEmail
+        ? `This browser holds the keys for another Orbyn account (${maskedEmail}). Signing in to a different account removes them from this browser.`
+        : "This browser holds the keys for another Orbyn account. Signing in to a different account removes them from this browser.",
+    );
+    this.name = "KeysForAnotherAccount";
+  }
+}
+
+/** "sam@example.com" as "s•••@example.com". */
+export function maskEmail(email: string): string {
+  const at = email.indexOf("@");
+  return at < 1 ? "•••" : `${email[0]}•••${email.slice(at)}`;
+}
+
 /**
  * Signs in. A browser that already holds trusted keys proves it with a signature, so someone
  * guessing passwords cannot use up the owner's attempts. A new browser signs in as a pending device.
+ *
+ * Keys belong to one account. If the stored keys were made for another email, nothing is sent until
+ * the person agrees (`replaceKeys`): then this attempt uses new keys held only in memory, with no
+ * proof from the old ones, so the server can't link the two accounts. The stored keys, snapshot and
+ * wrapping key are not touched unless the sign-in succeeds; only then are they replaced. A mistyped
+ * email or password therefore never costs a trusted device its keys.
  */
-export async function signIn(services: AuthServices, input: { email: string; password: string; name?: string }): Promise<StoredSession> {
+export async function signIn(services: AuthServices, input: { email: string; password: string; name?: string; replaceKeys?: boolean }): Promise<StoredSession> {
   const crypto = services.crypto();
   try {
     const email = emailOrFail(crypto, input.email);
     const password = utf8(input.password);
-    let saved = await services.keys.loadKeys();
-    // Keys belong to one account. For any other email (or keys with no email recorded) they are
-    // forgotten before anything is sent, so the old key never signs a proof for, or registers with,
-    // another account: that would let the server link the two.
-    if (saved && (await services.keys.loadIdentity())?.email !== email) {
-      await services.engine.forget();
-      saved = null;
-    }
+    const saved = await services.keys.loadKeys();
+    const identity = saved ? await services.keys.loadIdentity() : null;
+    const foreign = saved !== null && identity?.email !== email;
+    if (foreign && !input.replaceKeys) throw new KeysForAnotherAccount(identity?.email ? maskEmail(identity.email) : null);
     let known = null as ReturnType<typeof crypto.deviceKeys.import> | null;
-    if (saved) {
+    if (saved && !foreign) {
       const wrap = await services.wrapSecret();
       try {
         known = crypto.deviceKeys.import(saved, wrap);
@@ -117,7 +140,7 @@ export async function signIn(services: AuthServices, input: { email: string; pas
       device: describeDevice(keys),
       device_signature: encodeBytes(keys.signLogin(started.login_id)),
     });
-    await bindKeys(services, keys, known !== null, created, email);
+    await bindKeys(services, keys, known !== null, created, email, foreign);
     const session = toStored(created, email, input.name ?? "");
     await services.tokens.set(session);
     return session;
@@ -131,7 +154,7 @@ export async function signIn(services: AuthServices, input: { email: string; pas
  * keys are stored. Keys made for another account are replaced, with the old state wiped; the same
  * account under a new device id means the old row was removed, so the saved trust state is wiped.
  */
-async function bindKeys(services: AuthServices, keys: DeviceKeys, existing: boolean, created: SessionCreated, email: string): Promise<void> {
+async function bindKeys(services: AuthServices, keys: DeviceKeys, existing: boolean, created: SessionCreated, email: string, replace: boolean): Promise<void> {
   // Under the engine's lock, so no action in another tab is half-way through saving into what is wiped here.
   await services.engine.exclusive(async () => {
     const identity = await services.keys.loadIdentity();
@@ -143,7 +166,11 @@ async function bindKeys(services: AuthServices, keys: DeviceKeys, existing: bool
         wrap.fill(0);
       }
     };
-    if (!existing) {
+    if (replace) {
+      // The person agreed to give up the other account's keys, and this sign-in worked: only now.
+      await services.keys.clearDevice();
+      await seal();
+    } else if (!existing) {
       await services.keys.clearSnapshot(); // no keys were here: whatever snapshot there is is not theirs
       await seal();
     } else if (identity && identity.accountId !== created.account_id) {

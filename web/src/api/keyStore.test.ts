@@ -59,7 +59,7 @@ describe("the key store", () => {
 });
 
 describe("forgetting a device in IndexedDB", () => {
-  it("removes the keys, the snapshot, the wrapping key and the identity together, and keeps the quarantine", async () => {
+  it("removes the keys, the snapshot, the wrapping key, the identity and the quarantine together", async () => {
     const store = createIdbKeyStore();
     const wrap = await crypto.subtle.generateKey({ name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
     await store.saveKeys(new Uint8Array([1]));
@@ -73,7 +73,7 @@ describe("forgetting a device in IndexedDB", () => {
     expect(await store.loadSnapshot()).toBeNull();
     expect(await store.loadWrapKey()).toBeNull();
     expect(await store.loadIdentity()).toBeNull();
-    expect((await store.loadQuarantine()).map((b) => b[0])).toEqual([3]);
+    expect(await store.loadQuarantine()).toEqual([]); // it was sealed under the wrapping key just removed
   });
 
   it("pins the first unreadable snapshot and keeps the newest after it", async () => {

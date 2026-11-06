@@ -24,8 +24,10 @@ async function setup() {
   await keys.saveKeys(crypto.deviceKeys.create().export(wrap));
   await keys.saveIdentity({ accountId: session.accountId, deviceId: session.deviceId });
   /** A new host over the same stored state: what another page load or tab sees. */
-  const host = (): EngineHost => createEngineHost({ keys, crypto: () => crypto, wrapSecret: async () => wrap.slice(), now: () => 0 });
-  return { keys, host };
+  let present = true;
+  const host = (): EngineHost => createEngineHost({ keys, crypto: () => crypto, wrapSecret: async () => wrap.slice(), wrapKeyPresent: async () => present, now: () => 0 });
+  const setPresent = (value: boolean) => void (present = value);
+  return { keys, host, setPresent };
 }
 
 describe("the engine's saved state", () => {
@@ -105,6 +107,17 @@ describe("the engine's saved state", () => {
     expect(await keys.loadQuarantine()).toEqual([odd]);
     expect(h.notice.get()).toBe(SNAPSHOT_UNREADABLE);
     h.notice.clear();
+    expect(h.notice.get()).toBeNull();
+  });
+
+  it("the notice is only shown while the wrapping key that sealed the quarantine exists", async () => {
+    const { keys, host, setPresent } = await setup();
+    await keys.quarantineSnapshot(new Uint8Array([4]));
+    const h = host();
+    await h.notice.refresh();
+    expect(h.notice.get()).toBe(SNAPSHOT_UNREADABLE);
+    setPresent(false); // the key is gone: "the old copy is kept" would be untrue, it can't be opened
+    await h.notice.refresh();
     expect(h.notice.get()).toBeNull();
   });
 

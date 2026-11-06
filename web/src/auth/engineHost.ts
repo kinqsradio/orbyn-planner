@@ -55,14 +55,15 @@ export interface EngineHost {
 
 const NOTICE_CHANNEL = "orbyn-planner-engine-notice";
 
-function createNotice(keys: KeyStore): Notice & { announce(): Promise<void> } {
+function createNotice(keys: KeyStore, wrapKeyPresent: () => Promise<boolean>): Notice & { announce(): Promise<void> } {
   let count = 0;
   let dismissed = false;
   const listeners = new Set<() => void>();
   const emit = () => listeners.forEach((l) => l());
   const refresh = async () => {
     try {
-      const next = (await keys.loadQuarantine()).length;
+      // Only while the wrapping key that sealed it exists: otherwise "the old copy is kept" would be untrue.
+      const next = (await wrapKeyPresent()) ? (await keys.loadQuarantine()).length : 0;
       if (next !== count) {
         count = next;
         emit();
@@ -111,11 +112,13 @@ export function createEngineHost(deps: {
   keys: KeyStore;
   crypto: () => AuthCrypto;
   wrapSecret: () => Promise<Uint8Array>;
+  /** Whether the wrapping key still exists. Defaults to looking for it in the key store. */
+  wrapKeyPresent?: () => Promise<boolean>;
   now: () => number;
   lock?: Lock;
 }): EngineHost {
   const lock = deps.lock ?? browserLock;
-  const notice = createNotice(deps.keys);
+  const notice = createNotice(deps.keys, deps.wrapKeyPresent ?? (async () => (await deps.keys.loadWrapKey()) !== null));
   return {
     notice,
     forget: () => lock(() => deps.keys.clearDevice()),

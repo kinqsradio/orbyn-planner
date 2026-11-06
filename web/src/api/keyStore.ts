@@ -49,7 +49,7 @@ export interface KeyStore {
   /** The non-extractable WebCrypto key the wrapping secret comes from. It can be stored but not read. */
   loadWrapKey(): Promise<CryptoKey | null>;
   saveWrapKey(key: CryptoKey): Promise<void>;
-  /** Forgets this device: keys, snapshot and wrapping key together (the snapshot is bound to the keys). */
+  /** Forgets this device: keys, snapshot, wrapping key, identity and the quarantine together (all are sealed under, or bound to, the keys). */
   clearDevice(): Promise<void>;
   loadSession(): Promise<StoredSession | null>;
   saveSession(session: StoredSession): Promise<void>;
@@ -148,11 +148,18 @@ export function createIdbKeyStore(factory: IDBFactory = indexedDB): KeyStore {
       return request(database.transaction("quarantine", "readonly").objectStore("quarantine").getAll() as IDBRequest<Uint8Array[]>);
     },
     clearDevice: async () => {
-      // The quarantine stays: it is what a person could still recover.
       await remove("device");
       await remove("snapshot");
       await remove("wrap");
       await remove("identity");
+      // The quarantine is sealed under the wrapping key just removed: nothing could open it again.
+      const database = await open();
+      const tx = database.transaction("quarantine", "readwrite");
+      tx.objectStore("quarantine").clear();
+      await new Promise<void>((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = tx.onabort = () => reject(tx.error);
+      });
     },
     loadSession: () => get<StoredSession>("session"),
     saveSession: (s) => put("session", s),
@@ -190,6 +197,7 @@ export function createMemoryKeyStore(): KeyStore {
       snapshot = null;
       wrap = null;
       identity = null;
+      quarantined.length = 0;
     },
     loadSession: async () => session,
     saveSession: async (s) => void (session = s),

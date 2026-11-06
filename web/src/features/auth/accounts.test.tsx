@@ -254,6 +254,62 @@ describe("sign in", () => {
     expect(sessionToken()).toBe(auth.tokens.getSession()?.token);
   });
 
+  describe("a browser that holds another account's keys", () => {
+    async function withOtherAccount() {
+      const keys = await accountWithSignedOutBrowser(); // Sam's trusted keys stay in this browser
+      const other = createMemoryKeyStore();
+      const elsewhere = await mount(services(other));
+      await fillSignUp({ name: "Alex", email: "alex@example.com", password: "another long password" });
+      await todayShown();
+      elsewhere.unmount();
+      return keys;
+    }
+    const startOf = () => engine.calls.filter((c) => c.path === "/v1/sessions/login/start");
+
+    it("asks first, sends nothing on Cancel, and keeps the keys", async () => {
+      const keys = await withOtherAccount();
+      const before = await keys.loadKeys();
+      const sent = engine.calls.length;
+      await mount(services(keys));
+      await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
+      await fillSignIn("alex@example.com", "another long password");
+      const dialog = await screen.findByRole("alertdialog", { name: "Sign in to a different account" });
+      expect(dialog).toHaveTextContent("s•••@example.com");
+      expect(dialog).toHaveTextContent("removes them from this browser");
+      expect(engine.calls.length).toBe(sent);
+      await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument();
+      expect(engine.calls.length).toBe(sent);
+      expect(await keys.loadKeys()).toEqual(before);
+    });
+
+    it("Sign in anyway signs in with new keys and no proof from the old ones", async () => {
+      const keys = await withOtherAccount();
+      const before = await keys.loadKeys();
+      await mount(services(keys));
+      await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
+      await fillSignIn("alex@example.com", "another long password");
+      await userEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Sign in anyway" }));
+      await screen.findByRole("heading", { name: "Approve this device" });
+      expect((startOf().at(-1)!.body as { trusted_device?: unknown }).trusted_device).toBeUndefined();
+      expect(await keys.loadKeys()).not.toEqual(before);
+      expect((await keys.loadIdentity())?.email).toBe("alex@example.com");
+    });
+
+    it("a wrong password after Sign in anyway leaves the old keys alone", async () => {
+      const keys = await withOtherAccount();
+      const before = await keys.loadKeys();
+      await mount(services(keys));
+      await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
+      await fillSignIn("alex@example.com", "wrong wrong wrong");
+      await userEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Sign in anyway" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("don’t match");
+      expect(await keys.loadKeys()).toEqual(before);
+      expect((await keys.loadIdentity())?.email).toBe("sam@example.com");
+    });
+  });
+
   it("a new browser signs in as a pending device and waits for approval", async () => {
     await accountWithSignedOutBrowser();
     const second = services();
