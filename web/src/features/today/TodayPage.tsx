@@ -20,7 +20,7 @@ export function TodayPage() {
   const now = useNow();
   const waiting = useMemo(() => {
     const latest = new Map<string, string>();
-    for (const e of outbox) if (e.type === "task") latest.set(e.id, e.at);
+    for (const e of outbox) if (e.type === "task") latest.set(e.id, e.updatedAt);
     return [...latest].flatMap(([id, at]) => {
       const task = tasks.find((t) => t.id === id);
       return task ? [{ id, label: task.title, at }] : [];

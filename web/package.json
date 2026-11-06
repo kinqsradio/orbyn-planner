@@ -31,6 +31,7 @@
     "@vitejs/plugin-react": "^6.2.1",
     "eslint": "^10.14.0",
     "eslint-plugin-react-hooks": "^7.1.1",
+    "fake-indexeddb": "^6.2.7",
     "globals": "^17.14.0",
     "jsdom": "^29.1.1",
     "typescript": "^6.0.3",
