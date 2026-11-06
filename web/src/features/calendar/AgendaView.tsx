@@ -1,6 +1,7 @@
 import { useUi } from "../../app/ui";
 import { EmptyState } from "../../components/EmptyState";
 import { dateOf, formatTime, parseDue, shortDay } from "../../lib/dates";
+import { touchesDay } from "../../lib/wall";
 import { usePlanner } from "../../store/context";
 import type { Occurrence } from "../../store/occurrences";
 import { colourOf } from "./TimeGrid";
@@ -17,7 +18,7 @@ export function AgendaView({ days, occurrences, today }: { days: string[]; occur
   const { calendars } = usePlanner();
   const ui = useUi();
   const groups = days
-    .map((day) => ({ day, items: occurrences.filter((o) => o.start.slice(0, 10) <= day && o.end.slice(0, 10) >= day) }))
+    .map((day) => ({ day, items: occurrences.filter((o) => touchesDay(o, day)) }))
     .filter((g) => g.items.length > 0);
 
   if (groups.length === 0) {

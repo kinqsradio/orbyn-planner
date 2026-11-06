@@ -1,5 +1,6 @@
 import { useUi } from "../../app/ui";
 import { WEEKDAYS, dateOf } from "../../lib/dates";
+import { touchesDay } from "../../lib/wall";
 import { usePlanner } from "../../store/context";
 import type { Occurrence } from "../../store/occurrences";
 import { colourOf } from "./TimeGrid";
@@ -29,7 +30,7 @@ export function MonthView({ days, anchor, occurrences, today, weekStart, onDay }
       {shownDays.map((day) => {
         const date = dateOf(day);
         const inMonth = date.getMonth() === month;
-        const here = occurrences.filter((o) => o.start.slice(0, 10) <= day && o.end.slice(0, 10) >= day);
+        const here = occurrences.filter((o) => touchesDay(o, day));
         const classes = ["md", day === today ? "today" : "", inMonth ? "" : "out"].filter(Boolean).join(" ");
         return (
           <div className={classes} role="gridcell" key={day} data-day={day}>

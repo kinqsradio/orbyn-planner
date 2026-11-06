@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useUi } from "../../app/ui";
 import { WEEKDAYS, dateOf, formatTime, parseDue } from "../../lib/dates";
+import { touchesDay } from "../../lib/wall";
 import { usePlanner } from "../../store/context";
 import type { Occurrence } from "../../store/occurrences";
 import type { CalendarEvent, Task } from "../../store/types";
@@ -41,7 +42,7 @@ export function TimeGrid({ days, occurrences, today, now, mode }: { days: string
 
   const byDay = useMemo(() => {
     const map = new Map<string, Occurrence[]>();
-    for (const d of days) map.set(d, occurrences.filter((o) => o.start.slice(0, 10) <= d && o.end.slice(0, 10) >= d));
+    for (const d of days) map.set(d, occurrences.filter((o) => touchesDay(o, d)));
     return map;
   }, [days, occurrences]);
   const allDay = occurrences.filter(isAllDayLike);

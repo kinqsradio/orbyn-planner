@@ -88,3 +88,17 @@ describe("countOverlaps", () => {
     expect(countOverlaps(day)).toBe(2);
   });
 });
+
+describe("an end at midnight", () => {
+  it("is exclusive: it fills the evening of its own day and leaves the next day empty", () => {
+    const night = occ("2026-11-07T20:00", "2026-11-08T00:00");
+    expect(layoutDay([night], "2026-11-07")[0]).toMatchObject({ top: 1200, height: 240 });
+    expect(layoutDay([night], "2026-11-08")).toEqual([]);
+  });
+
+  it("does not count as overlapping an event that starts at midnight", () => {
+    const a = occ("2026-11-07T22:00", "2026-11-08T00:00");
+    const b = occ("2026-11-08T00:00", "2026-11-08T01:00");
+    expect(layoutDay([a, b], "2026-11-08").map((p) => [p.occ.event.title, p.overlaps])).toEqual([[b.event.title, false]]);
+  });
+});

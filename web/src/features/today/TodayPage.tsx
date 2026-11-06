@@ -4,6 +4,7 @@ import { useUi } from "../../app/ui";
 import { PageHeader } from "../../components/EmptyState";
 import { Icon } from "../../components/Icon";
 import { MONTHS, WEEKDAYS, dateKey, formatTime, parseDue, startOfDay } from "../../lib/dates";
+import { touchesDay } from "../../lib/wall";
 import { usePlanner } from "../../store/context";
 import { expandEvents, type Occurrence } from "../../store/occurrences";
 import { colourOf } from "../calendar/TimeGrid";
@@ -151,7 +152,7 @@ export function TodayPage() {
           <ul aria-label="The week at a glance">
             {g.week.map(({ date, tasks: due }) => {
               const k = dateKey(date);
-              const evs = weekEvents.filter((o) => o.start.slice(0, 10) <= k && o.end.slice(0, 10) >= k);
+              const evs = weekEvents.filter((o) => touchesDay(o, k));
               const total = due.length + evs.length;
               const label =
                 total === 0

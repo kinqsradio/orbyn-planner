@@ -1,4 +1,4 @@
-import { parseDue } from "../../lib/dates";
+import { touchesDay, wallMinutes } from "../../lib/wall";
 import type { Occurrence } from "../../store/occurrences";
 
 export const MINUTES_IN_DAY = 1440;
@@ -18,14 +18,11 @@ export interface Placed {
   overlaps: boolean;
 }
 
-const minutesOf = (value: string) => {
-  const d = parseDue(value).date;
-  return d.getHours() * 60 + d.getMinutes();
-};
+const minutesOf = (value: string) => Number(value.slice(11, 13)) * 60 + Number(value.slice(14, 16));
 
 /** Whether an occurrence is drawn in the all-day row: an all-day event, or a timed one lasting a day or more. */
 export function isAllDayLike(occ: Occurrence): boolean {
-  return occ.allDay || parseDue(occ.end).date.getTime() - parseDue(occ.start).date.getTime() >= 86_400_000;
+  return occ.allDay || wallMinutes(occ.end) - wallMinutes(occ.start) >= 1440;
 }
 
 /**
@@ -35,9 +32,10 @@ export function isAllDayLike(occ: Occurrence): boolean {
  */
 export function layoutDay(occurrences: readonly Occurrence[], day: string): Placed[] {
   const blocks = occurrences
-    .filter((o) => !isAllDayLike(o) && o.start.slice(0, 10) <= day && o.end.slice(0, 10) >= day)
+    .filter((o) => !isAllDayLike(o) && touchesDay(o, day))
     .map((occ) => {
       const top = occ.start.slice(0, 10) < day ? 0 : minutesOf(occ.start);
+      // An end at 00:00 of a later day runs to the end of this one.
       const end = occ.end.slice(0, 10) > day ? MINUTES_IN_DAY : minutesOf(occ.end);
       return { occ, top, height: Math.max(end - top, MIN_BLOCK_MINUTES) };
     })

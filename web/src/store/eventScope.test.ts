@@ -138,3 +138,13 @@ describe("deleting and duplicating", () => {
     expect(copy.id).not.toBe(store.getState().events[0]!.id);
   });
 });
+
+describe("expandEvents and midnight", () => {
+  it("an event ending at 00:00 does not appear on the next day", async () => {
+    const { store } = await weekly();
+    store.addEvent({ title: "Late film", start: "2026-11-06T21:00", end: "2026-11-07T00:00" });
+    const on = (d: string) => expandEvents(store.getState().events, d, d).map((o) => o.event.title);
+    expect(on("2026-11-06")).toContain("Late film");
+    expect(on("2026-11-07")).not.toContain("Late film");
+  });
+});
