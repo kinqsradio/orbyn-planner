@@ -40,6 +40,62 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  # The committed WebAssembly package must be what the pinned orbyn-engine commit builds on Linux, with the pinned toolchain.
+  wasm:
+    name: Wasm package
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      # The engine commit the package was built from: updating it is a deliberate `npm run wasm` and a commit.
+      - id: pin
+        run: |
+          engine=$(node -p "require('./src/generated/wasm/manifest.json').engine")
+          [[ "$engine" =~ ^[0-9a-f]{40}$ ]] || { echo "manifest.json engine is not a commit: $engine"; exit 1; }
+          echo "engine=$engine" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: kinqsradio/orbyn-engine
+          ref: ${{ steps.pin.outputs.engine }}
+          path: engine
+          persist-credentials: false
+      # The versions in web/wasm.lock.json: change them together.
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.99.1
+          targets: wasm32-unknown-unknown
+      # No build cache here: the package must come from a clean build of the pinned commit.
+      # Built from source like `cargo install` does locally: the prebuilt CLI stamps its own git hash
+      # into the package's producers section, so its output differs by a few bytes.
+      - name: wasm-bindgen CLI (same build as local)
+        working-directory: .
+        run: cargo +1.99.1 install wasm-bindgen-cli --version 0.2.130 --locked
+      # Exactly the pinned commit, with nothing changed: the check is byte for byte.
+      - name: The engine checkout is clean and at the pin
+        working-directory: engine
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ steps.pin.outputs.engine }}"
+          test -z "$(git status --porcelain)"
+      - run: npm run wasm:check
+        env:
+          ORBYN_ENGINE_DIR: ${{ github.workspace }}/engine
+          ORBYN_WASM_KEEP: ${{ runner.temp }}/wasm-built
+      # The fresh build, to compare with or to commit when CI's build is the one to trust.
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: wasm-built
+          path: ${{ runner.temp }}/wasm-built
+          if-no-files-found: ignore
+
   desktop:
     name: Desktop (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

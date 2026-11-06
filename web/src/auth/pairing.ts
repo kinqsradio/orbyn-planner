@@ -13,11 +13,17 @@ import type { AuthServices, PollSchedule } from "./services";
 
 export type CloseReason = "cancelled" | "mismatch" | "expired" | "closed" | "failed";
 
+/** Said with every "ran out of time": a wrong clock makes an approval look old or not yet made. */
+export const CLOCK_HINT = "If this keeps happening, check that this device’s clock is right.";
+
+/** Right after the person compared the digits themselves, the plain words are the most useful. */
+export const DIGITS_MISMATCH = "The digits didn’t match, so this approval was closed.";
+
 const REASONS: Record<CloseReason, string> = {
   cancelled: "This approval was cancelled.",
-  mismatch: "The digits didn’t match, so this approval was closed.",
-  expired: "This approval ran out of time.",
-  closed: "This approval was closed, by the other device or because it ran out of time.",
+  mismatch: "The two devices didn’t agree. Start again from the other device.",
+  expired: `This approval ran out of time. ${CLOCK_HINT}`,
+  closed: `This approval was closed, by the other device or because it ran out of time. ${CLOCK_HINT}`,
   failed: "Something went wrong, so this approval was closed.",
 };
 
@@ -72,13 +78,19 @@ class Controller<S> {
     if (this.ended && !final) return;
     this.state = next;
     for (const l of this.listeners) l();
+    const phase = (next as { phase?: string }).phase;
+    if (final || phase === "done" || phase === "trusted") this.release();
   }
 
   /** Stops waiting and polling; the screen has gone. */
   dispose(): void {
     this.disposed = true;
     this.wake?.();
+    this.release();
   }
+
+  /** Gives the module's memory for a finished session back. Called once the attempt is over, and idempotent. */
+  protected release(): void {}
 
   protected sleep(ms: number): Promise<void> {
     return new Promise((resolve) => {
@@ -109,6 +121,8 @@ export function* delays(poll: PollSchedule): Generator<number> {
   }
 }
 
+/** An approval is good for ten minutes. */
+const APPROVAL_SECS = 600;
 const nowSecs = (services: AuthServices) => Math.floor(services.now() / 1000);
 /** The approval is at another step: another tab of this device got there first. */
 const isOutOfOrder = (e: unknown) => e instanceof ApiFailure && (e.status === 409 || e.code === "approval_out_of_order");
@@ -125,6 +139,12 @@ export class ApproverController extends Controller<ApproverState> {
     private readonly pending: Device,
   ) {
     super({ phase: "starting" });
+  }
+
+  protected override release(): void {
+    const pairing = this.pairing;
+    this.pairing = null;
+    pairing?.free();
   }
 
   /** Creates the approval and walks to the comparison. After a cancel nothing here posts or changes the screen. */
@@ -173,7 +193,11 @@ export class ApproverController extends Controller<ApproverState> {
     try {
       const devices = await this.services.api.devices();
       if (this.ended || this.disposed) return;
-      const body = await this.services.engine.run(this.session, (e) => e.confirmApproval(pairing, devices)); // signs
+      const body = await this.services.engine.run(this.session, (e) => {
+        // Checked inside the lock, right before signing: a cancel that came while this waited has already freed the session.
+        if (this.ended || this.disposed) throw new Error("cancelled: the approval was closed");
+        return e.confirmApproval(pairing, devices); // signs
+      });
       if (this.ended || this.disposed) return;
       await this.services.api.confirmApproval(id, body);
       if (this.ended || this.disposed) return;
@@ -186,7 +210,7 @@ export class ApproverController extends Controller<ApproverState> {
       });
       if (done) this.set({ phase: "done" });
     } catch (e) {
-      await this.fail(e);
+      await this.fail(e, true); // after "They match"
     }
   }
 
@@ -214,7 +238,7 @@ export class ApproverController extends Controller<ApproverState> {
     return undefined;
   }
 
-  private async fail(error: unknown): Promise<void> {
+  private async fail(error: unknown, afterComparison = false): Promise<void> {
     if (this.ended || this.disposed) return;
     this.ended = true;
     let reason: CloseReason = "failed";
@@ -225,9 +249,10 @@ export class ApproverController extends Controller<ApproverState> {
     } else if (isGone(error)) {
       reason = "closed";
       message = REASONS.closed;
-    } else if (error instanceof Error && /^keys_changed:/.test(error.message)) {
+    } else if (error instanceof Error && /^mismatch:/.test(error.message)) {
+      // The module's one code for any disagreement; at this end it means the keys the server showed are not the ones this device started with.
       reason = "mismatch";
-      message = "The keys the server showed for the new device changed, so this approval was closed.";
+      message = afterComparison ? DIGITS_MISMATCH : REASONS.mismatch;
     } else if (error instanceof ApiFailure) {
       message = error.message;
     }
@@ -259,6 +284,12 @@ export class DeviceController extends Controller<DeviceState> {
     private readonly repair = false,
   ) {
     super({ phase: "waiting" });
+  }
+
+  protected override release(): void {
+    const pairing = this.pairing;
+    this.pairing = null;
+    pairing?.free();
   }
 
   /** Polls until trusted, closed or disposed. Safe to call again after "Start again". */
@@ -313,6 +344,12 @@ export class DeviceController extends Controller<DeviceState> {
         return (this.state as DeviceState).phase === "closed";
       }
       if (this.approvalId !== view.id) {
+        // The module refuses an approval older than ten minutes with its generic `mismatch`, so the age is checked here to say so.
+        if (nowSecs(this.services) - view.created_at > APPROVAL_SECS) {
+          this.dead.add(view.id);
+          await this.close("expired", false);
+          return true;
+        }
         this.set({ phase: "joining" });
         const pairing = await this.services.engine.run(this.session, (e) => e.joinApproval(view, nowSecs(this.services)));
         this.approvalId = view.id;
@@ -320,6 +357,7 @@ export class DeviceController extends Controller<DeviceState> {
         try {
           await this.services.api.submitNonce(view.id, pairing.nonce);
         } catch (e) {
+          pairing.free(); // never used: this tab didn't get to answer
           if (!isOutOfOrder(e)) throw e;
           // Another tab of this device already sent its nonce and owns the approval; it is not ours to cancel.
           this.set({ phase: "elsewhere" });
@@ -330,12 +368,16 @@ export class DeviceController extends Controller<DeviceState> {
         return false;
       }
       if (this.state.phase === "joined" && view.approver_nonce) {
-        this.set({ phase: "compare", sas: this.pairing!.sas(view) });
+        if (!this.pairing) return false;
+        this.set({ phase: "compare", sas: this.pairing.sas(view) });
         return false;
       }
       if (this.state.phase === "finishing" && view.signature && this.pairing) {
         const pairing = this.pairing;
-        const code = await this.services.engine.run(this.session, (e) => e.finishApproval(pairing, view, this.typed, nowSecs(this.services)));
+        const code = await this.services.engine.run(this.session, (e) => {
+          if (this.ended || this.disposed) throw new Error("cancelled: the approval was closed");
+          return e.finishApproval(pairing, view, this.typed, nowSecs(this.services));
+        });
         this.finished = true;
         await this.services.api.submitCode(view.id, { code });
         // The planner opens on "Continue", so the person sees that this device is trusted.
@@ -345,7 +387,7 @@ export class DeviceController extends Controller<DeviceState> {
       return false;
     } catch (e) {
       if (view) this.dead.add(view.id);
-      await this.fail(e);
+      await this.fail(e, this.state.phase === "finishing");
       return true;
     }
   }
@@ -374,7 +416,7 @@ export class DeviceController extends Controller<DeviceState> {
   /** After a close, waits for a new approval. */
   startAgain(): void {
     this.approvalId = null;
-    this.pairing = null;
+    this.release();
     this.typed = undefined;
     this.budget = 0;
     this.finished = false;
@@ -383,21 +425,22 @@ export class DeviceController extends Controller<DeviceState> {
     void this.run();
   }
 
-  private async close(reason: CloseReason, tellServer = true): Promise<void> {
+  private async close(reason: CloseReason, tellServer = true, afterComparison = false): Promise<void> {
     this.ended = true;
     const id = this.approvalId;
     if (id) {
       this.dead.add(id);
       if (tellServer) await this.services.api.cancelApproval(id).catch(() => undefined);
     }
-    this.set({ phase: "closed", reason, message: REASONS[reason] }, true);
+    this.set({ phase: "closed", reason, message: reason === "mismatch" && afterComparison ? DIGITS_MISMATCH : REASONS[reason] }, true);
   }
 
-  private async fail(error: unknown): Promise<void> {
+  private async fail(error: unknown, afterComparison: boolean): Promise<void> {
     const text = error instanceof Error ? error.message : "";
-    if (error instanceof ApiFailure && error.code === "wrong_code") return this.close("mismatch");
-    if (/^(commitment_mismatch|wrong_code|invalid_signature):/.test(text)) return this.close("mismatch");
-    if (/^approval_expired:/.test(text)) return this.close("expired");
+    const mismatch = () => this.close("mismatch", true, afterComparison);
+    if (error instanceof ApiFailure && error.code === "wrong_code") return mismatch();
+    // The module has one code for every disagreement: the digits, a nonce against its commitment, the signature.
+    if (/^mismatch:/.test(text)) return mismatch();
     if (isGone(error)) return this.close("closed", false);
     return this.close("failed");
   }

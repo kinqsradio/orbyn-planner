@@ -46,8 +46,15 @@ export const fakeVerifierFor = (password: string) => passwordTag(utf8(password))
 
 let counter = 0;
 
+/** How many times each kind of object was released, so a test can see that nothing is left to the module. */
+export const fakeFreed = { keys: 0, engine: 0, pairing: 0 };
+
 class FakeDeviceKeys implements DeviceKeys {
   constructor(private readonly signing: Uint8Array, private readonly agreement: Uint8Array) {}
+
+  free() {
+    fakeFreed.keys += 1;
+  }
 
   export(wrapSecret: Uint8Array) {
     return fakeSeal(wrapSecret, "keys", concat(this.signing, this.agreement));
@@ -135,6 +142,8 @@ export class FakeAuthCrypto implements AuthCrypto {
  * secret, so a test can check that what is stored is sealed. The real one is XChaCha20-Poly1305 in the module.
  */
 function keystream(secret: Uint8Array, purpose: string, n: number): Uint8Array {
+  // The real module refuses a wrapping secret under 32 bytes.
+  if (secret.length < 32) throw new Error("invalid_wrap_secret: the wrapping secret must be 32 bytes or more");
   const out = new Uint8Array(n);
   for (let i = 0; i < n; i += 32) out.set(fakeDigest(secret, utf8(purpose), utf8(String(i))).slice(0, Math.min(32, n - i)), i);
   return out;
@@ -163,6 +172,9 @@ function fakeApprovals(keys: DeviceKeys, accountId: string, deviceId: string, in
   let counted = initial.counted;
   const pinned = new Set<string>(initial.pinned);
   return {
+    free() {
+      fakeFreed.engine += 1;
+    },
     snapshot(wrapSecret) {
       const state = { accountId, deviceId, signing: keys.signingKey(), pinned: [...pinned], counted };
       return fakeSeal(wrapSecret, "snapshot", utf8(JSON.stringify(state)));
@@ -198,6 +210,7 @@ function fakeApprovals(keys: DeviceKeys, accountId: string, deviceId: string, in
       const rA = random32();
       const state = { parts, pairing, rA, rD: undefined as Uint8Array | undefined, used: false };
       const session: ApproverPairing = {
+        free: () => void (fakeFreed.pairing += 1),
         createRequest: { approval_id: parts.approvalId, device_id: target.id, created_at: nowSecs, commitment: encodeBytes(fakeCommitment(pairing, rA)) },
         deviceFingerprint: () => {
           const d = fakeDigest(utf8("fingerprint"), decodeBytes(target.signing_key), decodeBytes(target.agreement_key));
@@ -205,9 +218,9 @@ function fakeApprovals(keys: DeviceKeys, accountId: string, deviceId: string, in
         },
         reveal(view) {
           if (view.device_signing_key !== parts.deviceSigning || view.device_agreement_key !== parts.deviceAgreement || view.device_id !== parts.deviceId || view.id !== parts.approvalId) {
-            throw new Error("keys_changed: the server shows other keys for the new device than this device started with");
+            throw new Error("mismatch: the answer does not match the upload"); // the real module: one code for every disagreement
           }
-          if (!view.device_nonce) throw new Error("approval_out_of_order: the new device has not sent its nonce");
+          if (!view.device_nonce) throw new Error("mismatch: the answer does not match the upload");
           state.rD = decodeBytes(view.device_nonce);
           return { nonce: encodeBytes(state.rA) };
         },
@@ -219,23 +232,25 @@ function fakeApprovals(keys: DeviceKeys, accountId: string, deviceId: string, in
     confirmApproval(session) {
       const state = approver.get(session);
       if (!state || state.used) throw new Error("already_finished: this approval was used");
-      if (!state.rD) throw new Error("approval_out_of_order: nothing was revealed yet");
+      const rD = state.rD;
+      if (!rD) throw new Error("mismatch: the answer does not match the upload"); // nothing was revealed yet
       state.used = true;
       return {
-        signature: encodeBytes(keys.sign(APPROVAL_CONTEXT, confirmMessage(state.pairing, state.rA, state.rD))),
+        signature: encodeBytes(keys.sign(APPROVAL_CONTEXT, confirmMessage(state.pairing, state.rA, rD))),
         endorsement: encodeBytes(keys.sign("orbyn/approval-endorsement/v2", state.pairing)),
       };
     },
     joinApproval(view, nowSecs) {
-      if (nowSecs - view.created_at > ten) throw new Error("approval_expired: this approval is older than ten minutes");
+      if (nowSecs - view.created_at > ten) throw new Error("mismatch: the answer does not match the upload");
       const pairing = pairingBytes(partsOfView(accountId, view));
       const rD = random32();
       const session: DevicePairing = {
+        free: () => void (fakeFreed.pairing += 1),
         nonce: { nonce: encodeBytes(rD) },
         sas(v) {
-          if (!v.approver_nonce) throw new Error("approval_out_of_order: the approver has not revealed yet");
+          if (!v.approver_nonce) throw new Error("mismatch: the answer does not match the upload");
           const rA = decodeBytes(v.approver_nonce);
-          if (encodeBytes(fakeCommitment(pairing, rA)) !== v.commitment) throw new Error("commitment_mismatch: the approver's nonce does not match its commitment");
+          if (encodeBytes(fakeCommitment(pairing, rA)) !== v.commitment) throw new Error("mismatch: the answer does not match the upload");
           return fakeSas(pairing, rA, rD);
         },
       };
@@ -245,17 +260,17 @@ function fakeApprovals(keys: DeviceKeys, accountId: string, deviceId: string, in
     finishApproval(session, view, typed, nowSecs) {
       const state = device.get(session);
       if (!state || state.used) throw new Error("already_finished: this approval was used");
-      if (!view.signature || !view.approver_nonce) throw new Error("approval_not_confirmed: the approver has not confirmed yet");
+      if (!view.signature || !view.approver_nonce) throw new Error("mismatch: the answer does not match the upload");
       pinned.add(view.approver_id);
       state.used = true;
-      if (nowSecs - view.created_at > ten) throw new Error("approval_expired: this approval is older than ten minutes");
+      if (nowSecs - view.created_at > ten) throw new Error("mismatch: the answer does not match the upload");
       const rA = decodeBytes(view.approver_nonce);
-      if (encodeBytes(fakeCommitment(state.pairing, rA)) !== view.commitment) throw new Error("commitment_mismatch: the approver's nonce does not match its commitment");
+      if (encodeBytes(fakeCommitment(state.pairing, rA)) !== view.commitment) throw new Error("mismatch: the answer does not match the upload");
       if (!fakeVerify(decodeBytes(state.approverSigning), APPROVAL_CONTEXT, confirmMessage(state.pairing, rA, state.rD), decodeBytes(view.signature))) {
-        throw new Error("invalid_signature: the approver's signature is not valid");
+        throw new Error("mismatch: the answer does not match the upload");
       }
       const sas = fakeSas(state.pairing, rA, state.rD);
-      if (typed !== undefined && typed.replace(/\s+/g, "") !== sas) throw new Error("wrong_code: the digits typed are not the ones this device computed");
+      if (typed !== undefined && typed.replace(/\s+/g, "") !== sas) throw new Error("mismatch: the answer does not match the upload");
       return sas;
     },
   };

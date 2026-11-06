@@ -1,4 +1,4 @@
-import type { ApprovalEngine, AuthCrypto } from "../api/authCrypto";
+import type { ApprovalEngine, AuthCrypto, DeviceKeys } from "../api/authCrypto";
 import type { KeyStore, StoredSession } from "../api/keyStore";
 import { ApiFailure } from "../api/auth";
 
@@ -130,8 +130,10 @@ export function createEngineHost(deps: {
         const saved = await deps.keys.loadKeys();
         if (!saved) throw new ApiFailure("device_not_trusted", 403, "This device has no keys, so it can’t take part in an approval.");
         const wrap = await deps.wrapSecret();
+        let keys: DeviceKeys | null = null;
+        let engine: ApprovalEngine | null = null;
         try {
-          const keys = crypto.deviceKeys.import(saved, wrap);
+          keys = crypto.deviceKeys.import(saved, wrap);
           const identity = await deps.keys.loadIdentity();
           let snapshot = await deps.keys.loadSnapshot();
           // State made for another account or device is not this session's: it must not speak for it.
@@ -142,7 +144,6 @@ export function createEngineHost(deps: {
             snapshot = null;
             await notice.announce();
           }
-          let engine: ApprovalEngine | null = null;
           if (snapshot) {
             try {
               engine = crypto.engine.restore(keys, snapshot, wrap, deps.now());
@@ -154,12 +155,13 @@ export function createEngineHost(deps: {
             }
           }
           engine ??= crypto.engine.create(keys, session.accountId, session.deviceId);
+          const running = engine;
 
           let result: Awaited<ReturnType<typeof fn>> | undefined;
           let failure: unknown;
           let failed = false;
           try {
-            result = await fn(engine);
+            result = await fn(running);
           } catch (e) {
             failed = true;
             failure = e;
@@ -167,7 +169,7 @@ export function createEngineHost(deps: {
           // Saved also after a refusal: counting a list or pinning a device is not undone by one. A
           // failed save is an error of its own unless the action already failed.
           try {
-            await deps.keys.saveSnapshot(engine.snapshot(wrap));
+            await deps.keys.saveSnapshot(running.snapshot(wrap));
             // Keep the email the keys were made for: without it the next sign-in to this same account
             // would look like another account's and ask to replace the person's own keys.
             const email = identity?.accountId === session.accountId ? identity.email : undefined;
@@ -178,6 +180,9 @@ export function createEngineHost(deps: {
           if (failed) throw failure;
           return result as never;
         } finally {
+          // The module's memory goes back, whatever happened; the state was saved (or the save failed) above.
+          engine?.free();
+          keys?.free();
           wrap.fill(0);
         }
       }),

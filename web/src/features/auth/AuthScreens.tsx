@@ -3,11 +3,13 @@ import { ApiFailure } from "../../api/auth";
 import { SignInUnavailable } from "../../api/authCrypto";
 import { Icon } from "../../components/Icon";
 import { KeysForAnotherAccount, signIn, signUp } from "../../auth/flows";
+import { cryptoLoad } from "../../api/realCrypto";
+import { CryptoProblem, MODULE_LOAD_FAILED } from "./CryptoProblem";
 import { useAuth, type AuthScreen } from "../../auth/AuthProvider";
 
 /** A readable line for whatever went wrong. */
 export function describeError(error: unknown): string {
-  if (error instanceof SignInUnavailable) return error.message + ".";
+  if (error instanceof SignInUnavailable) return cryptoLoad.get() === "failed" ? `${MODULE_LOAD_FAILED}.` : error.message + ".";
   if (error instanceof ApiFailure) return error.message;
   return "Something went wrong. Try again.";
 }
@@ -65,6 +67,7 @@ function SignUp({ go }: { go: (s: AuthScreen) => void }) {
         <input id="su-password" className="field" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
       </div>
       <p className="t3 small">Your password never leaves this device. Only a sealed proof of it is sent.</p>
+      <CryptoProblem />
       {error && <p className="err" role="alert">{error}</p>}
       <button type="submit" className="btn" disabled={busy || !email.trim() || password.length < 8}>
         {busy ? "Creating your account…" : "Create account"}
@@ -129,6 +132,7 @@ function SignIn({ go }: { go: (s: AuthScreen) => void }) {
         <label htmlFor="si-password">Password</label>
         <input id="si-password" className="field" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
       </div>
+      <CryptoProblem />
       {error && <p className="err" role="alert">{error}</p>}
       <button type="submit" className="btn" disabled={busy || !email.trim() || !password}>
         {busy ? "Signing in…" : "Sign in"}

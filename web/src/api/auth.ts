@@ -25,7 +25,7 @@ const MESSAGES: Record<string, string> = {
   login_failed: "That email and password don’t match.",
   device_not_trusted: "This device hasn’t been approved yet. Approve it from a device you already trust.",
   last_trusted_device: "This is your last trusted device. Approve another device first, then remove this one.",
-  approval_expired: "That approval ran out of time or was closed. Start again from a trusted device.",
+  approval_expired: "That approval ran out of time or was closed. Start again from a trusted device. If this keeps happening, check that this device’s clock is right.",
   approval_out_of_order: "That approval isn’t at that step. Start again.",
   approval_not_confirmed: "The trusted device hasn’t confirmed yet.",
   invalid_commitment: "The two devices didn’t agree, so the approval was closed. Start again.",

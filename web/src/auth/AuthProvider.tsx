@@ -58,7 +58,7 @@ export function AuthProvider({ services, children }: { services: AuthServices | 
   useEffect(() => {
     if (!services) return;
     let live = true;
-    void services.tokens.load(services.now()).then(() => live && setLoaded(true));
+    void services.ready.then(() => services.tokens.load(services.now())).then(() => live && setLoaded(true));
     return () => {
       live = false;
     };

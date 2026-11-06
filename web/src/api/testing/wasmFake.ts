@@ -4,14 +4,15 @@ import type { OrbynWasmModule } from "../WasmAuthCrypto";
 /** A stand-in for the orbyn-wasm module that only records which function was called (tests). */
 export function WasmAuthCrypto_forTests(): { module: OrbynWasmModule; log: string[] } {
   const log: string[] = [];
-  const keys = { signingKey: () => "signing" } as unknown as DeviceKeys;
+  const keys = { signingKey: () => "signing", free: () => void log.push("DeviceKeys.free") } as unknown as DeviceKeys;
   const engine = () => ({
+    free: () => void log.push("SyncEngine.free"),
     snapshot: () => (log.push("snapshot"), new Uint8Array([1])),
     verifyDevices: () => (log.push("verifyDevices"), '["a"]'),
     signRemoval: () => (log.push("signRemoval"), '{"sequence":1,"signature":"s"}'),
-    startApproval: () => (log.push("startApproval"), { createJson: "{}", deviceFingerprint: () => "fp", reveal: () => (log.push("reveal"), '{"nonce":"n"}'), sas: () => "123456" }),
+    startApproval: () => (log.push("startApproval"), { free: () => void log.push("ApproverSession.free"), createJson: "{}", deviceFingerprint: () => "fp", reveal: () => (log.push("reveal"), '{"nonce":"n"}'), sas: () => "123456" }),
     confirmApproval: () => (log.push("confirmApproval"), '{"signature":"s"}'),
-    joinApproval: () => (log.push("joinApproval"), { nonceJson: '{"nonce":"d"}', sas: () => "123456" }),
+    joinApproval: () => (log.push("joinApproval"), { free: () => void log.push("DeviceSession.free"), nonceJson: '{"nonce":"d"}', sas: () => "123456" }),
     finishApproval: () => (log.push("finishApproval"), "123456"),
   });
   const module: OrbynWasmModule = {

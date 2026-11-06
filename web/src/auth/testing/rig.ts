@@ -20,6 +20,8 @@ export interface Rig {
   tabOfD: () => Promise<AuthServices>;
   fail: { save: boolean };
   delay: { devices: number };
+  /** Replace what the new device is shown of the approver's nonce (the server lying), when set. */
+  tamper: { approverNonce: string | null };
 }
 
 export async function createRig(options: { newDeviceState?: "pending" | "trusted"; slowDevices?: number } = {}): Promise<Rig> {
@@ -46,6 +48,7 @@ export async function createRig(options: { newDeviceState?: "pending" | "trusted
   const engine = createMockEngine();
   const fail = { save: false };
   const delay = { devices: options.slowDevices ?? 0 };
+  const tamper = { approverNonce: null as string | null };
 
   const keyStore = (): KeyStore => {
     const k = createMemoryKeyStore();
@@ -69,7 +72,13 @@ export async function createRig(options: { newDeviceState?: "pending" | "trusted
       wrapSecret: async () => wrapOf.get(keys)!.slice(),
       fetch: (async (url: string, init?: RequestInit) => {
         if (delay.devices && /\/v1\/devices$/.test(String(url)) && (init?.method ?? "GET") === "GET") await new Promise((r) => setTimeout(r, delay.devices));
-        return engine.fetch(url, init);
+        const response = await engine.fetch(url, init);
+        if (tamper.approverNonce && /\/v1\/devices\/current$/.test(String(url))) {
+          const body = (await response.json()) as { approval: { approver_nonce: string | null } | null };
+          if (body.approval?.approver_nonce) body.approval.approver_nonce = tamper.approverNonce;
+          return new Response(JSON.stringify(body), { status: response.status, headers: { "content-type": "application/json" } });
+        }
+        return response;
       }) as typeof fetch,
     });
   };
@@ -95,7 +104,7 @@ export async function createRig(options: { newDeviceState?: "pending" | "trusted
   engine.accounts.set("a@b.co", { id: ACCOUNT, email: "a@b.co", verifier: new Uint8Array(32), devices: [a.device, d.device] });
   engine.sessions.set("tok-a", { accountId: ACCOUNT, deviceId: ID_A });
   engine.sessions.set("tok-d", { accountId: ACCOUNT, deviceId: ID_D });
-  return { engine, counts, a, d, fail, delay, tabOfD: async () => {
+  return { engine, counts, a, d, fail, delay, tamper, tabOfD: async () => {
       const tab = build(d.keys);
       await tab.tokens.set(d.session);
       return tab;

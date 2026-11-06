@@ -33,7 +33,9 @@ test("the CSP allows itself and the engine and nothing else", () => {
   assert.match(csp, /frame-src 'none'/);
   assert.doesNotMatch(csp, /\*/);
   assert.doesNotMatch(csp, /localhost:5173/);
-  assert.doesNotMatch(csp, /script-src[^;]*unsafe/);
+  // WebAssembly may be compiled; eval and inline scripts may not.
+  assert.match(csp, /script-src 'self' 'wasm-unsafe-eval'(;|$)/);
+  assert.doesNotMatch(csp.split("; ").find((d) => d.startsWith("script-src")), /'unsafe-eval'|'unsafe-inline'/);
 });
 
 test("only the development CSP knows the dev server", () => {
