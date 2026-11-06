@@ -1,7 +1,7 @@
 import { IDBFactory } from "fake-indexeddb";
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it } from "vitest";
-import { createIdbKeyStore, createMemoryKeyStore } from "../api/keyStore";
+import { createIdbKeyStore, createMemoryKeyStore, emptySyncState } from "../api/keyStore";
 import { FakeAuthCrypto, fakeFreed } from "../api/testing/FakeAuthCrypto";
 import { createMockEngine } from "../api/testing/MockEngine";
 import { signIn, signUp } from "./flows";
@@ -70,6 +70,43 @@ describe("a join that finishes after the screen has gone", () => {
   });
 });
 
+// The approving device may close the approval itself; only this device's cancels are counted.
+const byDevice = (r: Parameters<typeof calls>[0]) => calls(r, "/cancel").filter((c) => c.authorization === "Bearer tok-d");
+
+describe("a join whose screen goes while the nonce is in flight", () => {
+  it("is freed and the approval is cancelled, so it doesn't stay open until it expires", async () => {
+    const r = await createRig();
+    const approver = new ApproverController(r.a.services, r.a.session, r.d.device);
+    void approver.start();
+    await until(() => approver.getState().phase === "waiting");
+    r.delay.nonce = 300; // the nonce takes a while to get there
+    const device = new DeviceController(r.d.services, r.d.session);
+    void device.run();
+    await new Promise((res) => setTimeout(res, 40)); // the join is made and the nonce is on its way
+    const before = fakeFreed.pairing;
+    device.dispose(); // the screen goes while the nonce is out
+    await new Promise((res) => setTimeout(res, 500));
+    expect(fakeFreed.pairing).toBeGreaterThan(before); // the join's session was given back
+    expect(byDevice(r)).toHaveLength(1); // best effort, and only once
+    approver.dispose();
+  });
+
+  it("an attempt that had already ended has already cancelled: no second cancel", async () => {
+    const r = await createRig();
+    const approver = new ApproverController(r.a.services, r.a.session, r.d.device);
+    void approver.start();
+    await until(() => approver.getState().phase === "waiting");
+    r.delay.nonce = 300;
+    const device = new DeviceController(r.d.services, r.d.session);
+    void device.run();
+    await new Promise((res) => setTimeout(res, 40)); // the join is made and the nonce is on its way
+    await device.cancel(); // ends the attempt, and cancels
+    await new Promise((res) => setTimeout(res, 500));
+    expect(byDevice(r)).toHaveLength(1);
+    approver.dispose();
+  });
+});
+
 describe("the signature is checked inside the lock", () => {
   it("a cancel that comes while the confirmation waits for the lock stops it before it signs", async () => {
     const r = await createRig();
@@ -104,6 +141,7 @@ describe("replacing a device's keys is one transaction", () => {
     await store.saveSnapshot(new Uint8Array([2]));
     await store.saveWrapKey(wrap);
     await store.quarantineSnapshot(new Uint8Array([3]));
+    await store.saveSyncState({ ...emptySyncState(), zones: ["list:old"], lastSyncedAt: "2026-11-07T10:00:00Z" });
     await store.saveSession({ token: "t", accountId: "old", deviceId: "d", deviceState: "trusted", expiresAt: "2030-01-01T00:00:00Z", email: "old@example.com", name: "" });
     return { store, wrap };
   }
@@ -117,7 +155,15 @@ describe("replacing a device's keys is one transaction", () => {
     expect(await store.loadWrapKey()).not.toBeNull();
     expect(await store.loadSnapshot()).toBeNull();
     expect(await store.loadQuarantine()).toEqual([]);
+    expect(await store.loadSyncState()).toBeNull(); // the other account's sync state must not carry over
     expect((await store.loadSession())?.token).toBe("t");
+  });
+
+  it("the in-memory store clears the sync state too", async () => {
+    const store = createMemoryKeyStore();
+    await store.saveSyncState({ ...emptySyncState(), zones: ["list:old"] });
+    await store.replaceDevice({ keys: new Uint8Array([1]), wrapKey: null, identity: { accountId: "n", deviceId: "d", email: "n@example.com" } });
+    expect(await store.loadSyncState()).toBeNull();
   });
 
   it("a failure partway leaves the old device exactly as it was", async () => {
@@ -130,6 +176,7 @@ describe("replacing a device's keys is one transaction", () => {
     expect(Array.from((await store.loadSnapshot())!)).toEqual([2]);
     expect(await store.loadWrapKey()).not.toBeNull();
     expect((await store.loadQuarantine()).map((b) => Array.from(b))).toEqual([[3]]);
+    expect((await store.loadSyncState())?.zones).toEqual(["list:old"]); // and the sync state stays too
   });
 
   it("signing in to another account replaces the keys through it, and a store that fails leaves the old keys", async () => {

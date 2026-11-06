@@ -670,6 +670,10 @@ describe("signing out", () => {
     await openAccount();
     await waitFor(async () => expect(await auth.keys.loadSnapshot()).not.toBeNull()); // opening Account made the engine's state
     await userEvent.click(await screen.findByRole("button", { name: "Sign out" }));
+    const ask = screen.getByRole("dialog", { name: "Sign out" });
+    expect(ask).toHaveTextContent("Remove this account’s planner from this browser?");
+    expect(within(ask).getByRole("button", { name: "Remove" })).toHaveFocus(); // the default
+    await userEvent.click(within(ask).getByRole("button", { name: "Keep on this browser" }));
     expect(await screen.findByRole("heading", { name: /Your tasks and calendar/ })).toBeInTheDocument();
     const out = engine.calls.find((c) => c.method === "DELETE" && c.path === "/v1/sessions/current")!;
     expect(out.authorization).toMatch(/^Bearer token-/);
@@ -701,6 +705,7 @@ describe("signing out", () => {
       throw new Error("blocked");
     };
     await userEvent.click(await screen.findByRole("button", { name: "Sign out" }));
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Sign out" })).getByRole("button", { name: "Remove" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("saved keys couldn’t be removed");
     expect(auth.tokens.token()).toBeNull();
   });

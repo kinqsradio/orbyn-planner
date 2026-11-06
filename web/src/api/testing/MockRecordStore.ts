@@ -100,6 +100,23 @@ export function recordStoreRoute(ctx: RecordStoreContext, method: string, rawPat
     return json(200, { zone: z.name, token: token(z), deleted: z.deleted, created_at: z.createdAt });
   }
 
+  if (m && method === "DELETE") {
+    const z = records.zones.get(decodeURIComponent(m[1]!));
+    if (!z) return fail(404, "zone_not_found", "No such zone.");
+    // Every live record becomes a tombstone with a new version (carrying the deleting device's proof), and the zone is marked deleted.
+    const proof = (body as { proof?: string } | undefined)?.proof;
+    for (const [id, record] of z.records) {
+      if (record.deleted) continue;
+      z.sequence += 1;
+      z.records.set(id, { ...record, version: z.sequence, ciphertext: null, wrapped_key: null, deleted: true, author_device_id: ctx.deviceId, ...(proof ? { delete_proof: proof } : {}) });
+      z.changedAt.set(id, z.sequence);
+    }
+    z.sequence += 1;
+    z.deleted = true;
+    ctx.notify?.(z.name, token(z), ctx.deviceId);
+    return json(200, { token: token(z) });
+  }
+
   m = /^\/v1\/zones\/([^/]+)\/changes$/.exec(path!);
   if (m) {
     const z = records.zones.get(decodeURIComponent(m[1]!));

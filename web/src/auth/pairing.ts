@@ -371,6 +371,8 @@ export class DeviceController extends Controller<DeviceState> {
         if (this.disposed || this.ended) {
           // Gone while the nonce was in flight: freed, not assigned (a released controller never takes a session back).
           pairing.free();
+          // The nonce is posted, so the approval would stay open until it expires. An ended attempt has already cancelled it; one that was only disposed has not.
+          if (!this.ended) void this.services.api.cancelApproval(view.id).catch(() => undefined);
           return true;
         }
         this.pairing = pairing;

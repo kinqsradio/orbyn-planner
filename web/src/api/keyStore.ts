@@ -261,6 +261,7 @@ export function createMemoryKeyStore(): KeyStore {
       snapshot = null;
       wrap = next.wrapKey;
       identity = next.identity;
+      sync = null;
       quarantined.length = 0;
     },
     clearDevice: async () => {

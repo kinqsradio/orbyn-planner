@@ -3,7 +3,7 @@ import { engineUrl } from "../api/engine";
 import type { AuthServices } from "../auth/services";
 import type { SyncServerMessage } from "../generated/SyncServerMessage";
 import type { PlannerStore } from "../store/types";
-import { runCycle, SyncError, type CycleReport } from "./cycle";
+import { Aborted, runCycle, SyncError, type CycleReport } from "./cycle";
 
 export type SyncPhase =
   /** Not syncing: signed out, an untrusted device, or no engine. */
@@ -25,6 +25,14 @@ export interface SyncState {
   quarantined: number;
   /** Zones with changes waiting for a key from another device. */
   waitingForKeys: string[];
+  /** Zones whose keys couldn't be sent to the other devices yet, so nothing is sent to them. */
+  keysPending: string[];
+  /** Lists or calendars deleted on another device while this one had changes for them: those changes were dropped. */
+  dropped: { zone: string; records: number }[];
+  /** Changes that can't be sent (too large). */
+  failed: { type: string; id: string; reason: string }[];
+  /** Zones skipped for a while after a refusal. */
+  skipped: string[];
   error: string | null;
   /** Whether this tab holds the sync (the live socket and the passes), or another tab does. */
   leader: boolean;
@@ -32,7 +40,7 @@ export interface SyncState {
   live: boolean;
 }
 
-const OFF: SyncState = { phase: "off", devices: 0, lastSyncedAt: null, quarantined: 0, waitingForKeys: [], error: null, leader: false, live: false };
+const OFF: SyncState = { phase: "off", devices: 0, lastSyncedAt: null, quarantined: 0, waitingForKeys: [], keysPending: [], dropped: [], failed: [], skipped: [], error: null, leader: false, live: false };
 
 /** The part of a WebSocket the controller uses. */
 export interface SocketLike {
@@ -79,6 +87,8 @@ export class SyncController {
   private state: SyncState = OFF;
   private listeners = new Set<() => void>();
   private running = false;
+  /** The pass in flight: stopping flips it, and the pass then changes and saves nothing. */
+  private signal = { aborted: false };
   private again = false;
   private stopped = true;
   private timer: unknown = null;
@@ -117,8 +127,8 @@ export class SyncController {
     for (const l of this.listeners) l();
     if (this.state.leader) {
       try {
-        const { devices, lastSyncedAt, quarantined, phase, waitingForKeys, error } = this.state;
-        this.status?.postMessage({ devices, lastSyncedAt, quarantined, phase, waitingForKeys, error });
+        const { devices, lastSyncedAt, quarantined, phase, waitingForKeys, keysPending, dropped, failed, skipped, error } = this.state;
+        this.status?.postMessage({ devices, lastSyncedAt, quarantined, phase, waitingForKeys, keysPending, dropped, failed, skipped, error });
       } catch {
         // Other tabs just don't hear it.
       }
@@ -155,6 +165,7 @@ export class SyncController {
   /** Stops everything, and gives the lock to another tab. */
   stop(): void {
     this.stopped = true;
+    this.signal.aborted = true;
     this.closeSocket();
     this.clearTimers();
     this.unsubscribeStore?.();
@@ -235,14 +246,29 @@ export class SyncController {
       return;
     }
     this.running = true;
+    const signal = (this.signal = { aborted: false });
     this.update({ phase: "syncing", error: null });
     try {
-      const report: CycleReport = await runCycle(this.services, session, this.store);
+      const report: CycleReport = await runCycle(this.services, session, this.store, undefined, signal);
+      if (signal.aborted || this.stopped) return; // stopped meanwhile (a sign-out): the result is not used
       this.retry = 0;
-      this.update({ phase: "idle", devices: report.devices, lastSyncedAt: new Date(this.services.now()).toISOString(), quarantined: report.quarantined, waitingForKeys: report.waitingForKeys, error: null });
-      if (report.waitingForKeys.length > 0) this.later(this.delays.retryMs[0]); // a key may arrive any moment
+      const dropped = [...this.state.dropped, ...report.dropped];
+      this.update({
+        phase: "idle",
+        devices: report.devices,
+        lastSyncedAt: new Date(this.services.now()).toISOString(),
+        quarantined: report.quarantined,
+        waitingForKeys: report.waitingForKeys,
+        keysPending: report.keysPending,
+        dropped,
+        failed: report.failed,
+        skipped: report.skipped,
+        error: null,
+      });
+      // A key may arrive any moment, a send may succeed, a skipped zone may be due: look again soon.
+      if (report.waitingForKeys.length > 0 || report.keysPending.length > 0) this.later(this.delays.retryMs[0]);
     } catch (error) {
-      this.failed(error);
+      if (!(error instanceof Aborted) && !signal.aborted && !this.stopped) this.failed(error);
     } finally {
       this.running = false;
     }
@@ -253,6 +279,7 @@ export class SyncController {
   }
 
   private failed(error: unknown): void {
+    if (this.stopped) return;
     if (error instanceof ApiFailure && error.status === 401) {
       this.update({ phase: "off", leader: this.state.leader });
       return;

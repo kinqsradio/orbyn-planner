@@ -48,6 +48,8 @@ export interface Persistence {
    */
   acknowledge(sent: Acknowledged[]): Promise<ApplyResult>;
   setHandlers(handlers: PersistenceHandlers): void;
+  /** Lets go of the storage connection (none to let go of in memory). */
+  close?(): void;
 }
 
 const STORE_OF: Record<RecordType, "tasks" | "lists" | "events" | "calendars" | "projects"> = { task: "tasks", list: "lists", event: "events", calendar: "calendars", project: "projects" };
@@ -135,7 +137,8 @@ export class MemoryPersistence implements Persistence {
   }
 }
 
-const DB_NAME = "orbyn-planner";
+/** The planner kept on this device alone; each account has a database of its own (see `planners.ts`). */
+export const DEVICE_DB = "orbyn-planner";
 const DB_VERSION = 4;
 
 type Rec = AnyRecord & Record<string, unknown>;
@@ -144,6 +147,9 @@ const ALL_STORES = ["tasks", "lists", "events", "calendars", "projects", "outbox
 /** One IndexedDB object store per record type, and an outbox keyed by an auto-incrementing number. */
 export class IdbPersistence implements Persistence {
   readonly durable = true;
+
+  constructor(private readonly dbName: string = DEVICE_DB) {}
+
   private db: Promise<IDBDatabase> | null = null;
   private handlers: PersistenceHandlers = {};
 
@@ -151,9 +157,16 @@ export class IdbPersistence implements Persistence {
     this.handlers = handlers;
   }
 
+  /** Lets go of the connection, so the database can be deleted. */
+  close(): void {
+    const pending = this.db;
+    this.db = null;
+    void pending?.then((db) => db.close(), () => undefined);
+  }
+
   private open(): Promise<IDBDatabase> {
     this.db ??= new Promise((resolve, reject) => {
-      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      const req = indexedDB.open(this.dbName, DB_VERSION);
       req.onupgradeneeded = (event) => {
         const db = req.result;
         for (const name of ["tasks", "lists", "events", "calendars", "projects"]) {
@@ -310,6 +323,6 @@ export class IdbPersistence implements Persistence {
 }
 
 /** IndexedDB where it exists, else memory that says so. */
-export function defaultPersistence(): Persistence {
-  return typeof indexedDB === "undefined" ? new MemoryPersistence({ volatile: true }) : new IdbPersistence();
+export function defaultPersistence(dbName: string = DEVICE_DB): Persistence {
+  return typeof indexedDB === "undefined" ? new MemoryPersistence({ volatile: true }) : new IdbPersistence(dbName);
 }

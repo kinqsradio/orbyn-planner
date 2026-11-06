@@ -56,17 +56,48 @@ export function zoneOf(type: RecordType, record: { id: string; listId?: string; 
   }
 }
 
+/** A zone's kind and the id of the list, project or calendar it belongs to. */
+export function zoneParts(zone: string): { kind: string; owner: string } {
+  const at = zone.indexOf(":");
+  return at < 0 ? { kind: zone, owner: "" } : { kind: zone.slice(0, at), owner: zone.slice(at + 1) };
+}
+
 /**
  * The record type of an id in a zone, which the engine doesn't return: the zone's own record (its id is
  * the zone's) is the list, project or calendar, and anything else in a list zone is a task and in a
  * calendar zone an event. The settings zone holds no planner records yet.
  */
 export function typeIn(zone: string, id: string): RecordType | null {
-  const [kind, owner] = [zone.slice(0, zone.indexOf(":")), zone.slice(zone.indexOf(":") + 1)];
+  const { kind, owner } = zoneParts(zone);
   if (kind === "list") return id === owner ? "list" : "task";
   if (kind === "calendar") return id === owner ? "calendar" : "event";
   if (kind === "project") return id === owner ? "project" : null;
   return null;
+}
+
+/**
+ * Whether a record that arrived may be applied, checked strictly because the type is only inferred (the
+ * engine returns none, and the server's `record_type` is not authenticated):
+ *  - a list zone holds only its list (the record whose id is the zone's) and tasks of that list;
+ *  - a calendar zone only its calendar and events of that calendar;
+ *  - a project zone only its project;
+ *  - an id equal to the zone owner's is only for the owner kind;
+ *  - the server's record type, when there is one, must be the inferred one;
+ *  - a task's `listId` and an event's `calendarId` must be the zone's owner.
+ * A record that fails any of these is rejected and quarantined, never applied.
+ *
+ * TODO(engine#17): the engine will return the authenticated record type; use it here instead of inferring.
+ */
+export function acceptable(zone: string, id: string, fields: Record<string, unknown> | null, serverType?: string): RecordType | null {
+  const type = typeIn(zone, id);
+  if (!type) return null;
+  if (serverType !== undefined && serverType !== type) return null;
+  const { owner } = zoneParts(zone);
+  if (fields) {
+    if (type === "task" && fields.listId !== owner) return null;
+    if (type === "event" && fields.calendarId !== owner) return null;
+  }
+  return type;
 }
 
 /** Stamps every field of an edit with one stamp. */

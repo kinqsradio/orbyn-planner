@@ -1,7 +1,7 @@
 import { repeatFields } from "./eventRecord";
 import { applyFields, sectionFields, storedOf, viewOf } from "./records";
 import { coalesce, refKey, type AnyRecord, type Patch, type Ref } from "./outbox";
-import { defaultPersistence, type Acknowledged, type ApplyResult, type Persistence } from "./persistence";
+import { DEVICE_DB, defaultPersistence, type Acknowledged, type ApplyResult, type Persistence } from "./persistence";
 import { inOrder, keyBetween } from "./order";
 import { newSeries, validate } from "./repeat";
 import { completeRepeating } from "./taskRepeat";
@@ -43,6 +43,8 @@ const KEY_OF = { task: "tasks", list: "lists", event: "events", calendar: "calen
 
 export interface LocalStoreOptions {
   persistence?: Persistence;
+  /** The IndexedDB database to open when no `persistence` is given: the device-only planner by default, an account's own otherwise. */
+  dbName?: string;
   now?: () => Date;
   newId?: () => string;
   /** Called when another tab upgrades the database and this one must start over. Defaults to a page reload. */
@@ -75,7 +77,7 @@ export class LocalStore implements PlannerStore {
   private readonly newId: () => string;
 
   constructor(options: LocalStoreOptions = {}) {
-    this.persistence = options.persistence ?? defaultPersistence();
+    this.persistence = options.persistence ?? defaultPersistence(options.dbName);
     this.now = options.now ?? (() => new Date());
     this.newId = options.newId ?? (() => crypto.randomUUID());
     this.state = { ...this.state, persistence: this.persistence.durable ? { status: "ok" } : { status: "memory" } };
@@ -89,7 +91,8 @@ export class LocalStore implements PlannerStore {
       onBlocked: () => this.setPersistence({ status: "failed", reason: "Close the other Orbyn Planner tabs to finish updating." }),
     });
     if ((options.broadcast ?? true) && typeof BroadcastChannel !== "undefined") {
-      this.channel = new BroadcastChannel(CHANNEL_NAME);
+      // Tabs on the same database talk; tabs on another account's database never hear this one.
+      this.channel = new BroadcastChannel(options.dbName && options.dbName !== DEVICE_DB ? `${CHANNEL_NAME}:${options.dbName}` : CHANNEL_NAME);
       this.channel.onmessage = (event: MessageEvent<{ tab: string; refs: Ref[] }>) => {
         if (event.data.tab !== this.tab) void this.refresh(event.data.refs);
       };
@@ -113,6 +116,7 @@ export class LocalStore implements PlannerStore {
   close(): void {
     this.channel?.close();
     this.channel = null;
+    this.persistence.close?.();
   }
 
   nowIso(): string {

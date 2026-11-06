@@ -6,7 +6,7 @@ import { SyncProviderForTests } from "../../sync/testing/SyncProviderForTests";
 import { SyncSettings } from "../settings/SyncSettings";
 import { useSyncStatus } from "./SyncLine";
 
-const base: SyncState = { phase: "idle", devices: 2, lastSyncedAt: "2026-11-07T10:00:00Z", quarantined: 0, waitingForKeys: [], error: null, leader: true, live: true };
+const base: SyncState = { phase: "idle", devices: 2, lastSyncedAt: "2026-11-07T10:00:00Z", quarantined: 0, waitingForKeys: [], keysPending: [], dropped: [], failed: [], skipped: [], error: null, leader: true, live: true };
 
 describe("the sync line follows real sync when it runs", () => {
   const status = (sync: SyncState | null, pending = 0) => renderHook(() => useSyncStatus(pending, sync)).result.current.status;

@@ -19,7 +19,7 @@ export interface Rig {
   /** More services over the new device's keys and session: another tab of it. */
   tabOfD: () => Promise<AuthServices>;
   fail: { save: boolean };
-  delay: { devices: number };
+  delay: { devices: number; nonce: number };
   /** Replace what the new device is shown of the approver's nonce (the server lying), when set. */
   tamper: { approverNonce: string | null };
 }
@@ -47,7 +47,7 @@ export async function createRig(options: { newDeviceState?: "pending" | "trusted
   });
   const engine = createMockEngine();
   const fail = { save: false };
-  const delay = { devices: options.slowDevices ?? 0 };
+  const delay = { devices: options.slowDevices ?? 0, nonce: 0 };
   const tamper = { approverNonce: null as string | null };
 
   const keyStore = (): KeyStore => {
@@ -72,6 +72,7 @@ export async function createRig(options: { newDeviceState?: "pending" | "trusted
       wrapSecret: async () => wrapOf.get(keys)!.slice(),
       fetch: (async (url: string, init?: RequestInit) => {
         if (delay.devices && /\/v1\/devices$/.test(String(url)) && (init?.method ?? "GET") === "GET") await new Promise((r) => setTimeout(r, delay.devices));
+        if (delay.nonce && init?.method === "POST" && String(url).endsWith("/nonce")) await new Promise((r) => setTimeout(r, delay.nonce));
         const response = await engine.fetch(url, init);
         if (tamper.approverNonce && /\/v1\/devices\/current$/.test(String(url))) {
           const body = (await response.json()) as { approval: { approver_nonce: string | null } | null };

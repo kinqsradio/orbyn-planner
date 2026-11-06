@@ -27,17 +27,43 @@ export interface SyncRig {
   /** Another store over the same stored data: what a reload of the device shows. */
   reload(d: TestDevice): Promise<LocalStore>;
   /** Makes the network refuse (a thrown fetch) while `down` is true. */
-  network: { down: boolean; /** The next upload reaches the server but its answer is lost. */ loseAnswer: boolean };
+  network: {
+    down: boolean;
+    /** The next upload reaches the server but its answer is lost. */
+    loseAnswer: boolean;
+    /** The key envelopes the server takes are refused (400) while true. */
+    refuseKeys: boolean;
+    /** The next request to make a zone fails as if the connection dropped, after the server got it. */
+    dropZoneMake: boolean;
+    /** Uploads to these zones are refused with this status. */
+    refuseUploads: Map<string, { status: number; code: string }>;
+    /** Milliseconds every request waits, to make a pass long enough to stop. */
+    delayMs: number;
+  };
 }
 
 /** Two trusted devices of one account on the mock server, with the real module and each pinning the other. Tests only. */
 export async function createSyncRig(): Promise<SyncRig> {
   const crypto = realAuthCrypto();
   const clock = { now: Date.UTC(2026, 10, 7, 10, 0, 0) };
-  const network = { down: false, loseAnswer: false };
+  const network = { down: false, loseAnswer: false, refuseKeys: false, dropZoneMake: false, refuseUploads: new Map<string, { status: number; code: string }>(), delayMs: 0 };
   const engine = createMockEngine(() => clock.now);
   const fetchFn = (async (url: string, init?: RequestInit) => {
     if (network.down) throw new TypeError("Failed to fetch");
+    if (network.delayMs) await new Promise((r) => setTimeout(r, network.delayMs));
+    const method = init?.method ?? "GET";
+    if (network.refuseKeys && method === "POST" && String(url).endsWith("/v1/keychain/envelopes")) {
+      return new Response(JSON.stringify({ code: "recipient_not_trusted", message: "No." }), { status: 400, headers: { "content-type": "application/json" } });
+    }
+    if (network.dropZoneMake && method === "PUT" && /\/v1\/zones\//.test(String(url))) {
+      network.dropZoneMake = false;
+      throw new TypeError("Failed to fetch");
+    }
+    if (method === "POST" && /\/v1\/zones\/[^/]+\/changes$/.test(String(url))) {
+      const zone = decodeURIComponent(/\/v1\/zones\/([^/]+)\/changes$/.exec(String(url))![1]!);
+      const refused = network.refuseUploads.get(zone);
+      if (refused) return new Response(JSON.stringify({ code: refused.code, message: "Refused." }), { status: refused.status, headers: { "content-type": "application/json" } });
+    }
     if (network.loseAnswer && init?.method === "POST" && String(url).endsWith("/changes")) {
       network.loseAnswer = false;
       await engine.fetch(url, init);

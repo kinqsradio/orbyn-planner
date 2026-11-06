@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../components/Icon";
 import { Portal } from "../components/Portal";
 import { useDialog } from "../components/useDialog";
@@ -14,7 +14,7 @@ import { NewTaskDialog } from "../features/tasks/NewTaskDialog";
 import { TaskPanel } from "../features/tasks/TaskPanel";
 import { dueCount } from "../features/tasks/selectors";
 import { TasksPage } from "../features/tasks/TasksPage";
-import { LocalStore } from "../store/LocalStore";
+import { plannerFor } from "../store/planners";
 import { StoreProvider, usePlanner } from "../store/context";
 import type { PlannerStore } from "../store/types";
 import { Toast } from "../components/Toast";
@@ -22,7 +22,7 @@ import { useNow } from "./clock";
 import { SyncProvider } from "../sync/SyncProvider";
 import { useExternalLinks } from "./links";
 import { UiProvider, useUi } from "./ui";
-import { AuthProvider } from "../auth/AuthProvider";
+import { AuthProvider, useAuth } from "../auth/AuthProvider";
 import type { AuthServices } from "../auth/services";
 import { AuthGate } from "../features/auth/AuthGate";
 import { PrefsProvider } from "./prefs";
@@ -167,12 +167,11 @@ function Shell() {
 /** `auth` turns accounts on: signed out, the public pages show first. Without it the planner runs on this device alone. */
 export function App({ store, auth }: { store?: PlannerStore; auth?: AuthServices }) {
   useExternalLinks();
-  const [own] = useState(() => store ?? new LocalStore());
   return (
-    <StoreProvider store={own}>
-      <UiProvider>
-        <PrefsProvider>
-          <AuthProvider services={auth ?? null}>
+    <UiProvider>
+      <PrefsProvider>
+        <AuthProvider services={auth ?? null}>
+          <PlannerStores fixed={store}>
             <AuthGate>
               <SyncProvider>
                 <RouterProvider>
@@ -180,9 +179,25 @@ export function App({ store, auth }: { store?: PlannerStore; auth?: AuthServices
                 </RouterProvider>
               </SyncProvider>
             </AuthGate>
-          </AuthProvider>
-        </PrefsProvider>
-      </UiProvider>
+          </PlannerStores>
+        </AuthProvider>
+      </PrefsProvider>
+    </UiProvider>
+  );
+}
+
+/**
+ * Whose planner is open: the account's own while a trusted device is signed in to it, otherwise the one kept
+ * on this device alone. Each is its own database, so one account never sees another's records or outbox, and
+ * the planner is built again (nothing carried over) when the account changes. A store passed in (tests) is used as is.
+ */
+function PlannerStores({ fixed, children }: { fixed?: PlannerStore; children: ReactNode }) {
+  const auth = useAuth();
+  const accountId = auth?.status === "signedIn" && auth.session ? auth.session.accountId : null;
+  const store = useMemo(() => fixed ?? plannerFor(accountId), [fixed, accountId]);
+  return (
+    <StoreProvider key={fixed ? "fixed" : (accountId ?? "device")} store={store}>
+      {children}
     </StoreProvider>
   );
 }
