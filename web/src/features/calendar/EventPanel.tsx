@@ -5,7 +5,7 @@ import { Portal } from "../../components/Portal";
 import { PHONE_QUERY, useMediaQuery } from "../../components/useMediaQuery";
 import { useDialog } from "../../components/useDialog";
 import { usePlanner, useStore } from "../../store/context";
-import { deleteOccurrence, duplicateOccurrence, editOccurrence, type Scope } from "../../store/eventScope";
+import { CannotMoveSeries, deleteOccurrence, duplicateOccurrence, editOccurrence, type Scope } from "../../store/eventScope";
 import { expandEvents, repeatLabel, type Occurrence } from "../../store/occurrences";
 import type { Person, Response } from "../../store/types";
 import { REMINDERS, REPEAT_CHOICES, RESPONSE_LABELS, choiceOf, parsePeople, ruleOf, type RepeatChoice } from "./eventForm";
@@ -40,6 +40,7 @@ function Panel({ occ }: { occ: Occurrence }) {
   const [email, setEmail] = useState("");
   const [notes, setNotes] = useState(event.notes);
   const [ask, setAsk] = useState<null | "save" | "delete">(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const start = allDay ? startDay : `${startDay}T${startTime}`;
   const end = allDay ? endDay : `${endDay}T${endTime}`;
@@ -47,20 +48,29 @@ function Panel({ occ }: { occ: Occurrence }) {
   const editable = useMemo(() => calendars.filter((c) => c.kind.type === "local" || c.id === event.calendarId), [calendars, event.calendarId]);
 
   const save = (scope: Scope) => {
-    const created = editOccurrence(store, occ, scope, {
-      title: title.trim(),
-      allDay,
-      start,
-      end,
-      calendarId,
-      place: place.trim(),
-      notes,
-      people,
-      reminder,
-      // Only a changed repeat is sent; the same one must not reset the dates skipped from it.
-      repeat: repeat === initialRepeat ? undefined : ruleOf(repeat),
-    });
+    let created: ReturnType<typeof editOccurrence>;
+    try {
+      created = editOccurrence(store, occ, scope, {
+        title: title.trim(),
+        allDay,
+        start,
+        end,
+        calendarId,
+        place: place.trim(),
+        notes,
+        people,
+        reminder,
+        // Only a changed repeat is sent; the same one must not reset the dates skipped from it.
+        repeat: repeat === initialRepeat ? undefined : ruleOf(repeat),
+      });
+    } catch (e) {
+      // A move the repeat cannot say: nothing was changed, and the person is told why.
+      setAsk(null);
+      setSaveError(e instanceof CannotMoveSeries ? e.message : "Couldn’t save that change.");
+      return;
+    }
     setAsk(null);
+    setSaveError(null);
     ui.openEvent(created?.id ?? event.id, startDay);
     ui.showToast("Event saved");
   };
@@ -180,6 +190,7 @@ function Panel({ occ }: { occ: Occurrence }) {
       <div className="bh"><b>Notes</b><span></span></div>
       <textarea className="field notes" aria-label="Notes" rows={4} value={notes} disabled={locked} onChange={(e) => setNotes(e.target.value)} />
 
+      {saveError && <p className="err" role="alert">{saveError}</p>}
       <div className="tp-foot">
         {!locked && <button type="button" className="ghost danger" onClick={() => (event.repeat ? setAsk("delete") : remove("all"))}>Delete</button>}
         <button type="button" className="ghost" onClick={duplicate}>Duplicate</button>

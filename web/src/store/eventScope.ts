@@ -21,6 +21,27 @@ export function shiftWeekdays(days: readonly Day[], by: number): Day[] {
 
 const shiftDate = (date: string, by: number) => addWall(date, by);
 
+/** Raised when a move cannot be written as a repeat the engine understands. */
+export class CannotMoveSeries extends Error {
+  constructor() {
+    super("This repeat can’t be moved like that, because some of its days would fall in a different week of the cycle. Move this event only, or change the repeat.");
+    this.name = "CannotMoveSeries";
+  }
+}
+
+/**
+ * Weeks run Monday to Sunday and an every-N-weeks cycle counts them from the series' first week. Moving
+ * every chosen weekday by `by` days keeps the cycle only if they all stay in the same week as each
+ * other; if the move carries some past Sunday into the next week and not the others, the days would
+ * sit in different weeks of the cycle, which a single rule cannot say.
+ */
+export function breaksCycle(series: Series, by: number): boolean {
+  const r = series.repeat;
+  if (r.frequency !== "weekly" || r.interval < 2 || r.weekdays.length < 2) return false;
+  const weeks = new Set(r.weekdays.map((d) => Math.floor((DAYS.indexOf(d) + by) / 7)));
+  return weeks.size > 1;
+}
+
 /**
  * The event's own first start and end after the occurrence on `occ` moved to `start` and `end`. It
  * moves by whole calendar days and by the change in the time of day, so a daylight-saving change
@@ -63,6 +84,7 @@ export function editOccurrence(store: PlannerStore, occ: Occurrence, scope: Scop
     const moved = moveBase(event, occ, start, end);
     const day = moved.start.slice(0, 10);
     const by = daysBetween(series.start, day);
+    if (rule === undefined && breaksCycle(series, by)) throw new CannotMoveSeries();
     let next: Series | null;
     if (rule === null) next = null;
     else if (rule) next = { ...newSeries(day, rule), skipped: series.skipped.map((d) => shiftDate(d, by)) };
@@ -74,7 +96,12 @@ export function editOccurrence(store: PlannerStore, occ: Occurrence, scope: Scop
       };
     }
     store.updateEvent(event.id, { ...fields, ...moved, repeat: next });
-    if (by !== 0) for (const o of overridesOf(store, event)) store.updateEvent(o.id, { overrideOf: { id: event.id, date: shiftDate(o.overrideOf!.date, by) } });
+    // The moved copies of single dates travel with the series by the same number of days.
+    if (by !== 0) {
+      for (const o of overridesOf(store, event)) {
+        store.updateEvent(o.id, { start: addWall(o.start, by), end: addWall(o.end, by), overrideOf: { id: event.id, date: shiftDate(o.overrideOf!.date, by) } });
+      }
+    }
     return null;
   }
 
@@ -85,9 +112,10 @@ export function editOccurrence(store: PlannerStore, occ: Occurrence, scope: Scop
 
   // "following": end the series before this date and start a new one here, keeping what was skipped later on.
   const [first, following] = splitAt(series, occ.date);
-  store.updateEvent(event.id, { repeat: first });
   const day = start.slice(0, 10);
   const by = daysBetween(occ.date, day);
+  if (rule === undefined && breaksCycle(following, by)) throw new CannotMoveSeries();
+  store.updateEvent(event.id, { repeat: first });
   const skipped = following.skipped.map((d) => shiftDate(d, by));
   const next: Series | null =
     rule === null
@@ -98,7 +126,9 @@ export function editOccurrence(store: PlannerStore, occ: Occurrence, scope: Scop
   const created = store.addEvent({ ...copyOf(event), ...fields, start, end, repeat: null, series: next });
   // One-off copies of later dates now belong to the new series.
   for (const o of overridesOf(store, event)) {
-    if (o.overrideOf!.date >= occ.date) store.updateEvent(o.id, { overrideOf: { id: created.id, date: shiftDate(o.overrideOf!.date, by) } });
+    if (o.overrideOf!.date >= occ.date) {
+      store.updateEvent(o.id, { start: addWall(o.start, by), end: addWall(o.end, by), overrideOf: { id: created.id, date: shiftDate(o.overrideOf!.date, by) } });
+    }
   }
   return created;
 }

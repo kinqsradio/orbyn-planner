@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../../app/App";
@@ -485,5 +485,21 @@ describe("keyboard", () => {
     await open();
     await userEvent.click(document.querySelector('[data-slot="2026-11-04T10"]') as HTMLElement);
     expect(within(screen.getByRole("dialog", { name: "New event" })).getByLabelText("Start time")).toHaveValue("10:00");
+  });
+});
+
+describe("a move the repeat cannot say", () => {
+  it("is explained in the panel and changes nothing", async () => {
+    const store = await open({
+      seed: (s) => s.addEvent({ title: "Swim", start: "2026-11-07T09:00", end: "2026-11-07T10:00", repeat: { ...repeatEvery("weekly"), interval: 2, weekdays: ["sat", "sun"] } }),
+    });
+    await userEvent.click(screen.getAllByRole("button", { name: /Swim/ })[0]!);
+    const panel = screen.getByRole("complementary", { name: "Event" });
+    fireEvent.change(within(panel).getByLabelText("Start date"), { target: { value: "2026-11-08" } });
+    fireEvent.change(within(panel).getByLabelText("End date"), { target: { value: "2026-11-08" } });
+    await userEvent.click(within(panel).getByRole("button", { name: "Save" }));
+    await userEvent.click(screen.getByRole("button", { name: /^All events/ }));
+    expect(await within(panel).findByRole("alert")).toHaveTextContent("some of its days would fall in a different week of the cycle");
+    expect(store.getState().events[0]!.start).toBe("2026-11-07T09:00");
   });
 });

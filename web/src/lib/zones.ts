@@ -55,6 +55,59 @@ const WINDOWS_ZONES: Record<string, string> = {
   "Tasmania Standard Time": "Australia/Hobart",
   "West Pacific Standard Time": "Pacific/Port_Moresby",
   "New Zealand Standard Time": "Pacific/Auckland",
+  // Outlook's other common names.
+  "Central Standard Time (Mexico)": "America/Mexico_City",
+  "Mountain Standard Time (Mexico)": "America/Mazatlan",
+  "Pacific Standard Time (Mexico)": "America/Tijuana",
+  "Eastern Standard Time (Mexico)": "America/Cancun",
+  "Aleutian Standard Time": "America/Adak",
+  "Venezuela Standard Time": "America/Caracas",
+  "Central Brazilian Standard Time": "America/Cuiaba",
+  "Pacific SA Standard Time": "America/Santiago",
+  "Paraguay Standard Time": "America/Asuncion",
+  "Montevideo Standard Time": "America/Montevideo",
+  "SA Eastern Standard Time": "America/Cayenne",
+  "Bahia Standard Time": "America/Bahia",
+  "Greenland Standard Time": "America/Godthab",
+  "Cuba Standard Time": "America/Havana",
+  "Haiti Standard Time": "America/Port-au-Prince",
+  "Azores Standard Time": "Atlantic/Azores",
+  "Cape Verde Standard Time": "Atlantic/Cape_Verde",
+  "Morocco Standard Time": "Africa/Casablanca",
+  "Namibia Standard Time": "Africa/Windhoek",
+  "E. Africa Standard Time": "Africa/Nairobi",
+  "Jordan Standard Time": "Asia/Amman",
+  "Middle East Standard Time": "Asia/Beirut",
+  "Syria Standard Time": "Asia/Damascus",
+  "Arabic Standard Time": "Asia/Baghdad",
+  "Belarus Standard Time": "Europe/Minsk",
+  "Kaliningrad Standard Time": "Europe/Kaliningrad",
+  "Georgian Standard Time": "Asia/Tbilisi",
+  "Caucasus Standard Time": "Asia/Yerevan",
+  "Azerbaijan Standard Time": "Asia/Baku",
+  "Afghanistan Standard Time": "Asia/Kabul",
+  "West Asia Standard Time": "Asia/Tashkent",
+  "Sri Lanka Standard Time": "Asia/Colombo",
+  "Nepal Standard Time": "Asia/Katmandu",
+  "Central Asia Standard Time": "Asia/Almaty",
+  "Myanmar Standard Time": "Asia/Rangoon",
+  "N. Central Asia Standard Time": "Asia/Novosibirsk",
+  "North Asia Standard Time": "Asia/Krasnoyarsk",
+  "Ulaanbaatar Standard Time": "Asia/Ulaanbaatar",
+  "Yakutsk Standard Time": "Asia/Yakutsk",
+  "Vladivostok Standard Time": "Asia/Vladivostok",
+  "Magadan Standard Time": "Asia/Magadan",
+  "Mauritius Standard Time": "Indian/Mauritius",
+  "Fiji Standard Time": "Pacific/Fiji",
+  "Tonga Standard Time": "Pacific/Tongatapu",
+  "Samoa Standard Time": "Pacific/Apia",
+  "Marquesas Standard Time": "Pacific/Marquesas",
+  "Lord Howe Standard Time": "Australia/Lord_Howe",
+  "Mid-Atlantic Standard Time": "Etc/GMT+2",
+  "UTC-11": "Etc/GMT+11",
+  "UTC-02": "Etc/GMT+2",
+  "UTC+12": "Etc/GMT-12",
+  "Coordinated Universal Time": "UTC",
 };
 
 const formatters = new Map<string, Intl.DateTimeFormat | null>();
@@ -115,4 +168,23 @@ export function zonedInstant(zone: string, y: number, mo: number, d: number, h: 
   const valid = candidates.filter((c) => asUtc - offsetMinutes(zone, c) * 60_000 === c);
   if (valid.length > 0) return new Date(Math.min(...valid));
   return new Date(asUtc - before * 60_000);
+}
+
+const pad = (n: number, w = 2) => String(n).padStart(w, "0");
+
+/** A wall-clock time (`YYYY-MM-DDTHH:mm`) in a zone, as the same moment on the viewer's wall clock. Null if the zone is unknown. */
+export function wallToLocal(zone: string, wall: string): string | null {
+  const y = Number(wall.slice(0, 4));
+  const instant = zonedInstant(zone, y, Number(wall.slice(5, 7)), Number(wall.slice(8, 10)), Number(wall.slice(11, 13)), Number(wall.slice(14, 16)));
+  if (!instant) return null;
+  return `${pad(instant.getFullYear(), 4)}-${pad(instant.getMonth() + 1)}-${pad(instant.getDate())}T${pad(instant.getHours())}:${pad(instant.getMinutes())}`;
+}
+
+/** An instant as a wall-clock time in a zone. Null if the zone is unknown. */
+export function instantToWall(zone: string, at: Date): string | null {
+  const f = formatterFor(zone);
+  if (!f) return null;
+  const parts = f.formatToParts(at);
+  const get = (type: string) => Number(parts.find((p) => p.type === type)!.value);
+  return `${pad(get("year"), 4)}-${pad(get("month"))}-${pad(get("day"))}T${pad(get("hour"))}:${pad(get("minute"))}`;
 }
