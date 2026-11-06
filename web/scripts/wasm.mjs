@@ -43,6 +43,16 @@ if (!dir) {
 }
 const engine = resolve(dir);
 
+// The manifest records the engine commit, so it must be readable before anything is built. A git worktree
+// mounted into a container has a .git file pointing outside the mount, and git cannot read it there: use a
+// plain clone checked out at the commit instead.
+const head = spawnSync("git", ["-C", engine, "rev-parse", "--verify", "HEAD"], { encoding: "utf8" });
+if (head.status !== 0 || !/^[0-9a-f]{40}$/.test(head.stdout.trim())) {
+  console.error(`wasm: cannot read the engine commit in ${engine}. Use a plain \`git clone\` of orbyn-engine checked out at the commit (not a git worktree, whose .git points outside a container mount).`);
+  process.exit(1);
+}
+const commit = head.stdout.trim();
+
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { stdio: ["ignore", "inherit", "inherit"], ...options });
   if (result.status !== 0) {
@@ -89,8 +99,6 @@ try {
     console.error(`wasm: wasm-bindgen did not make ${missing.join(", ")}`);
     process.exit(1);
   }
-  const head = spawnSync("git", ["-C", engine, "rev-parse", "HEAD"], { encoding: "utf8" });
-  const commit = head.status === 0 ? head.stdout.trim() : "unknown";
   if (check) {
     const have = existsSync(target) ? readdirSync(target) : [];
     const manifestPath = join(target, MANIFEST);
