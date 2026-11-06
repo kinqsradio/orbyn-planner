@@ -173,3 +173,11 @@ describe("ReminderScheduler", () => {
     expect(notify).not.toHaveBeenCalled();
   });
 });
+
+describe("a reminder in whole days", () => {
+  it("counts calendar days, so it keeps the hour across a clock change", () => {
+    const t = task({ due: "2026-11-02T09:00", reminder: 1440 * 2 });
+    const at = reminderTime(t)!;
+    expect([at.getMonth(), at.getDate(), at.getHours()]).toEqual([9, 31, 9]);
+  });
+});

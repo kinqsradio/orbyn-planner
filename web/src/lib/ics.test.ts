@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { IcsError, MAX_EVENTS, parseIcs } from "./ics";
+import { wallToLocal } from "./zones";
 
 const wrap = (...events: string[]) => ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Test//EN", ...events, "END:VCALENDAR"].join("\r\n");
 const vevent = (...props: string[]) => ["BEGIN:VEVENT", ...props, "END:VEVENT"].join("\r\n");
@@ -11,7 +12,7 @@ describe("parseIcs", () => {
     );
     expect(e).toEqual({
       title: "Team planning", allDay: false, start: "2026-11-07T09:00", end: "2026-11-07T11:00",
-      place: "Room 3", notes: "Bring the plan", series: null,
+      place: "Room 3", notes: "Bring the plan", series: null, zone: null,
     });
   });
 
@@ -27,15 +28,10 @@ describe("parseIcs", () => {
     expect(e!.title).toBe("Tabbed");
   });
 
-  it("converts UTC times to local time", () => {
+  it("keeps a UTC time as UTC, to be converted to the viewer's time when it is shown", () => {
     const [e] = parseIcs(wrap(vevent("DTSTART:20261107T150000Z", "DTEND:20261107T160000Z", "SUMMARY:Call")));
-    const local = (iso: string) => {
-      const d = new Date(iso);
-      const p = (n: number) => String(n).padStart(2, "0");
-      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
-    };
-    expect(e!.start).toBe(local("2026-11-07T15:00:00Z"));
-    expect(e!.end).toBe(local("2026-11-07T16:00:00Z"));
+    expect(e).toMatchObject({ start: "2026-11-07T15:00", end: "2026-11-07T16:00", zone: "UTC" });
+    expect(wallToLocal("UTC", e!.start)).toMatch(/^2026-11-0[78]T/);
   });
 
   it("reads all-day dates; DTEND is the day after the last day", () => {
@@ -116,10 +112,18 @@ describe("parseIcs", () => {
     expect(events[0]!.series!.skipped).toEqual(["2026-11-09"]);
   });
 
-  it("a rule it cannot repeat is a read-only event on its first date with a note", () => {
-    const [e] = parseIcs(wrap(vevent("DTSTART:20261102T090000", "RRULE:FREQ=MONTHLY;BYDAY=1MO", "SUMMARY:First Monday", "DESCRIPTION:Bring the plan")));
-    expect(e).toMatchObject({ series: null, start: "2026-11-02T09:00" });
-    expect(e!.notes).toBe("Bring the plan\n\nRepeat not supported: this event is shown once, on its first date.");
+  it("a rule it cannot repeat is shown once on its next date, stepped by FREQ and INTERVAL alone, with a note", () => {
+    const text = wrap(vevent("DTSTART:20261102T090000", "DTEND:20261102T100000", "RRULE:FREQ=MONTHLY;BYDAY=1MO", "SUMMARY:First Monday", "DESCRIPTION:Bring the plan"));
+    const [e] = parseIcs(text, new Date(2026, 10, 7));
+    expect(e).toMatchObject({ series: null, start: "2026-12-02T09:00", end: "2026-12-02T10:00" });
+    expect(e!.notes).toBe("Bring the plan\n\nRepeat not supported: this event is shown once, on its next date.");
+    // Still ahead of today: it stays where it is.
+    expect(parseIcs(text, new Date(2026, 9, 1))[0]!.start).toBe("2026-11-02T09:00");
+    // Every second week, ignoring the days it also names.
+    const biweekly = wrap(vevent("DTSTART:20261102T090000", "RRULE:FREQ=WEEKLY;INTERVAL=2;BYSETPOS=1;BYDAY=MO,TU", "SUMMARY:x"));
+    expect(parseIcs(biweekly, new Date(2026, 10, 7))[0]!.start).toBe("2026-11-16T09:00");
+    // No FREQ to step by: the first date.
+    expect(parseIcs(wrap(vevent("DTSTART:20261102T090000", "RRULE:BYDAY=MO", "SUMMARY:x")), new Date(2026, 10, 7))[0]!.start).toBe("2026-11-02T09:00");
   });
 
   it("COUNT and INTERVAL must be whole numbers in range, or the rule is not supported", () => {

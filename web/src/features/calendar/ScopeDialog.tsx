@@ -19,7 +19,7 @@ const CHOICES: Record<Noun, readonly { scope: Scope; label: string; hint: string
 };
 
 /** Asks which events of a repeating series an edit or delete should reach. */
-export function ScopeDialog({ title, noun = "event", onChoose, onCancel }: { title: string; noun?: Noun; onChoose: (scope: Scope) => void; onCancel: () => void }) {
+export function ScopeDialog({ title, noun = "event", allowed, onChoose, onCancel }: { title: string; noun?: Noun; allowed?: readonly Scope[]; onChoose: (scope: Scope) => void; onCancel: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useDialog(ref, onCancel);
   return (
@@ -28,7 +28,7 @@ export function ScopeDialog({ title, noun = "event", onChoose, onCancel }: { tit
       <div ref={ref} className="authcard" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1}>
         <b className="card-title">{title}</b>
         <p className="t3">This {noun} repeats. Which ones should change?</p>
-        {CHOICES[noun].map((c, i) => (
+        {CHOICES[noun].filter((c) => !allowed || allowed.includes(c.scope)).map((c, i) => (
           <button key={c.scope} type="button" className="ghost scope-choice" data-autofocus={i === 0 ? "" : undefined} onClick={() => onChoose(c.scope)}>
             <span>{c.label}</span>
             <span className="t3">{c.hint}</span>

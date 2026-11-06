@@ -41,7 +41,7 @@ export function toView(stored: Fields): CalendarEvent {
     } else rest[k] = v;
   }
   const rule = rest.repeat as StoredRule | null | undefined;
-  const event = { overrideOf: null, ...rest, repeat: null } as unknown as CalendarEvent;
+  const event = { overrideOf: null, zone: null, ...rest, repeat: null } as unknown as CalendarEvent;
   if (!rule) return event;
   return rollIntoSeries({ ...event, repeat: { start: rule.start, repeat: rule.repeat, skipped: skipped.sort() } });
 }

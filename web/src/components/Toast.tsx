@@ -42,6 +42,18 @@ function ToastBody({ toast, dismiss }: { toast: ToastState; dismiss: () => void 
           Undo
         </button>
       )}
+      {toast.secondary && (
+        <button
+          type="button"
+          className="toast-action"
+          onClick={() => {
+            toast.secondary?.run();
+            dismiss();
+          }}
+        >
+          {toast.secondary.label}
+        </button>
+      )}
     </div>
   );
 }

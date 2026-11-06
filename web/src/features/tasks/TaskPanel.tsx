@@ -8,9 +8,9 @@ import { useDialog } from "../../components/useDialog";
 import { dateKey, makeDue, parseDue } from "../../lib/dates";
 import { usePlanner, useStore } from "../../store/context";
 import { inOrder, keyBetween } from "../../store/order";
-import type { Scope } from "../../store/eventScope";
+import { CannotMoveSeries, type Scope } from "../../store/eventScope";
 import type { Repeat } from "../../store/repeat";
-import { editTaskRepeat, type RepeatEdit } from "../../store/taskRepeat";
+import { allowedScopes, editTaskRepeat, type RepeatEdit } from "../../store/taskRepeat";
 import { PRIORITIES, type Task } from "../../store/types";
 import { ScopeDialog } from "../calendar/ScopeDialog";
 import { RepeatPicker } from "./RepeatPicker";
@@ -35,6 +35,7 @@ function Panel({ task }: { task: Task }) {
   // A change to a repeating task waits here while the person says how far it reaches.
   const [asking, setAsking] = useState<RepeatEdit | null>(null);
   const [pickerKey, setPickerKey] = useState(0);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Title and notes are saved a moment after typing stops, and always when the panel is left.
   const latest = useRef({ title, notes, task });
@@ -86,8 +87,16 @@ function Panel({ task }: { task: Task }) {
   };
 
   const choose = (scope: Scope) => {
-    if (asking) editTaskRepeat(store, task, asking, scope, today);
+    if (asking) {
+      try {
+        editTaskRepeat(store, task, asking, scope, today);
+        setSaveError(null);
+      } catch (e) {
+        setSaveError(e instanceof CannotMoveSeries ? e.message : "Couldn’t save that change.");
+      }
+    }
     setAsking(null);
+    setPickerKey((k) => k + 1); // show what is really stored, whatever happened
   };
   const cancelAsk = () => {
     setAsking(null);
@@ -301,7 +310,8 @@ function Panel({ task }: { task: Task }) {
           {task.done ? "Mark not done" : "Complete"}
         </button>
       </div>
-      {asking && <ScopeDialog title="Change" noun="task" onChoose={choose} onCancel={cancelAsk} />}
+      {saveError && <p role="alert" className="t3">{saveError}</p>}
+      {asking && <ScopeDialog title="Change" noun="task" allowed={allowedScopes(asking)} onChoose={choose} onCancel={cancelAsk} />}
     </aside>
   );
   return phone ? <Portal>{panel}</Portal> : panel;

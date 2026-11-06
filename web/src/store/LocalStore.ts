@@ -1,4 +1,5 @@
-import { applyEventFields, repeatFields, toStored, toView } from "./eventRecord";
+import { repeatFields } from "./eventRecord";
+import { applyFields, sectionFields, storedOf, viewOf } from "./records";
 import { coalesce, refKey, type AnyRecord, type Patch, type Ref } from "./outbox";
 import { defaultPersistence, type ApplyResult, type Persistence } from "./persistence";
 import { inOrder, keyBetween } from "./order";
@@ -141,7 +142,7 @@ export class LocalStore implements PlannerStore {
       this.writable = false;
       persistence = { status: "failed", reason: describe(error, "open") };
     }
-    this.state = { ready: true, ...snapshot, events: snapshot.events.map((e) => toView(e as unknown as Record<string, unknown>)), persistence };
+    this.state = { ready: true, ...snapshot, events: snapshot.events.map((e) => viewOf("event", e as unknown as AnyRecord) as unknown as CalendarEvent), tasks: snapshot.tasks.map((t) => viewOf("task", t as unknown as AnyRecord) as unknown as Task), projects: snapshot.projects.map((x) => viewOf("project", x as unknown as AnyRecord) as unknown as Project), persistence };
     if (!this.state.lists.some((l) => l.isInbox)) {
       const inbox: TaskList = { id: INBOX_ID, name: "Inbox", colour: "c1", isInbox: true };
       this.commit([{ type: "list", id: inbox.id, op: "create", record: inbox }]);
@@ -193,7 +194,7 @@ export class LocalStore implements PlannerStore {
         this.replaceRecord(
           p.type,
           p.id,
-          p.type === "event" ? applyEventFields(record as CalendarEvent, p.fields) : ({ ...record, ...p.fields } as AnyRecord),
+          applyFields(p.type, record, p.fields),
         );
       }
       if (p.local) continue;
@@ -211,7 +212,7 @@ export class LocalStore implements PlannerStore {
   private reconcile(result: ApplyResult): void {
     for (const r of result.records) {
       if (this.pending.get(refKey(r))) continue;
-      this.replaceRecord(r.type, r.id, r.type === "event" && r.record ? toView(r.record as unknown as Record<string, unknown>) : r.record);
+      this.replaceRecord(r.type, r.id, r.record ? viewOf(r.type, r.record) : r.record);
     }
     for (const o of result.outbox) {
       if (this.pending.get(refKey(o))) continue;
@@ -233,7 +234,7 @@ export class LocalStore implements PlannerStore {
     const at = this.now().toISOString();
     const patches = inputs.map((p) => ({ ...p, key: this.newId() }) as Patch);
     // What is stored and sent is the engine's shape; the app holds events with their skips gathered.
-    const wire = patches.map((p) => (p.op === "create" && p.type === "event" ? { ...p, record: toStored(p.record as CalendarEvent) as unknown as AnyRecord } : p));
+    const wire = patches.map((p) => (p.op === "create" ? { ...p, record: storedOf(p.type, p.record) } : p));
     this.applyLocal(patches, wire, at);
     this.emit();
     if (!this.writable) return;
@@ -285,6 +286,7 @@ export class LocalStore implements PlannerStore {
       sectionId: input.sectionId ?? null,
       repeat: input.repeat ? newSeries((input.due ?? stamp).slice(0, 10), input.repeat) : null,
       reminder: input.reminder ?? null,
+      overrideOf: input.overrideOf ?? null,
       completions: [],
       createdAt: stamp,
       updatedAt: stamp,
@@ -294,7 +296,13 @@ export class LocalStore implements PlannerStore {
   }
 
   updateTask(id: string, patch: TaskPatch): void {
-    this.change(id, "update", { ...patch });
+    const { repeat, ...rest } = patch;
+    const fields: Record<string, unknown> = { ...rest };
+    if (repeat !== undefined) {
+      if (repeat) validate(repeat);
+      Object.assign(fields, repeatFields(this.task(id).repeat, repeat));
+    }
+    this.change(id, "update", fields);
   }
 
   setDone(id: string, done: boolean): void {
@@ -309,7 +317,11 @@ export class LocalStore implements PlannerStore {
   }
 
   restoreTask(id: string): void {
-    this.change(id, "update", { deletedAt: null });
+    const task = this.task(id);
+    // A section deleted in the meantime no longer exists: the task comes back to the project's top.
+    const project = task.projectId ? this.state.projects.find((p) => p.id === task.projectId) : undefined;
+    const lost = task.sectionId !== null && !project?.sections.some((s) => s.id === task.sectionId);
+    this.change(id, "update", { deletedAt: null, ...(lost ? { sectionId: null } : {}) });
   }
 
   /**
@@ -386,10 +398,6 @@ export class LocalStore implements PlannerStore {
     this.commit([{ type: "project", id, op: "update", fields }]);
   }
 
-  private setSections(projectId: string, sections: ProjectSection[], extra: PatchInput[] = []): void {
-    this.commit([{ type: "project", id: projectId, op: "update", fields: { sections } }, ...extra]);
-  }
-
   addSection(projectId: string, name: string): ProjectSection {
     this.assertReady();
     const project = this.project(projectId);
@@ -397,14 +405,15 @@ export class LocalStore implements PlannerStore {
     const order = keyBetween(last, null);
     if (order === null) throw new Error("Too many sections");
     const section: ProjectSection = { id: this.newId(), name: name.trim(), order };
-    this.setSections(projectId, [...project.sections, section]);
+    this.commit([{ type: "project", id: projectId, op: "update", fields: sectionFields.add(section) }]);
     return section;
   }
 
   renameSection(projectId: string, sectionId: string, name: string): void {
     this.assertReady();
-    const project = this.project(projectId);
-    this.setSections(projectId, project.sections.map((s) => (s.id === sectionId ? { ...s, name: name.trim() || s.name } : s)));
+    const section = this.project(projectId).sections.find((s) => s.id === sectionId);
+    if (!section) return;
+    this.commit([{ type: "project", id: projectId, op: "update", fields: sectionFields.rename(sectionId, name.trim() || section.name) }]);
   }
 
   moveSection(projectId: string, sectionId: string, direction: "up" | "down"): void {
@@ -418,19 +427,18 @@ export class LocalStore implements PlannerStore {
     const rest = sorted.filter((s) => s.id !== sectionId);
     const order = keyBetween(rest[j - 1]?.order ?? null, rest[j]?.order ?? null);
     if (order === null) return;
-    this.setSections(projectId, project.sections.map((s) => (s.id === sectionId ? { ...s, order } : s)));
+    this.commit([{ type: "project", id: projectId, op: "update", fields: sectionFields.move(sectionId, order) }]);
   }
 
   deleteSection(projectId: string, sectionId: string): void {
     this.assertReady();
-    const project = this.project(projectId);
+    this.project(projectId);
     const moved = this.state.tasks.filter((t) => t.sectionId === sectionId && t.deletedAt === null);
     const stamp = this.now().toISOString();
-    this.setSections(
-      projectId,
-      project.sections.filter((s) => s.id !== sectionId),
-      moved.map((t): PatchInput => ({ type: "task", id: t.id, op: "update", fields: { sectionId: null, updatedAt: stamp } })),
-    );
+    this.commit([
+      { type: "project", id: projectId, op: "update", fields: sectionFields.remove(sectionId) },
+      ...moved.map((t): PatchInput => ({ type: "task", id: t.id, op: "update", fields: { sectionId: null, updatedAt: stamp } })),
+    ]);
   }
 
   // Events and calendars ------------------------------------------------------------------------
@@ -465,6 +473,7 @@ export class LocalStore implements PlannerStore {
       reminder: input.reminder ?? null,
       repeat: input.series ?? (input.repeat ? newSeries(input.start.slice(0, 10), input.repeat) : null),
       overrideOf: input.overrideOf ?? null,
+      zone: input.zone ?? null,
       readOnly: false,
       deletedAt: null,
       createdAt: stamp,
@@ -549,6 +558,7 @@ export class LocalStore implements PlannerStore {
       reminder: null,
       repeat: e.series ?? null,
       overrideOf: null,
+      zone: e.zone ?? null,
       readOnly: true,
       deletedAt: null,
       createdAt: at,

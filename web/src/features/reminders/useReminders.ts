@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePrefs } from "../../app/prefs";
 import { formatDue } from "../../lib/dates";
 import { usePlanner } from "../../store/context";
@@ -14,6 +14,38 @@ export function permissionState(): PermissionState {
 const REBUILD_MS = 3_600_000;
 
 /**
+ * With several tabs open only one should show reminders. A tab asks for a browser lock and is the
+ * one to notify while it holds it; when it closes the lock passes to another tab. Without Web
+ * Locks every tab is its own leader.
+ */
+function useLeader(active: boolean): boolean {
+  const [leader, setLeader] = useState(false);
+  useEffect(() => {
+    if (!active) return;
+    const locks = typeof navigator === "undefined" ? undefined : navigator.locks;
+    if (!locks) return;
+    let release: (() => void) | null = null;
+    let gone = false;
+    locks
+      .request("orbyn-planner-reminders", () => {
+        if (gone) return undefined;
+        setLeader(true);
+        return new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      gone = true;
+      release?.();
+      setLeader(false);
+    };
+  }, [active]);
+  const noLocks = typeof navigator === "undefined" || !navigator.locks;
+  return active && (noLocks || leader);
+}
+
+/**
  * While the app is open, shows a browser notification for each task reminder, if the person turned
  * reminders on in Settings and the browser allows it. This never asks for permission: Settings does.
  */
@@ -27,7 +59,8 @@ export function useReminders(): void {
     quiet.current = prefs.quiet;
     latest.current = tasks;
   });
-  const enabled = prefs.reminders && permissionState() === "granted";
+  const wanted = prefs.reminders && permissionState() === "granted";
+  const enabled = useLeader(wanted);
 
   useEffect(() => {
     if (!enabled) return;

@@ -37,6 +37,8 @@ export interface Task {
   reminder: number | null;
   /** When a repeating task was completed, most recent last. Feeds "Done this week". */
   completions: string[];
+  /** Set on the one-off copy made by "This task" on a repeating task: which date of which task it replaces. */
+  overrideOf: { id: string; date: string } | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -99,6 +101,8 @@ export interface CalendarEvent {
    * (`repeat.skip.<date>`), so two devices that skip different dates both keep their skip.
    */
   repeat: Series | null;
+  /** The time zone a subscribed event is written in, so each repeat keeps its wall time there. Null for your own events. */
+  zone: string | null;
   /** Set on the one-off copy made by "This event" on a repeating event: which date of which event it replaces. */
   overrideOf: { id: string; date: string } | null;
   /** Events of a subscribed calendar cannot be changed here. */
@@ -168,6 +172,7 @@ export interface NewTask {
   /** A rule; the series starts on the due date (today when there is none). */
   repeat?: Repeat | null;
   reminder?: number | null;
+  overrideOf?: { id: string; date: string } | null;
 }
 
 export interface NewEvent {
@@ -185,6 +190,7 @@ export interface NewEvent {
   /** An existing series, kept as given (used when a series is split). */
   series?: Series | null;
   overrideOf?: { id: string; date: string } | null;
+  zone?: string | null;
 }
 
 export type EventPatch = Partial<
@@ -192,7 +198,7 @@ export type EventPatch = Partial<
 >;
 
 /** One event read from a subscribed calendar's feed. */
-export type FeedEvent = Pick<NewEvent, "title" | "allDay" | "start" | "end" | "place" | "notes" | "series">;
+export type FeedEvent = Pick<NewEvent, "title" | "allDay" | "start" | "end" | "place" | "notes" | "series" | "zone">;
 
 export type CalendarPatch = Partial<Pick<PlannerCalendar, "name" | "colour" | "visible">>;
 
