@@ -1,4 +1,5 @@
 import { addWall, daysBetween, lastDayOf } from "../lib/wall";
+import { wallToLocal } from "../lib/zones";
 import { occurrences as seriesOccurrences } from "./repeat";
 import type { CalendarEvent } from "./types";
 
@@ -41,12 +42,33 @@ function repeating(event: CalendarEvent, from: string, to: string): Occurrence[]
   return out;
 }
 
+/**
+ * An event written in another time zone repeats at the same wall time there. Its dates are found in
+ * that zone, a day either side of the range, and each is then converted to the viewer's time, so a
+ * change of daylight saving in either place moves it correctly.
+ */
+function zoned(event: CalendarEvent, from: string, to: string): Occurrence[] {
+  const zone = event.zone!;
+  const out: Occurrence[] = [];
+  const base = event.repeat
+    ? seriesOccurrences(event.repeat, addWall(from, -2), addWall(to, 2)).map((date) => shiftTo(event, date))
+    : [{ start: event.start, end: event.end }];
+  for (const w of base) {
+    const start = wallToLocal(zone, w.start) ?? w.start;
+    const end = wallToLocal(zone, w.end) ?? w.end;
+    if (start.slice(0, 10) <= to && lastDayOf(start, end, false) >= from) out.push({ event, date: start.slice(0, 10), start, end, allDay: false });
+  }
+  return out;
+}
+
 /** Every occurrence of the visible events that touches the days `from` to `to` (inclusive, `YYYY-MM-DD`), in start order. */
 export function expandEvents(events: readonly CalendarEvent[], from: string, to: string): Occurrence[] {
   const out: Occurrence[] = [];
   for (const event of events) {
     if (event.deletedAt !== null) continue;
-    if (event.repeat) {
+    if (event.zone && !event.allDay) {
+      out.push(...zoned(event, from, to));
+    } else if (event.repeat) {
       out.push(...repeating(event, from, to));
     } else if (event.start.slice(0, 10) <= to && lastDayOf(event.start, event.end, event.allDay) >= from) {
       out.push({ event, date: event.start.slice(0, 10), start: event.start, end: event.end, allDay: event.allDay });

@@ -1,7 +1,7 @@
-import { DAYS, newSeries, type Day, type Frequency, type Repeat, type Series } from "../store/repeat";
+import { nextOnOrAfter, newSeries, type Day, type Frequency, type Repeat, type Series } from "../store/repeat";
 import { addWall, daysBetween } from "./wall";
-import { makeDue } from "./dates";
-import { resolveZone, zonedInstant } from "./zones";
+import { dateKey } from "./dates";
+import { instantToWall, resolveZone, zonedInstant } from "./zones";
 import type { FeedEvent } from "../store/types";
 
 /** The most events one feed may hold, and the most bytes it may be, before it is refused. */
@@ -51,37 +51,33 @@ function lines(text: string): Line[] {
 const unescapeText = (s: string) => s.replace(/\\([nN,;\\])/g, (_, c: string) => (c === "n" || c === "N" ? "\n" : c));
 
 interface When {
-  /** `YYYY-MM-DD` or `YYYY-MM-DDTHH:mm`, in the viewer's local time. */
+  /** `YYYY-MM-DD` or `YYYY-MM-DDTHH:mm`, as written in the feed: wall-clock time in `zone`. */
   value: string;
   allDay: boolean;
-  /** Days the date moved when its zone was converted (a late evening in one zone is the next morning in another). */
-  dayShift: number;
+  /** The IANA zone the time is in ("UTC" for a trailing Z), or null for floating time. */
+  zone: string | null;
 }
 
 /**
- * DATE and DATE-TIME values, as local time. A trailing Z (UTC) and a TZID (an IANA name, or a
- * common Windows one) are converted to the viewer's time zone; a TZID that is not known is read as
- * floating local time and `notes` says so. Times with no zone are floating.
+ * DATE and DATE-TIME values. A trailing Z is UTC; a TZID (an IANA name, or a common Windows one)
+ * names the zone. The time stays as written, wall-clock in its zone, because a repeat keeps that
+ * wall time on every date: converting to the viewer's zone is done per occurrence, so zones whose
+ * daylight saving differs still land right. A TZID that is not known is floating local time, and
+ * `notes` says so.
  */
 function parseWhen(value: string, params: Record<string, string>, notes: Set<string>): When | null {
   const m = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?(Z)?)?$/.exec(value.trim());
   if (!m) return null;
   const [, y, mo, d, h, mi, , z] = m;
-  if (h === undefined || params.VALUE === "DATE") return { value: `${y}-${mo}-${d}`, allDay: true, dayShift: 0 };
+  if (h === undefined || params.VALUE === "DATE") return { value: `${y}-${mo}-${d}`, allDay: true, zone: null };
   const wall = `${y}-${mo}-${d}T${h}:${mi}`;
-  let instant: Date | null = null;
-  if (z) {
-    instant = new Date(0);
-    instant.setUTCFullYear(+y!, +mo! - 1, +d!);
-    instant.setUTCHours(+h, +mi!, 0, 0);
-  } else if (params.TZID) {
+  if (z) return { value: wall, allDay: false, zone: "UTC" };
+  if (params.TZID) {
     const zone = resolveZone(params.TZID);
-    if (zone) instant = zonedInstant(zone, +y!, +mo!, +d!, +h, +mi!);
-    else notes.add(`The time zone “${params.TZID}” isn’t known here, so times are shown as written.`);
+    if (zone) return { value: wall, allDay: false, zone };
+    notes.add(`The time zone “${params.TZID}” isn’t known here, so times are shown as written.`);
   }
-  if (!instant) return { value: wall, allDay: false, dayShift: 0 };
-  const local = makeDue(instant, true);
-  return { value: local, allDay: false, dayShift: daysBetween(wall, local) };
+  return { value: wall, allDay: false, zone: null };
 }
 
 const BY_DAY: Record<string, Day> = { MO: "mon", TU: "tue", WE: "wed", TH: "thu", FR: "fri", SA: "sat", SU: "sun" };
@@ -92,7 +88,7 @@ const WHOLE = /^\d{1,10}$/;
  * The rule's basic parts: FREQ, INTERVAL, BYDAY (weekly), COUNT, UNTIL. Anything else, or a number
  * that is not a whole number in the engine's range, makes the rule unsupported (null).
  */
-function parseRule(value: string, dayShift: number, notes: Set<string>): Repeat | null {
+function parseRule(value: string, notes: Set<string>): Repeat | null {
   const parts = Object.fromEntries(value.split(";").map((p) => p.split("=") as [string, string]));
   const frequency = FREQ[parts.FREQ ?? ""];
   if (!frequency) return null;
@@ -109,7 +105,7 @@ function parseRule(value: string, dayShift: number, notes: Set<string>): Repeat 
     if (frequency !== "weekly") return null;
     const days = parts.BYDAY.split(",").map((d) => BY_DAY[d]);
     if (days.some((d) => d === undefined)) return null; // "first Monday" style rules are not supported
-    repeat.weekdays = (days as Day[]).map((d) => DAYS[(((DAYS.indexOf(d) + dayShift) % 7) + 7) % 7]!);
+    repeat.weekdays = days as Day[];
   }
   if (parts.COUNT !== undefined) {
     if (!WHOLE.test(parts.COUNT)) return null;
@@ -139,9 +135,22 @@ interface Raw {
   event: FeedEvent;
 }
 
-const NOT_SUPPORTED = "Repeat not supported: this event is shown once, on its first date.";
+const NOT_SUPPORTED = "Repeat not supported: this event is shown once, on its next date.";
 
-function toEvent(props: Line[]): Raw | null {
+/**
+ * For a repeat it cannot express, the next date on or after `today` found by stepping the first date
+ * forward by FREQ and INTERVAL alone, ignoring every other part of the rule. Null if the rule has no
+ * usable FREQ.
+ */
+function nextStep(rule: string, firstDay: string, today: string): string | null {
+  const parts = Object.fromEntries(rule.split(";").map((p) => p.split("=") as [string, string]));
+  const frequency = FREQ[parts.FREQ ?? ""];
+  if (!frequency) return null;
+  const interval = parts.INTERVAL !== undefined && WHOLE.test(parts.INTERVAL) && Number(parts.INTERVAL) >= 1 && Number(parts.INTERVAL) <= 65535 ? Number(parts.INTERVAL) : 1;
+  return nextOnOrAfter({ start: firstDay, repeat: { frequency, interval, weekdays: [], end: { type: "never" } }, skipped: [] }, today);
+}
+
+function toEvent(props: Line[], today: string): Raw | null {
   const get = (name: string) => props.find((p) => p.name === name);
   const notes = new Set<string>();
   const cancelled = get("STATUS")?.value.toUpperCase() === "CANCELLED";
@@ -149,6 +158,7 @@ function toEvent(props: Line[]): Raw | null {
   const start = dtstart && parseWhen(dtstart.value, dtstart.params, notes);
   if (!dtstart || !start) return null;
 
+  let startValue = start.value;
   let end: string;
   const dtend = get("DTEND");
   const parsedEnd = dtend && parseWhen(dtend.value, dtend.params, notes);
@@ -158,13 +168,19 @@ function toEvent(props: Line[]): Raw | null {
     const last = parsedEnd ? addWall(parsedEnd.value.slice(0, 10), -1) : addWall(start.value, duration !== null ? Math.max(Math.ceil(duration / 1440) - 1, 0) : 0);
     end = last < start.value ? start.value : last;
   } else if (parsedEnd) {
-    end = parsedEnd.value.length === 10 ? `${parsedEnd.value}T00:00` : parsedEnd.value;
+    let wall = parsedEnd.value.length === 10 ? `${parsedEnd.value}T00:00` : parsedEnd.value;
+    // An end in another zone than the start becomes the same moment in the start's zone.
+    if (start.zone && parsedEnd.zone && parsedEnd.zone !== start.zone) {
+      const at = zonedInstant(parsedEnd.zone, +wall.slice(0, 4), +wall.slice(5, 7), +wall.slice(8, 10), +wall.slice(11, 13), +wall.slice(14, 16));
+      wall = (at && instantToWall(start.zone, at)) ?? wall;
+    }
+    end = wall;
   } else if (duration !== null) {
     end = addWall(start.value, 0, duration);
   } else {
     end = start.value;
   }
-  if (!start.allDay && end < start.value) end = start.value;
+  if (!start.allDay && end < startValue) end = startValue;
 
   let series: Series | null = null;
   const rrule = get("RRULE");
@@ -173,17 +189,26 @@ function toEvent(props: Line[]): Raw | null {
     .flatMap((p) => p.value.split(",").map((v) => parseWhen(v, p.params, notes)?.value.slice(0, 10)))
     .filter((d): d is string => Boolean(d));
   if (rrule) {
-    const rule = parseRule(rrule.value, start.dayShift, notes);
+    const rule = parseRule(rrule.value, notes);
     let ok = false;
     if (rule) {
       try {
-        series = { ...newSeries(start.value.slice(0, 10), rule), skipped: [...new Set(skipped)].sort() };
+        series = { ...newSeries(startValue.slice(0, 10), rule), skipped: [...new Set(skipped)].sort() };
         ok = true;
       } catch {
         series = null;
       }
     }
-    if (!ok) notes.add(NOT_SUPPORTED);
+    if (!ok) {
+      // Shown once, on its next date: stepped forward by FREQ and INTERVAL only.
+      const next = nextStep(rrule.value, startValue.slice(0, 10), today);
+      if (next && next !== startValue.slice(0, 10)) {
+        const days = daysBetween(startValue.slice(0, 10), next);
+        startValue = addWall(startValue, days);
+        end = addWall(end, days);
+      }
+      notes.add(NOT_SUPPORTED);
+    }
   }
 
   const recurrence = get("RECURRENCE-ID");
@@ -195,8 +220,9 @@ function toEvent(props: Line[]): Raw | null {
     event: {
       title: unescapeText(get("SUMMARY")?.value ?? "").trim() || "(No title)",
       allDay: start.allDay,
-      start: start.value,
+      start: startValue,
       end,
+      zone: start.allDay ? null : start.zone,
       place: unescapeText(get("LOCATION")?.value ?? ""),
       notes: [description, ...notes].filter(Boolean).join("\n\n"),
       series,
@@ -209,10 +235,11 @@ function toEvent(props: Line[]): Raw | null {
  * DESCRIPTION, all-day dates, UTC times and TZID times (IANA and common Windows names), converted
  * to the viewer's time, basic RRULEs (FREQ, INTERVAL, BYDAY on weekly rules, COUNT, UNTIL), EXDATE,
  * and RECURRENCE-ID overrides, cancelled ones included. A rule it cannot express leaves a read-only
- * event on its first date with a "Repeat not supported" note. Nested components such as VALARM are
+ * event, on its next date on or after today (stepped by FREQ and INTERVAL only), with a "Repeat not supported" note. Nested components such as VALARM are
  * ignored. A feed with more than MAX_EVENTS events is refused.
  */
-export function parseIcs(text: string): FeedEvent[] {
+export function parseIcs(text: string, now: Date = new Date()): FeedEvent[] {
+  const today = dateKey(now);
   const all = lines(text);
   if (!all.some((l) => l.name === "BEGIN" && l.value.toUpperCase() === "VCALENDAR")) {
     throw new IcsError("This is not a calendar feed");
@@ -235,7 +262,7 @@ export function parseIcs(text: string): FeedEvent[] {
     } else if (line.name === "BEGIN") {
       nested = 1;
     } else if (line.name === "END" && kind === "VEVENT") {
-      const raw = toEvent(current);
+      const raw = toEvent(current, today);
       if (raw) raws.push(raw);
       current = null;
     } else {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { LocalStore } from "./LocalStore";
 import { MemoryPersistence } from "./persistence";
-import { deleteOccurrence, duplicateOccurrence, editOccurrence, shiftWeekdays } from "./eventScope";
+import { CannotMoveSeries, breaksCycle, deleteOccurrence, duplicateOccurrence, editOccurrence, shiftWeekdays } from "./eventScope";
 import { expandEvents, repeatLabel } from "./occurrences";
 import { repeatEvery } from "./repeat";
 
@@ -201,6 +201,8 @@ describe("keeping what was changed on single dates", () => {
     editOccurrence(store, occ("2026-11-09"), "all", { start: "2026-11-10T09:00", end: "2026-11-10T10:00" });
     const copy = store.getState().events.find((e) => e.id === moved.id)!;
     expect(copy.overrideOf).toEqual({ id: base.id, date: "2026-11-24" });
+    // The moved copy itself moves by the same day: 23 November at 10:00 becomes 24 November at 10:00.
+    expect([copy.start, copy.end]).toEqual(["2026-11-24T10:00", "2026-11-24T11:00"]);
     expect(store.getState().events.find((e) => e.id === base.id)!.repeat!.skipped).toEqual(["2026-11-24"]);
   });
 });
@@ -246,5 +248,54 @@ describe("duplicating from a subscription", () => {
     const copy = duplicateOccurrence(store, expandEvents([feedEvent], "2026-11-05", "2026-11-05")[0]!);
     const own = store.getState().calendars.find((c) => c.kind.type === "local")!;
     expect(copy).toMatchObject({ title: "Bonfire night", calendarId: own.id, readOnly: false });
+  });
+});
+
+
+describe("moving a cycle of several weekdays", () => {
+  async function biweekendly(interval = 2) {
+    const store = new LocalStore({ persistence: new MemoryPersistence(), now: () => new Date(2026, 10, 1, 12), broadcast: false });
+    await store.ready;
+    store.addEvent({ title: "Swim", start: "2026-11-07T09:00", end: "2026-11-07T10:00", repeat: { ...repeatEvery("weekly"), interval, weekdays: ["sat", "sun"] } });
+    const occ = (d: string) => expandEvents(store.getState().events, d, d)[0]!;
+    const dates = () => expandEvents(store.getState().events, "2026-11-01", "2026-11-30").map((o) => o.date);
+    return { store, occ, dates };
+  }
+
+  it("every 2 weeks on Sat and Sun, moved a day later, would put Sunday and Monday in different weeks of the cycle: it is refused and nothing changes", async () => {
+    const { store, occ, dates } = await biweekendly();
+    expect(dates()).toEqual(["2026-11-07", "2026-11-08", "2026-11-21", "2026-11-22"]);
+    expect(() => editOccurrence(store, occ("2026-11-07"), "all", { start: "2026-11-08T09:00", end: "2026-11-08T10:00" })).toThrow(CannotMoveSeries);
+    expect(() => editOccurrence(store, occ("2026-11-21"), "following", { start: "2026-11-22T09:00", end: "2026-11-22T10:00" })).toThrow(CannotMoveSeries);
+    expect(dates()).toEqual(["2026-11-07", "2026-11-08", "2026-11-21", "2026-11-22"]);
+    expect(store.getState().events).toHaveLength(1);
+  });
+
+  it("every week it is fine, because there is no cycle to break", async () => {
+    const { store, occ, dates } = await biweekendly(1);
+    editOccurrence(store, occ("2026-11-07"), "all", { start: "2026-11-08T09:00", end: "2026-11-08T10:00" });
+    expect(dates()).toEqual(["2026-11-08", "2026-11-09", "2026-11-15", "2026-11-16", "2026-11-22", "2026-11-23", "2026-11-29", "2026-11-30"]);
+  });
+
+  it("a move that takes every day into the next week keeps the cycle", async () => {
+    const { store, occ, dates } = await biweekendly();
+    editOccurrence(store, occ("2026-11-07"), "all", { start: "2026-11-09T09:00", end: "2026-11-09T10:00" });
+    expect(dates()).toEqual(["2026-11-09", "2026-11-10", "2026-11-23", "2026-11-24"]);
+  });
+
+  it("a move that stays within the week keeps it too", async () => {
+    const { store, occ, dates } = await biweekendly();
+    editOccurrence(store, occ("2026-11-07"), "all", { start: "2026-11-06T09:00", end: "2026-11-06T10:00" });
+    expect(dates()).toEqual(["2026-11-06", "2026-11-07", "2026-11-20", "2026-11-21"]);
+  });
+
+  it("breaksCycle says which moves are fine", () => {
+    const series = (interval: number, weekdays: Parameters<typeof shiftWeekdays>[0]) => ({ start: "2026-11-07", skipped: [], repeat: { ...repeatEvery("weekly"), interval, weekdays: [...weekdays] } });
+    expect(breaksCycle(series(2, ["sat", "sun"]), 1)).toBe(true);
+    expect(breaksCycle(series(2, ["sat", "sun"]), 2)).toBe(false);
+    expect(breaksCycle(series(2, ["sat", "sun"]), -1)).toBe(false);
+    expect(breaksCycle(series(2, ["mon", "sun"]), -1)).toBe(true);
+    expect(breaksCycle(series(1, ["sat", "sun"]), 1)).toBe(false);
+    expect(breaksCycle(series(2, ["sat"]), 1)).toBe(false);
   });
 });
