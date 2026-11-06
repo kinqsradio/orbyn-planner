@@ -3,6 +3,7 @@ import { CHOICES, chooseTheme, readStoredChoice, type ThemeChoice } from "../../
 import { usePrefs } from "../../app/prefs";
 import { Icon } from "../../components/Icon";
 import { CalendarForms, CalendarList } from "../calendar/CalendarList";
+import { NotificationsSettings } from "./NotificationsSettings";
 import { InstallHint } from "../../components/InstallHint";
 
 const LABELS: Record<ThemeChoice, string> = { system: "System", light: "Light", dark: "Dark", dim: "Dim" };
@@ -84,6 +85,8 @@ export function SettingsPage() {
               </div>
               <InstallHint />
             </>
+          ) : category === "Notifications" ? (
+            <NotificationsSettings />
           ) : category === "Calendars" ? (
             <>
               <div className="bh"><b>Your calendars</b><span></span></div>

@@ -1,7 +1,10 @@
-import { applyEventFields, repeatFields, toStored, toView } from "./eventRecord";
+import { repeatFields } from "./eventRecord";
+import { applyFields, sectionFields, storedOf, viewOf } from "./records";
 import { coalesce, refKey, type AnyRecord, type Patch, type Ref } from "./outbox";
 import { defaultPersistence, type ApplyResult, type Persistence } from "./persistence";
+import { inOrder, keyBetween } from "./order";
 import { newSeries, validate } from "./repeat";
+import { completeRepeating } from "./taskRepeat";
 import {
   RESTORE_DAYS,
   type CalendarEvent,
@@ -11,8 +14,12 @@ import {
   type ListColour,
   type ListPatch,
   type NewEvent,
+  type NewProject,
   type NewTask,
   type PlannerCalendar,
+  type Project,
+  type ProjectPatch,
+  type ProjectSection,
   type OutboxEntry,
   type PersistenceState,
   type PlannerState,
@@ -29,7 +36,9 @@ export const INBOX_ID = "inbox";
 export const PERSONAL_CALENDAR_ID = "personal";
 export const CHANNEL_NAME = "orbyn-planner";
 const DAY_MS = 86_400_000;
-const KEY_OF = { task: "tasks", list: "lists", event: "events", calendar: "calendars" } as const;
+/** Stamps newer than this were made with the clock the purge is checking, so they prove nothing about it. */
+const CLOCK_CHECK_MS = 60_000;
+const KEY_OF = { task: "tasks", list: "lists", event: "events", calendar: "calendars", project: "projects" } as const;
 
 export interface LocalStoreOptions {
   persistence?: Persistence;
@@ -51,7 +60,7 @@ function describe(error: unknown, doing: "write" | "open"): string {
 
 export class LocalStore implements PlannerStore {
   readonly ready: Promise<void>;
-  private state: PlannerState = { ready: false, tasks: [], lists: [], events: [], calendars: [], outbox: [], persistence: { status: "ok" } };
+  private state: PlannerState = { ready: false, tasks: [], lists: [], events: [], calendars: [], projects: [], outbox: [], persistence: { status: "ok" } };
   private listeners = new Set<() => void>();
   private persistence: Persistence;
   private writes: Promise<void> = Promise.resolve();
@@ -123,7 +132,7 @@ export class LocalStore implements PlannerStore {
   }
 
   private async load(): Promise<void> {
-    let snapshot = { tasks: [] as Task[], lists: [] as TaskList[], events: [] as CalendarEvent[], calendars: [] as PlannerCalendar[], outbox: [] as OutboxEntry[] };
+    let snapshot = { tasks: [] as Task[], lists: [] as TaskList[], events: [] as CalendarEvent[], calendars: [] as PlannerCalendar[], projects: [] as Project[], outbox: [] as OutboxEntry[] };
     let persistence = this.state.persistence;
     try {
       snapshot = await this.persistence.load();
@@ -133,7 +142,7 @@ export class LocalStore implements PlannerStore {
       this.writable = false;
       persistence = { status: "failed", reason: describe(error, "open") };
     }
-    this.state = { ready: true, ...snapshot, events: snapshot.events.map((e) => toView(e as unknown as Record<string, unknown>)), persistence };
+    this.state = { ready: true, ...snapshot, events: snapshot.events.map((e) => viewOf("event", e as unknown as AnyRecord) as unknown as CalendarEvent), tasks: snapshot.tasks.map((t) => viewOf("task", t as unknown as AnyRecord) as unknown as Task), projects: snapshot.projects.map((x) => viewOf("project", x as unknown as AnyRecord) as unknown as Project), persistence };
     if (!this.state.lists.some((l) => l.isInbox)) {
       const inbox: TaskList = { id: INBOX_ID, name: "Inbox", colour: "c1", isInbox: true };
       this.commit([{ type: "list", id: inbox.id, op: "create", record: inbox }]);
@@ -185,7 +194,7 @@ export class LocalStore implements PlannerStore {
         this.replaceRecord(
           p.type,
           p.id,
-          p.type === "event" ? applyEventFields(record as CalendarEvent, p.fields) : ({ ...record, ...p.fields } as AnyRecord),
+          applyFields(p.type, record, p.fields),
         );
       }
       if (p.local) continue;
@@ -203,7 +212,7 @@ export class LocalStore implements PlannerStore {
   private reconcile(result: ApplyResult): void {
     for (const r of result.records) {
       if (this.pending.get(refKey(r))) continue;
-      this.replaceRecord(r.type, r.id, r.type === "event" && r.record ? toView(r.record as unknown as Record<string, unknown>) : r.record);
+      this.replaceRecord(r.type, r.id, r.record ? viewOf(r.type, r.record) : r.record);
     }
     for (const o of result.outbox) {
       if (this.pending.get(refKey(o))) continue;
@@ -225,7 +234,7 @@ export class LocalStore implements PlannerStore {
     const at = this.now().toISOString();
     const patches = inputs.map((p) => ({ ...p, key: this.newId() }) as Patch);
     // What is stored and sent is the engine's shape; the app holds events with their skips gathered.
-    const wire = patches.map((p) => (p.op === "create" && p.type === "event" ? { ...p, record: toStored(p.record as CalendarEvent) as unknown as AnyRecord } : p));
+    const wire = patches.map((p) => (p.op === "create" ? { ...p, record: storedOf(p.type, p.record) } : p));
     this.applyLocal(patches, wire, at);
     this.emit();
     if (!this.writable) return;
@@ -273,6 +282,12 @@ export class LocalStore implements PlannerStore {
       completedAt: null,
       deletedAt: null,
       checklist: input.checklist ?? [],
+      projectId: input.projectId ?? null,
+      sectionId: input.sectionId ?? null,
+      repeat: input.repeat ? newSeries((input.due ?? stamp).slice(0, 10), input.repeat) : null,
+      reminder: input.reminder ?? null,
+      overrideOf: input.overrideOf ?? null,
+      completions: [],
       createdAt: stamp,
       updatedAt: stamp,
     };
@@ -281,26 +296,52 @@ export class LocalStore implements PlannerStore {
   }
 
   updateTask(id: string, patch: TaskPatch): void {
-    this.change(id, "update", { ...patch });
+    const { repeat, ...rest } = patch;
+    const fields: Record<string, unknown> = { ...rest };
+    if (repeat !== undefined) {
+      if (repeat) validate(repeat);
+      Object.assign(fields, repeatFields(this.task(id).repeat, repeat));
+    }
+    this.change(id, "update", fields);
   }
 
   setDone(id: string, done: boolean): void {
-    this.change(id, "update", { done, completedAt: done ? this.now().toISOString() : null });
+    const task = this.task(id);
+    // Completing a repeating task moves it to its next date instead of finishing it.
+    if (done && task.repeat) this.change(id, "update", completeRepeating(task, this.now().toISOString()));
+    else this.change(id, "update", { done, completedAt: done ? this.now().toISOString() : null });
   }
 
   deleteTask(id: string): void {
-    this.change(id, "delete", { deletedAt: this.now().toISOString() });
+    const stamp = this.now().toISOString();
+    // One-off copies of single dates outlive their series: they keep their title and stand alone.
+    const copies = this.state.tasks.filter((t) => t.overrideOf?.id === id && t.deletedAt === null);
+    this.assertReady();
+    this.task(id);
+    this.commit([
+      { type: "task", id, op: "delete", fields: { deletedAt: stamp, updatedAt: stamp } },
+      ...copies.map((c): PatchInput => ({ type: "task", id: c.id, op: "update", fields: { overrideOf: null, updatedAt: stamp } })),
+    ]);
   }
 
   restoreTask(id: string): void {
-    this.change(id, "update", { deletedAt: null });
+    const task = this.task(id);
+    // A section deleted in the meantime no longer exists: the task comes back to the project's top.
+    const project = task.projectId ? this.state.projects.find((p) => p.id === task.projectId) : undefined;
+    const lost = task.sectionId !== null && !project?.sections.some((s) => s.id === task.sectionId);
+    this.change(id, "update", { deletedAt: null, ...(lost ? { sectionId: null } : {}) });
   }
 
   /**
-   * Removes tasks deleted more than 30 days ago for good, leaving a delete entry in the outbox.
-   * It does nothing when this device's clock is more than a day past the newest record it holds: a
-   * clock set far ahead would otherwise wipe the whole Deleted list. After a long idle spell the
-   * purge simply waits for the next change that brings the newest timestamp up to date.
+   * Removes records deleted more than 30 days ago for good (a record never sent leaves no trace;
+   * one that was sent leaves a delete entry in the outbox).
+   *
+   * It does nothing when this device's clock is more than a day past the newest timestamp it can
+   * trust. A timestamp can be trusted only if this device did not just make it with the clock being
+   * checked, so anything stamped within the last minute is ignored: otherwise a clock jumped far
+   * ahead would stamp a fresh record, look up to date and wipe the whole Deleted list. Until sync
+   * exists the evidence is the device's own older stamps; once it does, the newest server time
+   * replaces them. After a long idle spell the purge waits for the next session after a change.
    */
   purgeDeleted(): number {
     const stamps = [
@@ -309,7 +350,8 @@ export class LocalStore implements PlannerStore {
       ...this.state.outbox.flatMap((e) => [e.createdAt, e.updatedAt]),
     ]
       .filter((s): s is string => s !== null)
-      .map((s) => new Date(s).getTime());
+      .map((s) => new Date(s).getTime())
+      .filter((t) => t <= this.now().getTime() - CLOCK_CHECK_MS);
     const newest = stamps.length ? Math.max(...stamps) : 0;
     if (this.now().getTime() - newest > DAY_MS) return 0;
     const cutoff = this.now().getTime() - RESTORE_DAYS * DAY_MS;
@@ -339,6 +381,72 @@ export class LocalStore implements PlannerStore {
     const fields: Record<string, unknown> = { ...patch };
     if (patch.name !== undefined) fields.name = patch.name.trim() || current.name;
     this.commit([{ type: "list", id, op: "update", fields }]);
+  }
+
+  // Projects ------------------------------------------------------------------------------------
+
+  private project(id: string): Project {
+    const found = this.state.projects.find((p) => p.id === id);
+    if (!found) throw new Error(`No project ${id}`);
+    return found;
+  }
+
+  addProject(input: NewProject): Project {
+    this.assertReady();
+    const project: Project = { id: this.newId(), name: input.name.trim(), colour: input.colour, goal: input.goal ?? null, sections: [], archived: false };
+    this.commit([{ type: "project", id: project.id, op: "create", record: project }]);
+    return project;
+  }
+
+  updateProject(id: string, patch: ProjectPatch): void {
+    this.assertReady();
+    const current = this.project(id);
+    const fields: Record<string, unknown> = { ...patch };
+    if (patch.name !== undefined) fields.name = patch.name.trim() || current.name;
+    this.commit([{ type: "project", id, op: "update", fields }]);
+  }
+
+  addSection(projectId: string, name: string): ProjectSection {
+    this.assertReady();
+    const project = this.project(projectId);
+    const last = inOrder(project.sections).at(-1)?.order ?? null;
+    const order = keyBetween(last, null);
+    if (order === null) throw new Error("Too many sections");
+    const section: ProjectSection = { id: this.newId(), name: name.trim(), order };
+    this.commit([{ type: "project", id: projectId, op: "update", fields: sectionFields.add(section) }]);
+    return section;
+  }
+
+  renameSection(projectId: string, sectionId: string, name: string): void {
+    this.assertReady();
+    const section = this.project(projectId).sections.find((s) => s.id === sectionId);
+    if (!section) return;
+    this.commit([{ type: "project", id: projectId, op: "update", fields: sectionFields.rename(sectionId, name.trim() || section.name) }]);
+  }
+
+  moveSection(projectId: string, sectionId: string, direction: "up" | "down"): void {
+    this.assertReady();
+    const project = this.project(projectId);
+    const sorted = inOrder(project.sections);
+    const i = sorted.findIndex((s) => s.id === sectionId);
+    const j = direction === "up" ? i - 1 : i + 1;
+    if (i < 0 || j < 0 || j >= sorted.length) return;
+    // Take the section out and put its key between its new neighbours; no other section changes.
+    const rest = sorted.filter((s) => s.id !== sectionId);
+    const order = keyBetween(rest[j - 1]?.order ?? null, rest[j]?.order ?? null);
+    if (order === null) return;
+    this.commit([{ type: "project", id: projectId, op: "update", fields: sectionFields.move(sectionId, order) }]);
+  }
+
+  deleteSection(projectId: string, sectionId: string): void {
+    this.assertReady();
+    this.project(projectId);
+    const moved = this.state.tasks.filter((t) => t.sectionId === sectionId && t.deletedAt === null);
+    const stamp = this.now().toISOString();
+    this.commit([
+      { type: "project", id: projectId, op: "update", fields: sectionFields.remove(sectionId) },
+      ...moved.map((t): PatchInput => ({ type: "task", id: t.id, op: "update", fields: { sectionId: null, updatedAt: stamp } })),
+    ]);
   }
 
   // Events and calendars ------------------------------------------------------------------------

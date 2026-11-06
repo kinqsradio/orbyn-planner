@@ -23,7 +23,7 @@ function EventRow({ occ }: { occ: Occurrence }) {
   const ui = useUi();
   const meta = ["Event", occ.event.place].filter(Boolean).join(" · ");
   return (
-    <li className="row">
+    <li className="row" data-row-id={occ.event.id}>
       <span className="time">{occ.allDay ? "All day" : formatTime(parseDue(occ.start).date)}</span>
       <span className="sw" style={{ background: colourOf(calendars, occ.event) }} aria-hidden="true" />
       <button type="button" className="what link-btn" onClick={() => ui.openEvent(occ.event.id, occ.date)}>{occ.event.title}</button>
@@ -97,7 +97,7 @@ export function TodayPage() {
     <>
       <PageHeader title={greeting(now)} sub={`${dayName} ${now.getDate()} ${MONTHS[now.getMonth()]} · ${summary}`}>
         <SyncLine status={status} onRetry={retry} waiting={waiting} />
-        <button type="button" className="btn" onClick={ui.openNewTask}>
+        <button type="button" className="btn" onClick={() => ui.openNewTask()}>
           <Icon name="plus" small />
           New task
         </button>

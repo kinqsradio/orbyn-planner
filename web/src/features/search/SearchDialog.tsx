@@ -8,7 +8,7 @@ import { useDialog } from "../../components/useDialog";
 import { formatDue } from "../../lib/dates";
 import { usePlanner, useStore } from "../../store/context";
 import type { Task, TaskList } from "../../store/types";
-import { parseQuickAdd } from "../tasks/quickAdd";
+import { describeRepeat, parseQuickAdd } from "../tasks/quickAdd";
 import { isLive, openCount } from "../tasks/selectors";
 import { Swatch } from "../tasks/TaskRow";
 
@@ -55,10 +55,11 @@ export function SearchDialog() {
     const listSection: Section = { title: "Lists", items: matchedLists.map((l) => ({ kind: "list", id: `list-${l.id}`, list: l })) };
     let addSection: Section | null = null;
     if (!exact) {
-      const parsed = keep ? { title: q, due: null, listId: null, priority: "none" as const } : parseQuickAdd(q, now, lists);
+      const parsed = keep ? { title: q, due: null, listId: null, priority: "none" as const, repeat: null } : parseQuickAdd(q, now, lists);
       const bits = [
         parsed.due && `due ${formatDue(parsed.due, now)}`,
         parsed.listId && lists.find((l) => l.id === parsed.listId)?.name,
+        parsed.repeat && describeRepeat(parsed.repeat),
         parsed.priority !== "none" && `${parsed.priority} priority`,
       ].filter(Boolean);
       addSection = {
@@ -81,8 +82,8 @@ export function SearchDialog() {
   const pick = (item: Item | undefined) => {
     if (!item) return;
     if (item.kind === "add") {
-      const parsed = keep ? { title: q, due: null, listId: null, priority: "none" as const } : parseQuickAdd(q, now, lists);
-      const task = store.addTask({ title: parsed.title, due: parsed.due, listId: parsed.listId ?? undefined, priority: parsed.priority });
+      const parsed = keep ? { title: q, due: null, listId: null, priority: "none" as const, repeat: null } : parseQuickAdd(q, now, lists);
+      const task = store.addTask({ title: parsed.title, due: parsed.due, listId: parsed.listId ?? undefined, priority: parsed.priority, repeat: parsed.repeat });
       ui.closeSearch();
       ui.showToast(`Added “${task.title}”`);
     } else if (item.kind === "task") {

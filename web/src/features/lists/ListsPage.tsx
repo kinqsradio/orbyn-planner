@@ -139,7 +139,7 @@ export function ListsPage() {
                   </button>
                 ))}
               </div>
-              <button type="button" className="btn" onClick={ui.openNewTask}>
+              <button type="button" className="btn" onClick={() => ui.openNewTask()}>
                 <Icon name="plus" small />
                 Add a task
               </button>

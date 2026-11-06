@@ -33,7 +33,7 @@ export function useRouter(): Router {
 
 export function Link({ to, className, children, onClick, ...rest }: { to: string } & Omit<React.ComponentProps<"a">, "href">) {
   const { path, navigate } = useRouter();
-  const current = path === to || (to === "/today" && path === "/");
+  const current = path === to || (to === "/today" && path === "/") || (to !== "/today" && path.startsWith(`${to}/`));
   const classes = [className, current ? "on" : ""].filter(Boolean).join(" ");
   return (
     <a

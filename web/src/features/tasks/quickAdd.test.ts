@@ -17,11 +17,12 @@ describe("parseQuickAdd", () => {
       due: "2026-11-13T15:00",
       listId: "err",
       priority: "high",
+      repeat: null,
     });
   });
 
   it("leaves plain text as a title", () => {
-    expect(parse("buy milk")).toEqual({ title: "buy milk", due: null, listId: null, priority: "none" });
+    expect(parse("buy milk")).toEqual({ title: "buy milk", due: null, listId: null, priority: "none", repeat: null });
     expect(parse("   ")).toMatchObject({ title: "", due: null });
   });
 
@@ -126,12 +127,13 @@ describe("parseQuickAdd", () => {
         due: "2026-11-14",
         listId: "err",
         priority: "low",
+        repeat: null,
       });
     });
   });
 
   it("keeps the words when nothing is left to call the task", () => {
-    expect(parse("tomorrow")).toEqual({ title: "tomorrow", due: null, listId: null, priority: "none" });
+    expect(parse("tomorrow")).toEqual({ title: "tomorrow", due: null, listId: null, priority: "none", repeat: null });
     expect(parse("#errands !high")).toMatchObject({ title: "#errands !high", listId: null });
   });
 
@@ -152,7 +154,7 @@ describe("parseQuickAdd", () => {
     });
 
     it("an ALL CAPS word is never a date", () => {
-      expect(parse("SAT prep sat")).toEqual({ title: "SAT prep", due: "2026-11-14", listId: null, priority: "none" });
+      expect(parse("SAT prep sat")).toEqual({ title: "SAT prep", due: "2026-11-14", listId: null, priority: "none", repeat: null });
       none("MAY 5 reports");
     });
 
@@ -160,7 +162,7 @@ describe("parseQuickAdd", () => {
       expect(parse("dentist on sat")).toMatchObject({ title: "dentist", due: "2026-11-14" });
       expect(parse("pay rent by 1 may")).toMatchObject({ title: "pay rent", due: "2027-05-01" });
       expect(parse("tax due 14 nov")).toMatchObject({ title: "tax", due: "2026-11-14" });
-      expect(parse("gym every fri")).toMatchObject({ title: "gym every", due: "2026-11-13" });
+      expect(parse("gym every fri")).toMatchObject({ title: "gym", due: "2026-11-13" });
       expect(parse("lunch sun")).toMatchObject({ title: "lunch", due: "2026-11-08" });
     });
 
@@ -184,12 +186,12 @@ describe("parseQuickAdd", () => {
 
   describe("words that are also property names", () => {
     it("fix constructor bug", () => {
-      expect(parse("fix constructor bug")).toEqual({ title: "fix constructor bug", due: null, listId: null, priority: "none" });
+      expect(parse("fix constructor bug")).toEqual({ title: "fix constructor bug", due: null, listId: null, priority: "none", repeat: null });
       expect(parse("toString and valueOf and __proto__ hasOwnProperty")).toMatchObject({ due: null, listId: null, priority: "none" });
     });
 
     it("!constructor is not a priority, and next constructor is not a weekday", () => {
-      expect(parse("fix it !constructor")).toEqual({ title: "fix it !constructor", due: null, listId: null, priority: "none" });
+      expect(parse("fix it !constructor")).toEqual({ title: "fix it !constructor", due: null, listId: null, priority: "none", repeat: null });
       expect(parse("next constructor")).toMatchObject({ title: "next constructor", due: null });
       expect(parse("fix #constructor")).toMatchObject({ title: "fix #constructor", listId: null });
     });
@@ -207,6 +209,50 @@ describe("parseQuickAdd", () => {
 
     it("adds the year when it is not this year", () => {
       expect(describeParse(parse("renew on 2 feb"), LISTS, NOW)).toBe("renew · due Tue 2 Feb 2027");
+    });
+  });
+
+  describe("every …", () => {
+    const every = (text: string) => parse(text);
+
+    it("every fri is a weekly repeat on Friday, starting next Friday", () => {
+      expect(every("gym every fri")).toEqual({
+        title: "gym",
+        due: "2026-11-13",
+        listId: null,
+        priority: "none",
+        repeat: { frequency: "weekly", interval: 1, weekdays: ["fri"], end: { type: "never" } },
+      });
+      expect(every("gym every Friday 6pm").due).toBe("2026-11-13T18:00");
+    });
+
+    it("every day, week, month and year start today", () => {
+      expect(every("water plants every day")).toMatchObject({ title: "water plants", due: "2026-11-07", repeat: { frequency: "daily", interval: 1 } });
+      expect(every("review every week").repeat).toMatchObject({ frequency: "weekly", interval: 1, weekdays: [] });
+      expect(every("pay rent every month").repeat).toMatchObject({ frequency: "monthly" });
+      expect(every("renew every year").repeat).toMatchObject({ frequency: "yearly" });
+    });
+
+    it("every N units, every other unit and every weekday", () => {
+      expect(every("vacuum every 2 weeks").repeat).toMatchObject({ frequency: "weekly", interval: 2 });
+      expect(every("pills every 3 days").repeat).toMatchObject({ frequency: "daily", interval: 3 });
+      expect(every("bins every other week").repeat).toMatchObject({ frequency: "weekly", interval: 2 });
+      expect(every("stand-up every weekday").repeat).toMatchObject({ frequency: "weekly", weekdays: ["mon", "tue", "wed", "thu", "fri"] });
+    });
+
+    it("an explicit date wins as the start", () => {
+      expect(every("yoga every tue 14 nov on")).toMatchObject({ repeat: { weekdays: ["tue"] } });
+      expect(every("yoga every tue on 14 nov")).toMatchObject({ title: "yoga", due: "2026-11-14", repeat: { weekdays: ["tue"] } });
+    });
+
+    it("every followed by something else is plain text", () => {
+      expect(every("clean every nook")).toEqual({ title: "clean every nook", due: null, listId: null, priority: "none", repeat: null });
+      expect(every("every")).toMatchObject({ title: "every", repeat: null });
+    });
+
+    it("describes the repeat in the preview", () => {
+      expect(describeParse(every("gym every fri"), LISTS, NOW)).toBe("gym · due Fri 13 Nov · every Friday");
+      expect(describeParse(every("vacuum every 2 weeks"), LISTS, NOW)).toBe("vacuum · due Sat 7 Nov · every 2 weeks");
     });
   });
 });

@@ -8,6 +8,16 @@ export interface ToastState {
   undo?: () => void;
   /** Move focus to Undo when it appears, for a change that took the focused thing away. */
   focusUndo?: boolean;
+  /** After Undo, move focus to the row with this id (see lib/focus.ts). */
+  focusRowOnUndo?: string;
+  /** A second action beside Undo. */
+  secondary?: { label: string; run: () => void };
+}
+
+export interface ToastOptions {
+  focusUndo?: boolean;
+  focusRowOnUndo?: string;
+  secondary?: { label: string; run: () => void };
 }
 
 export interface EventKey {
@@ -35,13 +45,15 @@ interface Ui {
   listId: string | null;
   selectList: (id: string) => void;
   newTaskOpen: boolean;
-  openNewTask: () => void;
+  /** Where a new task starts out, when opened from a project. */
+  newTaskDefaults: { projectId?: string | null; sectionId?: string | null };
+  openNewTask: (defaults?: { projectId?: string | null; sectionId?: string | null }) => void;
   closeNewTask: () => void;
   searchOpen: boolean;
   openSearch: () => void;
   closeSearch: () => void;
   toast: ToastState | null;
-  showToast: (message: string, undo?: () => void, options?: { focusUndo?: boolean }) => void;
+  showToast: (message: string, undo?: () => void, options?: ToastOptions) => void;
   dismissToast: () => void;
 }
 
@@ -57,10 +69,11 @@ export function UiProvider({ children }: { children: ReactNode }) {
   const [listId, setListId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [newTaskOpen, setNewTaskOpen] = useState(false);
+  const [newTaskDefaults, setNewTaskDefaults] = useState<{ projectId?: string | null; sectionId?: string | null }>({});
   const [toast, setToast] = useState<ToastState | null>(null);
 
-  const showToast = useCallback((message: string, undo?: () => void, options?: { focusUndo?: boolean }) => {
-    setToast({ id: ++toastCounter, message, undo, focusUndo: options?.focusUndo });
+  const showToast = useCallback((message: string, undo?: () => void, options?: ToastOptions) => {
+    setToast({ id: ++toastCounter, message, undo, focusUndo: options?.focusUndo, focusRowOnUndo: options?.focusRowOnUndo, secondary: options?.secondary });
   }, []);
   const dismissToast = useCallback(() => setToast(null), []);
 
@@ -92,7 +105,11 @@ export function UiProvider({ children }: { children: ReactNode }) {
       listId,
       selectList: setListId,
       newTaskOpen,
-      openNewTask: () => setNewTaskOpen(true),
+      newTaskDefaults,
+      openNewTask: (defaults) => {
+        setNewTaskDefaults(defaults ?? {});
+        setNewTaskOpen(true);
+      },
       closeNewTask: () => setNewTaskOpen(false),
       searchOpen,
       openSearch: () => setSearchOpen(true),
@@ -101,7 +118,7 @@ export function UiProvider({ children }: { children: ReactNode }) {
       showToast,
       dismissToast,
     }),
-    [taskId, eventKey, newEventDate, newEventTime, calendarsOpen, listId, newTaskOpen, searchOpen, toast, showToast, dismissToast],
+    [newTaskDefaults, taskId, eventKey, newEventDate, newEventTime, calendarsOpen, listId, newTaskOpen, searchOpen, toast, showToast, dismissToast],
   );
   return <UiContext.Provider value={value}>{children}</UiContext.Provider>;
 }

@@ -5,9 +5,22 @@ export interface Prefs {
   weekStart: "mon" | "sun";
   /** Days in the Week view: the whole week, or Monday to Friday (which still shows 7 on a weekend of the current week). */
   weekDays: 5 | 7;
+  /** Task reminders as browser notifications. Turned on in Settings · Notifications, never at load. */
+  reminders: boolean;
+  /** No notification is shown between `from` and `to` (local time, may cross midnight). */
+  quiet: QuietHours;
 }
 
-export const DEFAULT_PREFS: Prefs = { weekStart: "mon", weekDays: 7 };
+export interface QuietHours {
+  enabled: boolean;
+  from: string;
+  to: string;
+}
+
+export const DEFAULT_QUIET: QuietHours = { enabled: false, from: "22:00", to: "07:00" };
+export const DEFAULT_PREFS: Prefs = { weekStart: "mon", weekDays: 7, reminders: false, quiet: DEFAULT_QUIET };
+
+const isTime = (v: unknown): v is string => typeof v === "string" && /^\d{2}:\d{2}$/.test(v);
 export const PREFS_KEY = "orbyn-planner.prefs";
 
 function read(): Prefs {
@@ -16,6 +29,12 @@ function read(): Prefs {
     return {
       weekStart: raw.weekStart === "sun" ? "sun" : "mon",
       weekDays: raw.weekDays === 5 ? 5 : 7,
+      reminders: raw.reminders === true,
+      quiet: {
+        enabled: raw.quiet?.enabled === true,
+        from: isTime(raw.quiet?.from) ? raw.quiet.from : DEFAULT_QUIET.from,
+        to: isTime(raw.quiet?.to) ? raw.quiet.to : DEFAULT_QUIET.to,
+      },
     };
   } catch {
     return DEFAULT_PREFS;

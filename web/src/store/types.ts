@@ -28,6 +28,17 @@ export interface Task {
   /** Set when deleted; the task can be put back for 30 days. */
   deletedAt: string | null;
   checklist: ChecklistItem[];
+  /** The project and section the task belongs to, if any. */
+  projectId: string | null;
+  sectionId: string | null;
+  /** The engine's Series shape; its start is the date of the first due. The task's `due` is the current occurrence. */
+  repeat: Series | null;
+  /** Minutes before the due time to remind (0 is at the due time), or null. A date-only due reminds at 09:00. */
+  reminder: number | null;
+  /** When a repeating task was completed, most recent last. Feeds "Done this week". */
+  completions: string[];
+  /** Set on the one-off copy made by "This task" on a repeating task: which date of which task it replaces. */
+  overrideOf: { id: string; date: string } | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -39,7 +50,7 @@ export interface TaskList {
   isInbox: boolean;
 }
 
-export type RecordType = "task" | "list" | "event" | "calendar";
+export type RecordType = "task" | "list" | "event" | "calendar" | "project";
 export type OutboxOp = "create" | "update" | "delete";
 
 /**
@@ -120,12 +131,31 @@ export type PersistenceState =
   | { status: "memory" }
   | { status: "failed"; reason: string };
 
+export interface ProjectSection {
+  id: string;
+  name: string;
+  /** Fractional key (see order.ts); sections sort by it, then by id. */
+  order: string;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  colour: ListColour;
+  /** `YYYY-MM-DD` the project should be done by, or null. */
+  goal: string | null;
+  sections: ProjectSection[];
+  /** Done: kept, but out of the Active list. */
+  archived: boolean;
+}
+
 export interface PlannerState {
   ready: boolean;
   tasks: readonly Task[];
   lists: readonly TaskList[];
   events: readonly CalendarEvent[];
   calendars: readonly PlannerCalendar[];
+  projects: readonly Project[];
   outbox: readonly OutboxEntry[];
   persistence: PersistenceState;
 }
@@ -137,6 +167,12 @@ export interface NewTask {
   due?: string | null;
   priority?: Priority;
   checklist?: ChecklistItem[];
+  projectId?: string | null;
+  sectionId?: string | null;
+  /** A rule; the series starts on the due date (today when there is none). */
+  repeat?: Repeat | null;
+  reminder?: number | null;
+  overrideOf?: { id: string; date: string } | null;
 }
 
 export interface NewEvent {
@@ -166,7 +202,17 @@ export type FeedEvent = Pick<NewEvent, "title" | "allDay" | "start" | "end" | "p
 
 export type CalendarPatch = Partial<Pick<PlannerCalendar, "name" | "colour" | "visible">>;
 
-export type TaskPatch = Partial<Pick<Task, "title" | "notes" | "listId" | "due" | "priority" | "checklist">>;
+export type TaskPatch = Partial<
+  Pick<Task, "title" | "notes" | "listId" | "due" | "priority" | "checklist" | "projectId" | "sectionId" | "repeat" | "reminder" | "completions" | "done" | "completedAt" | "overrideOf">
+>;
+
+export interface NewProject {
+  name: string;
+  colour: ListColour;
+  goal?: string | null;
+}
+
+export type ProjectPatch = Partial<Pick<Project, "name" | "colour" | "goal" | "archived">>;
 export type ListPatch = Partial<Pick<TaskList, "name" | "colour">>;
 
 export const RESTORE_DAYS = 30;
@@ -189,6 +235,14 @@ export interface PlannerStore {
 
   addList(name: string, colour: ListColour): TaskList;
   updateList(id: string, patch: ListPatch): void;
+
+  addProject(input: NewProject): Project;
+  updateProject(id: string, patch: ProjectPatch): void;
+  addSection(projectId: string, name: string): ProjectSection;
+  renameSection(projectId: string, sectionId: string, name: string): void;
+  moveSection(projectId: string, sectionId: string, direction: "up" | "down"): void;
+  /** Removes the section; its tasks go to "No section". */
+  deleteSection(projectId: string, sectionId: string): void;
 
   addEvent(input: NewEvent): CalendarEvent;
   updateEvent(id: string, patch: EventPatch): void;

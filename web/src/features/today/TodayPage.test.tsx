@@ -104,3 +104,16 @@ describe("Today when storage fails", () => {
     expect(document.body.textContent).not.toMatch(/saved here/i);
   });
 });
+
+describe("Done this week with repeating tasks", () => {
+  it("counts each completion of a repeating task", async () => {
+    const store = new LocalStore({ persistence: new MemoryPersistence(), now: () => NOW, broadcast: false });
+    await store.ready;
+    const t = store.addTask({ title: "Water plants", due: "2026-11-07", repeat: { frequency: "daily", interval: 1, weekdays: [], end: { type: "never" } } });
+    store.setDone(t.id, true);
+    store.setDone(t.id, true);
+    const once = store.addTask({ title: "One-off" });
+    store.setDone(once.id, true);
+    expect(groupToday(store.getState().tasks, NOW).doneThisWeek).toBe(3);
+  });
+});

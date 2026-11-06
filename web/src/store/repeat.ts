@@ -358,3 +358,8 @@ export function splitAt(series: Series, at: string): [Series, Series] {
   }
   return [first, following];
 }
+
+/** How many occurrences fall before `at`, counting skipped ones, as a count end does. */
+export function countBefore(series: Series, at: string): number {
+  return rawCountBefore(series, at);
+}

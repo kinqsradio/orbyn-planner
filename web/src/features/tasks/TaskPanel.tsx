@@ -6,25 +6,37 @@ import { Icon } from "../../components/Icon";
 import { Portal } from "../../components/Portal";
 import { PHONE_QUERY, useMediaQuery } from "../../components/useMediaQuery";
 import { useDialog } from "../../components/useDialog";
-import { makeDue, parseDue } from "../../lib/dates";
+import { dateKey, makeDue, parseDue } from "../../lib/dates";
 import { usePlanner, useStore } from "../../store/context";
 import { inOrder, keyBetween } from "../../store/order";
+import { CannotMoveSeries, type Scope } from "../../store/eventScope";
+import type { Repeat } from "../../store/repeat";
+import { allowedScopes, editTaskRepeat, type RepeatEdit } from "../../store/taskRepeat";
 import { PRIORITIES, type Task } from "../../store/types";
+import { ScopeDialog } from "../calendar/ScopeDialog";
+import { RepeatPicker } from "./RepeatPicker";
+import { TASK_REMINDERS } from "./reminder";
 import { needsAction } from "./selectors";
+import { useComplete } from "./useComplete";
 
 const SAVE_DELAY_MS = 500;
 
 function Panel({ task }: { task: Task }) {
   const store = useStore();
-  const { lists } = usePlanner();
+  const { lists, projects } = usePlanner();
   const ui = useUi();
   const now = useNow();
+  const complete = useComplete();
   const ref = useRef<HTMLElement>(null);
   const phone = useMediaQuery(PHONE_QUERY);
 
   const [title, setTitle] = useState(task.title);
   const [notes, setNotes] = useState(task.notes);
   const [step, setStep] = useState("");
+  // A change to a repeating task waits here while the person says how far it reaches.
+  const [asking, setAsking] = useState<RepeatEdit | null>(null);
+  const [pickerKey, setPickerKey] = useState(0);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Title and notes are saved a moment after typing stops, and always when the panel is left.
   const latest = useRef({ title, notes, task });
@@ -58,14 +70,40 @@ function Panel({ task }: { task: Task }) {
   const steps = inOrder(task.checklist);
   const doneSteps = task.checklist.filter((c) => c.done).length;
 
+  const today = dateKey(now);
+  /** Apply an edit to due or repeat; a repeating task asks how far it reaches first. */
+  const edit = (change: RepeatEdit) => {
+    if (task.repeat && change.due !== null) setAsking(change);
+    else editTaskRepeat(store, task, change, "all", today);
+  };
+
   const setDue = (day: string, time: string) => {
-    // No day means no due date, so a time left in the field goes with it.
-    if (!day) return store.updateTask(task.id, { due: null });
+    // No day means no due date, so a time left in the field goes with it. A repeating task keeps
+    // its date: stop the repeat first to remove it.
+    if (!day) return task.repeat ? undefined : edit({ due: null });
     const base = parseDue(day).date;
     const [h = 0, m = 0] = time ? time.split(":").map(Number) : [];
     base.setHours(h, m);
-    store.updateTask(task.id, { due: makeDue(base, time !== "") });
+    edit({ due: makeDue(base, time !== "") });
   };
+
+  const choose = (scope: Scope) => {
+    if (asking) {
+      try {
+        editTaskRepeat(store, task, asking, scope, today);
+        setSaveError(null);
+      } catch (e) {
+        setSaveError(e instanceof CannotMoveSeries ? e.message : "Couldn’t save that change.");
+      }
+    }
+    setAsking(null);
+    setPickerKey((k) => k + 1); // show what is really stored, whatever happened
+  };
+  const cancelAsk = () => {
+    setAsking(null);
+    setPickerKey((k) => k + 1); // show what is really stored again
+  };
+  const project = projects.find((p) => p.id === task.projectId);
 
   const commitTitle = () => {
     if (title.trim() === "") setTitle(task.title);
@@ -86,7 +124,7 @@ function Panel({ task }: { task: Task }) {
     flush();
     store.deleteTask(task.id);
     ui.closeTask();
-    ui.showToast("Task deleted", () => store.restoreTask(task.id), { focusUndo: true });
+    ui.showToast("Task deleted", () => store.restoreTask(task.id), { focusUndo: true, focusRowOnUndo: task.id });
   };
 
   const panel = (
@@ -108,7 +146,7 @@ function Panel({ task }: { task: Task }) {
           className="check"
           checked={task.done}
           aria-label={`Complete ${task.title}`}
-          onChange={(e) => store.setDone(task.id, e.target.checked)}
+          onChange={(e) => complete(task, e.target.checked)}
         />
         <input
           className="tp-title"
@@ -151,6 +189,71 @@ function Panel({ task }: { task: Task }) {
           </select>
         </b>
       </div>
+      <div className="kv">
+        <span>Repeat</span>
+        <b className="ctl">
+          <RepeatPicker
+            key={`${pickerKey}-${task.repeat ? JSON.stringify(task.repeat.repeat) : ""}`}
+            value={task.repeat?.repeat ?? null}
+            start={dayValue || today}
+            onChange={(rule: Repeat | null) => edit({ repeat: rule })}
+          />
+        </b>
+      </div>
+      <div className="kv">
+        <span>Reminder</span>
+        <b className="ctl">
+          <select
+            className="inp"
+            aria-label="Reminder"
+            value={task.reminder ?? ""}
+            onChange={(e) => store.updateTask(task.id, { reminder: e.target.value === "" ? null : Number(e.target.value) })}
+          >
+            {TASK_REMINDERS.map((r) => (
+              <option key={r.label} value={r.value ?? ""}>{r.label}</option>
+            ))}
+          </select>
+        </b>
+      </div>
+      {task.reminder !== null && !task.due && <p className="t3 hint">Set a due date to get this reminder.</p>}
+      {projects.length > 0 && (
+        <>
+          <div className="kv">
+            <span>Project</span>
+            <b className="ctl">
+              <select
+                className="inp"
+                aria-label="Project"
+                value={task.projectId ?? ""}
+                onChange={(e) => store.updateTask(task.id, { projectId: e.target.value || null, sectionId: null })}
+              >
+                <option value="">None</option>
+                {projects.filter((p) => !p.archived || p.id === task.projectId).map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </b>
+          </div>
+          {project && project.sections.length > 0 && (
+            <div className="kv">
+              <span>Section</span>
+              <b className="ctl">
+                <select
+                  className="inp"
+                  aria-label="Section"
+                  value={task.sectionId ?? ""}
+                  onChange={(e) => store.updateTask(task.id, { sectionId: e.target.value || null })}
+                >
+                  <option value="">No section</option>
+                  {inOrder(project.sections).map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </b>
+            </div>
+          )}
+        </>
+      )}
 
       <div className="bh">
         <b>Checklist</b>
@@ -213,10 +316,12 @@ function Panel({ task }: { task: Task }) {
 
       <div className="tp-foot">
         <button type="button" className="ghost danger" onClick={remove}>Delete</button>
-        <button type="button" className="btn" onClick={() => store.setDone(task.id, !task.done)}>
+        <button type="button" className="btn" onClick={() => complete(task, !task.done)}>
           {task.done ? "Mark not done" : "Complete"}
         </button>
       </div>
+      {saveError && <p role="alert" className="t3">{saveError}</p>}
+      {asking && <ScopeDialog title="Change" noun="task" allowed={allowedScopes(asking)} onChoose={choose} onCancel={cancelAsk} />}
     </aside>
   );
   return phone ? <Portal>{panel}</Portal> : panel;

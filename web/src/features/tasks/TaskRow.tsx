@@ -1,19 +1,20 @@
 import { useNow } from "../../app/clock";
 import { useUi } from "../../app/ui";
 import { formatTime, parseDue } from "../../lib/dates";
-import { usePlanner, useStore } from "../../store/context";
+import { usePlanner } from "../../store/context";
 import type { Task } from "../../store/types";
 import { dueText, needsAction } from "./selectors";
+import { useComplete } from "./useComplete";
 
 export function Swatch({ colour }: { colour: string }) {
   return <span className="sw" style={{ background: `var(--${colour})` }} aria-hidden="true" />;
 }
 
 export function useTaskActions(task: Task) {
-  const store = useStore();
   const ui = useUi();
+  const complete = useComplete();
   return {
-    toggle: (done: boolean) => store.setDone(task.id, done),
+    toggle: (done: boolean) => complete(task, done),
     open: () => ui.openTask(task.id),
   };
 }
@@ -53,7 +54,7 @@ export function TaskRow({ task, layout = "tasks", extra }: { task: Task; layout?
   const columns = layout === "tasks" ? TASKS_COLS : layout === "list" ? LIST_COLS : "22px minmax(0,1fr) 140px 120px";
 
   return (
-    <li className={`tr ${layout}${task.done ? " done" : ""}`} style={{ gridTemplateColumns: columns }} data-done={task.done}>
+    <li className={`tr ${layout}${task.done ? " done" : ""}`} data-row-id={task.id} style={{ gridTemplateColumns: columns }} data-done={task.done}>
       <span><Check task={task} /></span>
       <button type="button" className="tt link-btn" onClick={open}>{task.title}</button>
       {layout === "tasks" && (
@@ -93,7 +94,7 @@ export function TodayRow({ task, late, compact = false }: { task: Task; late?: n
   else meta = list && !list.isInbox ? list.name : (list?.name ?? "");
 
   return (
-    <li className={task.done ? "row done" : "row"} data-done={task.done} style={compact ? { gridTemplateColumns: "16px minmax(0,1fr) auto" } : undefined}>
+    <li className={task.done ? "row done" : "row"} data-row-id={task.id} data-done={task.done} style={compact ? { gridTemplateColumns: "16px minmax(0,1fr) auto" } : undefined}>
       {!compact && <span className="time">{time}</span>}
       <Check task={task} />
       <button type="button" className="what link-btn" onClick={open}>{task.title}</button>

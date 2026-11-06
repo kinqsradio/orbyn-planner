@@ -5,6 +5,7 @@ import { useDialog } from "../components/useDialog";
 import { CalendarPage } from "../features/calendar/CalendarPage";
 import { ListsPage } from "../features/lists/ListsPage";
 import { NotificationsPage } from "../features/notifications/NotificationsPage";
+import { ProjectPage } from "../features/projects/ProjectPage";
 import { ProjectsPage } from "../features/projects/ProjectsPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { CompletedPage } from "../features/completed/CompletedPage";
@@ -24,6 +25,7 @@ import { PrefsProvider } from "./prefs";
 import { CalendarsDialog } from "../features/calendar/CalendarsDialog";
 import { EventPanel } from "../features/calendar/EventPanel";
 import { NewEventDialog } from "../features/calendar/NewEventDialog";
+import { useReminders } from "../features/reminders/useReminders";
 import { useSubscriptionRefresh } from "../features/calendar/subscriptions";
 import { TodayPage } from "../features/today/TodayPage";
 import { MORE, NAV, SETTINGS, TABS, type NavItem } from "./nav";
@@ -99,7 +101,9 @@ function Shell() {
   const now = useNow();
   const due = dueCount(tasks, now);
   useSubscriptionRefresh();
-  const page = PAGES[path === "/" ? "/today" : path] ?? PAGES["/today"]!;
+  useReminders();
+  const project = /^\/projects\/([^/]+)$/.exec(path);
+  const page = project ? () => <ProjectPage id={decodeURIComponent(project[1]!)} /> : (PAGES[path === "/" ? "/today" : path] ?? PAGES["/today"]!);
   const inMore = MORE.some((item) => item.path === path);
 
   return (

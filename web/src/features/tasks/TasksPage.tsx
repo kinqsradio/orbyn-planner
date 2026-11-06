@@ -22,7 +22,7 @@ export function QuickAddField() {
   const [keep, setKeep] = useState(false);
   const typed = text.trim();
   const parsed = useMemo(
-    () => (keep ? { title: typed, due: null, listId: null, priority: "none" as const } : parseQuickAdd(text, now, lists)),
+    () => (keep ? { title: typed, due: null, listId: null, priority: "none" as const, repeat: null } : parseQuickAdd(text, now, lists)),
     [text, typed, keep, now, lists],
   );
   const preview = keep ? "" : describeParse(parsed, lists, now);
@@ -33,7 +33,7 @@ export function QuickAddField() {
       onSubmit={(event) => {
         event.preventDefault();
         if (!typed) return;
-        const task = store.addTask({ title: parsed.title, due: parsed.due, listId: parsed.listId ?? undefined, priority: parsed.priority });
+        const task = store.addTask({ title: parsed.title, due: parsed.due, listId: parsed.listId ?? undefined, priority: parsed.priority, repeat: parsed.repeat });
         ui.showToast(`Added “${task.title}”`);
         setText("");
       }}
@@ -66,7 +66,7 @@ function BoardCard({ task }: { task: Task }) {
   const now = useNow();
   const list = lists.find((l) => l.id === task.listId);
   return (
-    <li className="tcard" data-done={task.done}>
+    <li className="tcard" data-row-id={task.id} data-done={task.done}>
       <button type="button" className="tt link-btn" onClick={open}>{task.title}</button>
       <span className="m">
         {list && <Swatch colour={list.colour} />}
@@ -96,7 +96,7 @@ export function TasksPage() {
     <>
       <PageHeader title="Tasks" sub={view === "board" ? "Board" : `${openCount} open`}>
         <Link to="/completed" className="ghost">Completed and deleted</Link>
-        <button type="button" className="btn" onClick={ui.openNewTask}>
+        <button type="button" className="btn" onClick={() => ui.openNewTask()}>
           <Icon name="plus" small />
           Add a task
         </button>

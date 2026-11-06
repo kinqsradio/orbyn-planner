@@ -391,6 +391,17 @@ describe("Today with events", () => {
   });
 });
 
+describe("after Undo of a deleted event", () => {
+  it("focus returns to the restored event", async () => {
+    await open({ seed: seedWeek });
+    await userEvent.click(screen.getByRole("button", { name: /Lunch with Maya/ }));
+    await userEvent.click(within(screen.getByRole("complementary", { name: "Event" })).getByRole("button", { name: "Delete" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Undo" }));
+    const back = await screen.findByRole("button", { name: /Lunch with Maya/ });
+    await waitFor(() => expect(back).toHaveFocus());
+  });
+});
+
 describe("Monday to Friday and the weekend", () => {
   it("viewDays shows 7 days when today is a weekend day of the week being shown, and 5 otherwise", () => {
     const week = (anchor: string, today: string, weekDays: 5 | 7 = 5, weekStart: "mon" | "sun" = "mon") => viewDays("week", anchor, weekStart, weekDays, today);

@@ -79,9 +79,11 @@ describe("two tabs on one database", () => {
     a.deleteTask(task.id);
     await a.flush();
     await vi.waitFor(() => expect(b.getState().tasks).toHaveLength(1));
-    now = new Date("2026-12-08T10:00:00Z");
+    now = new Date("2026-12-07T10:00:00Z");
     a.addTask({ title: "keeps the clock honest" });
     await a.flush();
+    // A day later: the record above is old enough to vouch for the clock.
+    now = new Date("2026-12-08T10:00:00Z");
     // A third tab opens a month later and purges on load; the others hear about it.
     const c = new LocalStore({ persistence: new IdbPersistence(), now: clock });
     await c.ready;
