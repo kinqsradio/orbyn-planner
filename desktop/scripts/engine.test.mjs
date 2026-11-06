@@ -4,8 +4,19 @@ import test from "node:test";
 import { contentSecurityPolicy, engineOrigin } from "./engine.mjs";
 
 test("the engine origin and its socket", () => {
-  assert.deepEqual(engineOrigin("http://localhost:8080/some/path?q=1"), { http: "http://localhost:8080", socket: "ws://localhost:8080" });
+  assert.deepEqual(engineOrigin("http://localhost:8080/some/path?q=1", { allowLocalHttp: true }), { http: "http://localhost:8080", socket: "ws://localhost:8080" });
   assert.deepEqual(engineOrigin("https://engine.example.com"), { http: "https://engine.example.com", socket: "wss://engine.example.com" });
+});
+
+test("plain http:// is refused for a production build, and in development unless it is local", () => {
+  assert.throws(() => engineOrigin("http://localhost:8080"), /https:\/\//);
+  assert.throws(() => engineOrigin("http://127.0.0.1:8080"), /https:\/\//);
+  assert.throws(() => contentSecurityPolicy("http://engine.example.com"), /https:\/\//);
+  assert.throws(() => contentSecurityPolicy("http://engine.example.com", { dev: true }), /localhost or 127\.0\.0\.1/);
+  assert.throws(() => contentSecurityPolicy("http://localhost.evil.example", { dev: true }), /localhost or 127/);
+  assert.doesNotThrow(() => contentSecurityPolicy("http://localhost:8080", { dev: true }));
+  assert.doesNotThrow(() => contentSecurityPolicy("http://127.0.0.1:8080", { dev: true }));
+  assert.doesNotThrow(() => contentSecurityPolicy("https://engine.example.com"));
 });
 
 test("anything but a plain http(s) address is refused", () => {
@@ -32,6 +43,7 @@ test("only the development CSP knows the dev server", () => {
 test("the CSP in tauri.conf.json is the one for the default engine address", () => {
   const conf = JSON.parse(readFileSync(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8"));
   const config = JSON.parse(readFileSync(new URL("../config.json", import.meta.url), "utf8"));
-  assert.equal(conf.app.security.csp, contentSecurityPolicy(config.engineUrl));
+  // The checked-in file is the development default; real builds get their policy from scripts/tauri.mjs.
+  assert.equal(conf.app.security.csp, contentSecurityPolicy(config.engineUrl, { allowLocalHttp: true }));
   assert.equal(conf.app.security.devCsp, contentSecurityPolicy(config.engineUrl, { dev: true }));
 });

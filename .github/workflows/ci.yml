@@ -59,6 +59,12 @@ jobs:
           cache-dependency-path: desktop/package-lock.json
       - run: npm ci
       - run: npm test
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: cargo-audit
+      - name: Cargo audit
+        working-directory: desktop/src-tauri
+        run: cargo audit
       - name: Cargo check and test
         working-directory: desktop/src-tauri
         run: |

@@ -1,6 +1,6 @@
 # Orbyn Planner desktop
 
-A thin Tauri 2 shell around the web app in `../web`: one window, the standard menus, and the window's size and position remembered. It has no commands for the page to call and no network code; the page talks to the engine itself.
+A thin Tauri 2 shell around the web app in `../web`: one window, the standard menus, and the window's size and position remembered. It has one command for the page to call (`open_link`) and no network code; the page talks to the engine itself.
 
 ## Needs
 
@@ -26,6 +26,11 @@ The engine address is set in `config.json` (`engineUrl`). `scripts/tauri.mjs` wr
 npm test                          # the config and CSP scripts
 cd src-tauri && cargo test        # the navigation allowlist
 cd src-tauri && cargo clippy
+cd src-tauri && cargo audit     # dependency advisories
 ```
 
-Releases are not signed or notarised yet; installers are for testing.
+**Builds are unsigned and not notarised yet.** macOS will warn about an unidentified developer and Windows SmartScreen about an unknown publisher; installers are for testing only.
+
+Production builds need an `https://` engine URL (`ORBYN_ENGINE_URL`); plain `http://` is accepted only for localhost and 127.0.0.1 in `npm run dev`.
+
+Links in notes open in the system browser through the shell's single `open_link` command, which accepts http(s) addresses only.

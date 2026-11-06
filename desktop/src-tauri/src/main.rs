@@ -1,8 +1,8 @@
 //! The desktop shell of Orbyn Planner: a window around the web build, and nothing more.
 //!
 //! The page is the same app that runs in a browser. The shell may open the window, remember where
-//! it was, give it a native menu and refuse to navigate anywhere but the app. It has no commands
-//! for the page to call, no plugins the page can reach, and no network code: the page talks to the
+//! it was, give it a native menu and refuse to navigate anywhere but the app. It has one command
+//! for the page to call (`open_link`, http(s) only), no plugins the page can reach, and no network code: the page talks to the
 //! engine itself, as far as the content security policy in `tauri.conf.json` allows.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -34,6 +34,21 @@ fn may_show(url: &Url, debug: bool) -> bool {
         "about" => url.as_str() == "about:blank",
         _ => false,
     }
+}
+
+/// Whether `url` may be handed to the system browser: a plain http or https address, nothing else.
+fn is_web_link(url: &Url) -> bool {
+    matches!(url.scheme(), "http" | "https") && url.has_host() && url.username().is_empty() && url.password().is_none()
+}
+
+/// The page's one command: open a link in the system browser. It refuses anything but http(s).
+#[tauri::command]
+fn open_link(url: String) -> Result<(), String> {
+    let parsed = Url::parse(&url).map_err(|_| "not a web address".to_string())?;
+    if !is_web_link(&parsed) {
+        return Err("only http and https links open".to_string());
+    }
+    tauri_plugin_opener::open_url(parsed.as_str(), None::<&str>).map_err(|e| e.to_string())
 }
 
 /// The standard menus: the app, Edit, View and Window. Editing and window items are the system's own,
@@ -108,6 +123,9 @@ fn main() {
     tauri::Builder::default()
         // Remembers the window's size, position and whether it is maximised between runs.
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        // Used by `open_link` only: the plugin's own commands are not in any capability, so the page cannot reach them.
+        .plugin(tauri_plugin_opener::init())
+        .invoke_handler(tauri::generate_handler![open_link])
         .menu(menu)
         .setup(move |app| {
             // In development the window shows the dev server; otherwise the built app, which Tauri serves.
@@ -165,6 +183,20 @@ mod tests {
             assert!(!allowed(url, false), "{url}");
             assert!(!allowed(url, true), "{url}");
         }
+    }
+
+    #[test]
+    fn only_web_links_open_outside() {
+        let ok = |u: &str| is_web_link(&Url::parse(u).expect("url"));
+        assert!(ok("https://example.com/a?b=1"));
+        assert!(ok("http://example.com/"));
+        for bad in ["file:///etc/passwd", "javascript:alert(1)", "data:text/html,hi", "ftp://example.com/", "tauri://localhost/", "mailto:a@b.c", "https://user:pw@example.com/"] {
+            if let Ok(u) = Url::parse(bad) {
+                assert!(!is_web_link(&u), "{bad}");
+            }
+        }
+        assert!(open_link("javascript:alert(1)".into()).is_err());
+        assert!(open_link("not a url".into()).is_err());
     }
 
     #[test]
