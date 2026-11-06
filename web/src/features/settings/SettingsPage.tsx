@@ -5,6 +5,7 @@ import { Icon } from "../../components/Icon";
 import { CalendarForms, CalendarList } from "../calendar/CalendarList";
 import { AccountSettings } from "../auth/AccountSettings";
 import { NotificationsSettings } from "./NotificationsSettings";
+import { ExportSettings } from "../export/ExportSettings";
 import { InstallHint } from "../../components/InstallHint";
 
 const LABELS: Record<ThemeChoice, string> = { system: "System", light: "Light", dark: "Dark", dim: "Dim" };
@@ -101,6 +102,8 @@ export function SettingsPage() {
                 Subscribed calendars are read from their link in this browser, once an hour while Orbyn Planner is open. Some servers don’t allow that yet.
               </span>
             </>
+          ) : category === "Privacy" ? (
+            <ExportSettings />
           ) : (
             <p className="quiet">Nothing to set here yet.</p>
           )}

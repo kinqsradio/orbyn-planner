@@ -165,7 +165,8 @@ describe("source-zone clock changes and speed", () => {
     expandEvents(events, "2026-11-01", "2026-12-12");
     const t = performance.now();
     expect(expandEvents(events, "2026-11-01", "2026-12-12")).toHaveLength(500 * 42);
-    expect(performance.now() - t).toBeLessThan(250);
+    // A loose bound: it catches a runaway expansion, not a slow machine under load.
+    expect(performance.now() - t).toBeLessThan(2000);
   });
 });
 

@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "The window can call one command, open_link, which opens an http(s) address in the system browser. No plugin is reachable from the page.",
+  "description": "The window can call two commands: open_link, which opens an http(s) address in the system browser, and save_export, which asks the person where to save an export (a .json or .ics file) and writes it there. No plugin is reachable from the page.",
   "windows": ["main"],
   "local": true,
-  "permissions": ["allow-open-link"]
+  "permissions": ["allow-open-link", "allow-save-export"]
 }

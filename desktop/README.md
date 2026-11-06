@@ -1,6 +1,6 @@
 # Orbyn Planner desktop
 
-A thin Tauri 2 shell around the web app in `../web`: one window, the standard menus, and the window's size and position remembered. It has one command for the page to call (`open_link`) and no network code; the page talks to the engine itself.
+A thin Tauri 2 shell around the web app in `../web`: one window, the standard menus, and the window's size and position remembered. It has two commands for the page to call (`open_link`, and `save_export`, which saves an export through the system's save dialog) and no network code; the page talks to the engine itself.
 
 ## Needs
 
