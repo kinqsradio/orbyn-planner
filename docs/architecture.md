@@ -20,3 +20,13 @@ The UI talks to a `PlannerStore`. `LocalStore` keeps the records in IndexedDB, o
 - **Tabs.** After each committed write a tab posts the changed record ids on `BroadcastChannel("orbyn-planner")`; the other tabs re-read those records from IndexedDB. A version change closes the connection and reloads the page, and a blocked upgrade says which tabs must close. The Inbox has a fixed id so two tabs starting together make one.
 - **Failures are shown.** A failed or full write, or a database that will not open, sets the store's persistence state to `failed` with a reason; the sync line then reads "Couldn’t save on this device" and nothing claims the changes are saved. A failed open does not fall back to memory. Memory alone is used only where IndexedDB does not exist, and then the line reads "Not saved on this device".
 - **Checklist order.** Steps carry a fractional order key (`web/src/store/order.ts`, a port of the engine's `order.rs`), so inserting a step changes no other, and steps sort by key then id.
+
+## Desktop
+
+`desktop/` is a Tauri 2 shell with its own Cargo workspace; nothing else builds it. It opens one window on the web build (the dev server in development) and adds the standard menus and remembered window state. It exposes no commands or plugins to the page, so the page has no more power than in a browser.
+
+- **Navigation.** The window may show only the app's own pages (`tauri://localhost`, `http(s)://tauri.localhost`) and, in a debug build, the dev server on port 5173. Links to anywhere else, the engine included, are refused, and a request for a new window is denied.
+- **Content security policy.** Built from `desktop/config.json` (`engineUrl`) by `desktop/scripts/engine.mjs`: scripts only from the app, `connect-src` the app and the engine origin, no frames or objects.
+- **Platform.** `web/src/app/platform.ts` tells the desktop app from a browser by Tauri's injected `__TAURI_INTERNALS__`; the browser-only install hint in Settings is hidden in the desktop app.
+- **Not yet.** Code signing and notarisation, auto-update and background reminders.
+

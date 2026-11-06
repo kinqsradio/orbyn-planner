@@ -108,7 +108,7 @@ fn main() {
     tauri::Builder::default()
         // Remembers the window's size, position and whether it is maximised between runs.
         .plugin(tauri_plugin_window_state::Builder::default().build())
-        .menu(|app| menu(app))
+        .menu(menu)
         .setup(move |app| {
             // In development the window shows the dev server; otherwise the built app, which Tauri serves.
             let url = if debug {
