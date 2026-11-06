@@ -94,4 +94,32 @@ describe.skipIf(!engineUrl)("record sync against a real engine", () => {
       cb.stop();
     }
   }, 120_000);
+
+  it("the live socket stays connected past the server's keep-alive: the client answers its pings (no reconnect in 70 s of silence)", async () => {
+    const { a, b } = await pairedBrowsers(`e2e-keepalive-${Date.now()}@example.com`);
+    const Real = globalThis.WebSocket;
+    let opened = 0;
+    globalThis.WebSocket = class extends Real {
+      constructor(...args: ConstructorParameters<typeof Real>) {
+        super(...args);
+        opened++;
+      }
+    } as typeof Real;
+    const ca = run(a);
+    const cb = run(b);
+    try {
+      await until("both to be live", () => ca.getState().live && cb.getState().live);
+      const before = opened;
+      // The server pings every 30 s and closes a socket that has sent nothing for two intervals (60 s).
+      await new Promise((r) => setTimeout(r, 70_000));
+      expect(opened).toBe(before); // never reconnected
+      expect(ca.getState().live && cb.getState().live).toBe(true);
+      const task = a.store.addTask({ title: "Still live after the keep-alive" });
+      await until("the task to reach B over the same socket", () => b.store.getState().tasks.some((t) => t.id === task.id));
+    } finally {
+      ca.stop();
+      cb.stop();
+      globalThis.WebSocket = Real;
+    }
+  }, 150_000);
 });

@@ -168,11 +168,13 @@ describe("offline and failures", () => {
     // The server refuses B's token once, as it would after the zone was purged past it.
     const real = r.engine.fetch;
     let refused = 0;
+    let expired = 0;
     const asked: string[] = [];
     r.engine.fetch = (async (url: string, init?: RequestInit) => {
       if (/\/changes(\?|$)/.test(String(url)) && (init?.method ?? "GET") === "GET") {
         asked.push(String(url));
         if (String(url).includes("since=") && refused++ === 0) {
+          expired++;
           return new Response(JSON.stringify({ code: "token_expired", message: "Too old." }), { status: 410, headers: { "content-type": "application/json" } });
         }
       }
@@ -180,13 +182,36 @@ describe("offline and failures", () => {
     }) as typeof fetch;
     r.b.store.addTask({ title: "unsent on B" });
     await sync(r, r.b);
-    expect(refused).toBe(1);
+    expect(expired).toBe(1);
     expect(asked.some((u) => !u.includes("since="))).toBe(true); // fetched again from the start
     expect(titles(r.b)).toEqual(["new on A", "unsent on B", "x"]);
     r.engine.fetch = real;
     await sync(r, r.a);
     expect(titles(r.a)).toEqual(["new on A", "unsent on B", "x"]);
     expect(r.b.store.getState().outbox).toEqual([]);
+  });
+});
+
+describe("an upload refused for an expired token", () => {
+  it("starts the zone over and sends the edit on the next pass, once", async () => {
+    const r = await createSyncRig();
+    r.a.store.addTask({ title: "Seed" });
+    await sync(r, r.a);
+    await sync(r, r.b);
+    r.a.store.addTask({ title: "Edited once the token expired" });
+    const real = r.engine.fetch;
+    let refused = 0;
+    r.engine.fetch = (async (url: string, init?: RequestInit) => {
+      if (init?.method === "POST" && /\/v1\/zones\/[^/]+\/changes$/.test(String(url)) && refused++ === 0) {
+        return new Response(JSON.stringify({ code: "token_expired", message: "Too old." }), { status: 410, headers: { "content-type": "application/json" } });
+      }
+      return real(url, init);
+    }) as typeof fetch;
+    await sync(r, r.a);
+    await sync(r, r.a);
+    await sync(r, r.b);
+    expect(titles(r.b)).toEqual(["Edited once the token expired", "Seed"]);
+    expect(r.a.store.getState().outbox).toEqual([]);
   });
 });
 

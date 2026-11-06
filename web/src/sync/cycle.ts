@@ -302,7 +302,13 @@ export async function runCycle(
         body = await api.changes(zone, since);
       } catch (error) {
         if (!tokens.isExpired(error)) throw error;
-        await withEngine((e) => tokens.restart(e, zone));
+        try {
+          await withEngine((e) => tokens.restart(e, zone));
+        } catch (again) {
+          // Started over and refused again: there is nothing more to do now, and saying so beats a raw engine code.
+          if (hasCode(again, "expired_again")) throw new SyncError("token_expired", "The server keeps refusing this device's place in a list or calendar, even when it starts over. Try again later.");
+          throw again;
+        }
         continue; // restarted: fetch the zone again from the start
       }
       const types = new Map(body.records.map((r) => [r.record_id, r.record_type] as const));
@@ -419,6 +425,14 @@ export async function runCycle(
         await withEngine((e) => e.sync.uploadSucceeded(zone, JSON.stringify(result)));
         report.uploaded += body.changes.length;
       } catch (error) {
+        if (tokens.isExpired(error)) {
+          // The server no longer knows the place this device uploaded from: start the zone over, and fetch it again next.
+          await withEngine((e) => {
+            e.sync.abandonUpload(zone);
+            tokens.restart(e, zone);
+          });
+          return false;
+        }
         if (error instanceof ApiFailure && error.code === "zone_not_found") {
           // This device has the key but the zone was never made (a crash between): make it, and send again.
           serverZones.set(zone, await api.createZone(zone));

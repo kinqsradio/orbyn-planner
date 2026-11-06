@@ -135,6 +135,6 @@ describe("offline and online", () => {
     const a = controllerFor(r, r.a);
     a.c.start();
     await until(() => a.c.getState().phase === "error");
-    expect(a.c.getState().error).toMatch(/too old/);
+    expect(a.c.getState().error).toMatch(/keeps refusing/);
   });
 });
