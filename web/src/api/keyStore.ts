@@ -82,6 +82,13 @@ export interface KeyStore {
   saveWrapKey(key: CryptoKey): Promise<void>;
   /** Forgets this device: keys, snapshot, wrapping key, identity and the quarantine together (all are sealed under, or bound to, the keys). */
   clearDevice(): Promise<void>;
+  /**
+   * Replaces everything about this device with new keys, in ONE transaction: the old keys, snapshot,
+   * wrapping key, identity, sync state and quarantine go, and the new keys, wrapping key (if there is one
+   * to store) and identity are written. If anything fails, nothing changes: the old device is as it was,
+   * with no moment in which there are keys but no identity. The session is not touched.
+   */
+  replaceDevice(next: { keys: Uint8Array; wrapKey: CryptoKey | null; identity: DeviceIdentity }): Promise<void>;
   loadSession(): Promise<StoredSession | null>;
   saveSession(session: StoredSession): Promise<void>;
   clearSession(): Promise<void>;
@@ -180,6 +187,26 @@ export function createIdbKeyStore(factory: IDBFactory = indexedDB): KeyStore {
       const database = await open();
       return request(database.transaction("quarantine", "readonly").objectStore("quarantine").getAll() as IDBRequest<Uint8Array[]>);
     },
+    replaceDevice: async (next) => {
+      const database = await open();
+      const names = [...database.objectStoreNames].filter((n) => n !== "session");
+      const tx = database.transaction(names, "readwrite");
+      const done = new Promise<void>((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("The write was aborted"));
+      });
+      try {
+        for (const n of names) tx.objectStore(n).clear();
+        tx.objectStore("device").put(next.keys, "current");
+        if (next.wrapKey) tx.objectStore("wrap").put(next.wrapKey, "current");
+        tx.objectStore("identity").put(next.identity, "current");
+      } catch (error) {
+        tx.abort(); // nothing written so far stays
+        await done.catch(() => undefined);
+        throw error;
+      }
+      await done;
+    },
     clearDevice: async () => {
       await remove("device");
       await remove("snapshot");
@@ -229,6 +256,13 @@ export function createMemoryKeyStore(): KeyStore {
       if (quarantined.length > QUARANTINE_KEEP) quarantined.splice(1, 1);
     },
     loadQuarantine: async () => [...quarantined],
+    replaceDevice: async (next) => {
+      keys = next.keys;
+      snapshot = null;
+      wrap = next.wrapKey;
+      identity = next.identity;
+      quarantined.length = 0;
+    },
     clearDevice: async () => {
       keys = null;
       snapshot = null;

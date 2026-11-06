@@ -16,3 +16,12 @@ export async function wrapSecretFrom(store: KeyStore, subtle: SubtleCrypto = glo
   }
   return new Uint8Array(await subtle.sign("HMAC", key, new TextEncoder().encode(LABEL)));
 }
+
+/**
+ * A new wrapping key and the secret it gives, made but not stored: for replacing a device's keys in one
+ * transaction, where the new key is stored with them or not at all.
+ */
+export async function freshWrapSecret(subtle: SubtleCrypto = globalThis.crypto.subtle): Promise<{ key: CryptoKey; secret: Uint8Array }> {
+  const key = await subtle.generateKey({ name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return { key, secret: new Uint8Array(await subtle.sign("HMAC", key, new TextEncoder().encode(LABEL))) };
+}

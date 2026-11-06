@@ -352,6 +352,11 @@ export class DeviceController extends Controller<DeviceState> {
         }
         this.set({ phase: "joining" });
         const pairing = await this.services.engine.run(this.session, (e) => e.joinApproval(view, nowSecs(this.services)));
+        if (this.disposed || this.ended) {
+          // The screen went (or the attempt was closed) while this waited for the lock: nobody will use it.
+          pairing.free();
+          return true;
+        }
         this.approvalId = view.id;
         this.budget = 0;
         try {
@@ -362,6 +367,11 @@ export class DeviceController extends Controller<DeviceState> {
           // Another tab of this device already sent its nonce and owns the approval; it is not ours to cancel.
           this.set({ phase: "elsewhere" });
           return false;
+        }
+        if (this.disposed || this.ended) {
+          // Gone while the nonce was in flight: freed, not assigned (a released controller never takes a session back).
+          pairing.free();
+          return true;
         }
         this.pairing = pairing;
         this.set({ phase: "joined" });

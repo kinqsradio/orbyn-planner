@@ -2,7 +2,7 @@ import { createAuthApi, type AuthApi } from "../api/auth";
 import { requireAuthCrypto, type AuthCrypto } from "../api/authCrypto";
 import { defaultKeyStore, type KeyStore } from "../api/keyStore";
 import { TokenStore } from "../api/tokenStore";
-import { wrapSecretFrom } from "../api/wrapSecret";
+import { freshWrapSecret, wrapSecretFrom } from "../api/wrapSecret";
 import { createEngineHost, type EngineHost, type Lock } from "./engineHost";
 
 /** Everything the account screens use, so tests can swap the network, the storage and the crypto. */
@@ -16,6 +16,8 @@ export interface AuthServices {
   now: () => number;
   /** The secret keys and the engine snapshot are sealed under. */
   wrapSecret: () => Promise<Uint8Array>;
+  /** A new wrapping secret, with the key it comes from (null when the secret is supplied from outside), made but not stored. */
+  freshWrap: () => Promise<{ secret: Uint8Array; key: CryptoKey | null }>;
   /** This device's sync engine, kept sealed in the key store. */
   engine: EngineHost;
   /** Tabs tell each other when one signs out, so the others drop their session too. */
@@ -80,5 +82,5 @@ export function createAuthServices(options: AuthServiceOptions = {}): AuthServic
       return () => channel.close();
     },
   };
-  return { api, tokens, keys, crypto, now, poll: options.poll ?? DEFAULT_POLL, wrapSecret, engine, signedOut, ready: options.ready ?? Promise.resolve() };
+  return { api, tokens, keys, crypto, now, poll: options.poll ?? DEFAULT_POLL, wrapSecret, freshWrap: options.wrapSecret ? async () => ({ secret: await options.wrapSecret!(), key: null }) : freshWrapSecret, engine, signedOut, ready: options.ready ?? Promise.resolve() };
 }
