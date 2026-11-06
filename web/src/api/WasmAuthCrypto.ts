@@ -7,6 +7,7 @@ import type { ApprovalEngine, ApproverPairing, AuthCrypto, DeviceKeys, DevicePai
 
 /** `ApproverSession` in orbyn-wasm. */
 export interface WasmApproverSession {
+  free(): void;
   readonly createJson: string;
   deviceFingerprint(): string;
   reveal(viewJson: string): string;
@@ -14,11 +15,13 @@ export interface WasmApproverSession {
 }
 /** `DeviceSession` in orbyn-wasm. */
 export interface WasmDeviceSession {
+  free(): void;
   readonly nonceJson: string;
   sas(viewJson: string): string;
 }
 /** `SyncEngine` in orbyn-wasm, as far as approving a device needs it. Data goes in and out as JSON. */
 export interface WasmSyncEngine {
+  free(): void;
   verifyDevices(devicesJson: string): string;
   signRemoval(deviceJson: string): string;
   snapshot(wrapSecret: Uint8Array): Uint8Array;
@@ -61,12 +64,14 @@ function wasmApprovals(engine: WasmSyncEngine): ApprovalEngine {
   const approver = (s: ApproverPairing) => sessions.get(s) as WasmApproverSession;
   const device = (s: DevicePairing) => sessions.get(s) as WasmDeviceSession;
   return {
+    free: () => engine.free(),
     snapshot: (wrapSecret) => engine.snapshot(wrapSecret),
     verifyDevices: (devices) => JSON.parse(engine.verifyDevices(JSON.stringify(devices))) as string[],
     signRemoval: (target) => JSON.parse(engine.signRemoval(JSON.stringify(target))) as RemoveDevice,
     startApproval: (target, nowSecs) => {
       const inner = engine.startApproval(JSON.stringify(target), nowSecs);
       const pairing: ApproverPairing = {
+        free: () => inner.free(),
         createRequest: JSON.parse(inner.createJson) as CreateApproval,
         deviceFingerprint: () => inner.deviceFingerprint(),
         reveal: (view: PendingApproval) => JSON.parse(inner.reveal(JSON.stringify(view))) as ApprovalNonce,
@@ -79,6 +84,7 @@ function wasmApprovals(engine: WasmSyncEngine): ApprovalEngine {
     joinApproval: (view, nowSecs) => {
       const inner = engine.joinApproval(JSON.stringify(view), nowSecs);
       const pairing: DevicePairing = {
+        free: () => inner.free(),
         nonce: JSON.parse(inner.nonceJson) as ApprovalNonce,
         sas: (v: PendingApproval) => inner.sas(JSON.stringify(v)),
       };

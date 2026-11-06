@@ -22,12 +22,50 @@ export function loadRealAuthCrypto(): Promise<AuthCrypto> {
  * unavailable, which the screens already say; the planner itself keeps working.
  */
 export async function ensureRealAuthCrypto(): Promise<void> {
-  // Read here, as a literal Vite replaces at build time, so a build without an engine address drops the
-  // import below altogether and ships no module and no .wasm at all.
   if (!import.meta.env.VITE_ENGINE_URL || !configuredEngine()) return;
+  await attempt();
+}
+
+/** Where loading the module stands, for the screens that need it. "idle" is a build with no engine, which never loads it. */
+export type CryptoLoad = "idle" | "loading" | "ready" | "failed";
+let load: CryptoLoad = "idle";
+const listeners = new Set<() => void>();
+const set = (next: CryptoLoad) => {
+  load = next;
+  listeners.forEach((l) => l());
+};
+/** Puts the state back to "idle". For tests. */
+export function resetCryptoLoad(): void {
+  set("idle");
+}
+
+export const cryptoLoad = {
+  get: (): CryptoLoad => load,
+  subscribe: (l: () => void) => {
+    listeners.add(l);
+    return () => listeners.delete(l);
+  },
+};
+
+/** What loads the module; tests replace it to make the import fail or succeed. */
+let loader: () => Promise<AuthCrypto> = loadRealAuthCrypto;
+export function setCryptoLoader(next: () => Promise<AuthCrypto>): void {
+  loader = next;
+}
+
+async function attempt(): Promise<void> {
+  set("loading");
   try {
-    registerAuthCrypto(await loadRealAuthCrypto());
+    registerAuthCrypto(await loader());
+    set("ready");
   } catch {
-    // Left unregistered: "Sign-in isn't available in this build yet".
+    // Not a build without sign-in: the module itself would not load (a blocked request, a browser without WebAssembly).
+    set("failed");
   }
+}
+
+/** Tries the import again, for the Retry button. */
+export async function retryRealAuthCrypto(): Promise<void> {
+  if (!import.meta.env.VITE_ENGINE_URL) return; // as above: a build without an engine address has no import to retry
+  await attempt();
 }

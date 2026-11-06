@@ -41,13 +41,15 @@ function emailOrFail(crypto: AuthCrypto, email: string): string {
 /** Creates the account and signs this device in as its first, trusted device. */
 export async function signUp(services: AuthServices, input: { name: string; email: string; password: string }): Promise<StoredSession> {
   const crypto = services.crypto(); // refuses before anything is sent when sign-in is not in this build
+  let keys: DeviceKeys | null = null;
   try {
     const email = emailOrFail(crypto, input.email);
     const password = utf8(input.password);
     const pending = crypto.startRegistration(password);
     const started = await services.api.registerStart({ email, registration_request: encodeBytes(pending.request) });
     const upload = crypto.finishRegistration(pending, password, decodeBytes(started.registration_response));
-    const keys = crypto.deviceKeys.create();
+    pending.free?.();
+    keys = crypto.deviceKeys.create();
     const created = await services.api.registerFinish({
       email,
       registration_upload: encodeBytes(upload),
@@ -66,6 +68,8 @@ export async function signUp(services: AuthServices, input: { name: string; emai
     return session;
   } catch (error) {
     return asFailure(error);
+  } finally {
+    keys?.free();
   }
 }
 
@@ -107,6 +111,8 @@ export function maskEmail(email: string): string {
  */
 export async function signIn(services: AuthServices, input: { email: string; password: string; name?: string; replaceKeys?: boolean }): Promise<StoredSession> {
   const crypto = services.crypto();
+  let keys: DeviceKeys | null = null;
+  let known = null as DeviceKeys | null;
   try {
     const email = emailOrFail(crypto, input.email);
     const password = utf8(input.password);
@@ -114,7 +120,6 @@ export async function signIn(services: AuthServices, input: { email: string; pas
     const identity = saved ? await services.keys.loadIdentity() : null;
     const foreign = saved !== null && identity?.email !== email;
     if (foreign && !input.replaceKeys) throw new KeysForAnotherAccount(identity?.email ? maskEmail(identity.email) : null);
-    let known = null as ReturnType<typeof crypto.deviceKeys.import> | null;
     if (saved && !foreign) {
       const wrap = await services.wrapSecret();
       try {
@@ -137,8 +142,9 @@ export async function signIn(services: AuthServices, input: { email: string; pas
     const started = await services.api.loginStart({ email, credential_request: encodeBytes(pending.request), trusted_device: trusted });
     // A wrong password fails here, on the device, and nothing more is sent.
     const finalization = crypto.finishLogin(pending, password, decodeBytes(started.credential_response));
+    pending.free?.();
 
-    const keys = known ?? crypto.deviceKeys.create();
+    keys = known ?? crypto.deviceKeys.create();
     const created = await services.api.loginFinish({
       login_id: started.login_id,
       credential_finalization: encodeBytes(finalization),
@@ -151,6 +157,9 @@ export async function signIn(services: AuthServices, input: { email: string; pas
     return session;
   } catch (error) {
     return asFailure(error);
+  } finally {
+    // Whichever keys this attempt held (the saved ones opened, or new ones), they go back to the module.
+    (keys ?? known)?.free();
   }
 }
 

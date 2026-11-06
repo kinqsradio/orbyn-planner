@@ -15,7 +15,8 @@
     "generate": "node scripts/generate.mjs",
     "generate:check": "node scripts/generate.mjs --check",
     "wasm": "node scripts/wasm.mjs",
-    "wasm:check": "node scripts/wasm.mjs --check"
+    "wasm:check": "node scripts/wasm.mjs --check",
+    "wasm:check:local": "node scripts/wasm.mjs --check --local"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",

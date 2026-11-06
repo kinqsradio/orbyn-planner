@@ -1,12 +1,14 @@
 // Builds orbyn-engine's orbyn-wasm crate into src/generated/wasm/ (the committed JavaScript package).
 // With --check it builds into a temporary folder and fails if src/generated/wasm differs, like generate:check.
 //
+// The committed .wasm is the Linux build (the CI job rebuilds on Linux and requires it to be byte for byte the
+// same), from the engine commit in the manifest; moving that pin is a deliberate `npm run wasm` on Linux.
+//
 // Next to the package is manifest.json: the engine commit it was built from, the Rust and wasm-bindgen
 // versions, and the sha256 of each file. The check compares the JavaScript glue and the type files exactly,
-// whatever the machine: a change in the module's interface always shows there. The .wasm is compared byte
-// for byte too, but the same source can lay out its data differently on another operating system, so when
-// only the .wasm bytes differ the check passes with a warning if the manifest's engine commit and toolchain
-// are the ones in use, and fails otherwise.
+// whatever the machine: a change in the module's interface always shows there; and the .wasm byte for byte,
+// from exactly the pinned commit with nothing changed. `--local` (not on Linux, not in CI) lets a .wasm that differs
+// only in its bytes pass with a warning, because the same source lays its data out differently on another system.
 //
 // The build follows the engine's crates/orbyn-wasm/README.md: cargo build for wasm32-unknown-unknown, then
 // the wasm-bindgen CLI (--target web). To make the bytes the same on any machine it
@@ -22,6 +24,11 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const check = process.argv.includes("--check");
+// --local: a run on a machine other than Linux, where the same source can lay out the .wasm differently. It lets
+// a .wasm that differs only in its bytes pass with a warning if the engine commit and toolchain are the pinned ones.
+// Without it (and always in CI) the check is strict: every file byte for byte, from exactly the pinned commit.
+const local = process.argv.includes("--local") && process.platform !== "linux" && !process.env.CI;
+if (process.argv.includes("--local") && !local) console.warn("wasm: --local is ignored on Linux and in CI; the check is strict.");
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const lock = JSON.parse(readFileSync(join(root, "wasm.lock.json"), "utf8"));
 const target = join(root, "src/generated/wasm");
@@ -67,13 +74,13 @@ const rustflags = [
   `--remap-path-prefix=${rustup}=/rustup`,
 ].join("\x1f");
 
-const env = { ...process.env, CARGO_ENCODED_RUSTFLAGS: rustflags, CARGO_BUILD_TARGET_DIR: join(engine, "target") };
+const env = { ...process.env, CARGO_ENCODED_RUSTFLAGS: rustflags, CARGO_BUILD_TARGET_DIR: process.env.ORBYN_WASM_TARGET_DIR ?? join(engine, "target") };
 delete env.RUSTFLAGS;
 run("cargo", [`+${lock.rust}`, "build", "-p", "orbyn-wasm", "--release", "--target", "wasm32-unknown-unknown", "--locked"], { cwd: engine, env });
 
 const out = mkdtempSync(join(tmpdir(), "orbyn-wasm-"));
 try {
-  run("wasm-bindgen", ["--target", "web", "--out-dir", out, join(engine, "target/wasm32-unknown-unknown/release/orbyn_wasm.wasm")]);
+  run("wasm-bindgen", ["--target", "web", "--out-dir", out, join(env.CARGO_BUILD_TARGET_DIR, "wasm32-unknown-unknown/release/orbyn_wasm.wasm")]);
   const missing = FILES.filter((f) => !existsSync(join(out, f)));
   if (missing.length > 0) {
     console.error(`wasm: wasm-bindgen did not make ${missing.join(", ")}`);
@@ -97,11 +104,21 @@ try {
     for (const f of FILES.filter((f) => f !== "orbyn_wasm_bg.wasm" && have.includes(f))) {
       if (!readFileSync(join(out, f)).equals(readFileSync(join(target, f)))) problems.push(`${f} differs from a fresh build`);
     }
-    // The .wasm: identical, or the same engine commit and toolchain (with a warning).
+    // The engine checkout must be exactly the commit the package was built from, with nothing changed.
+    const dirty = spawnSync("git", ["-C", engine, "status", "--porcelain"], { encoding: "utf8" });
+    const tidy = dirty.status === 0 && dirty.stdout.trim() === "";
+    const pinned = manifest && manifest.engine === commit;
+    if (!local) {
+      if (!pinned) problems.push(`the engine checkout is at ${commit}, not at ${manifest?.engine ?? "the commit in the manifest"}`);
+      if (!tidy) problems.push("the engine checkout has changes (git status --porcelain is not empty)");
+    } else if (!pinned || !tidy) {
+      console.warn(`wasm:check: warning: the engine checkout is ${pinned ? "" : `at ${commit}, not ${manifest?.engine}, `}${tidy ? "" : "changed, "}so this comparison is only a guide.`);
+    }
+    // The .wasm: byte for byte. Only a --local run on another system may accept a layout difference.
     if (have.includes("orbyn_wasm_bg.wasm") && !readFileSync(join(out, "orbyn_wasm_bg.wasm")).equals(readFileSync(join(target, "orbyn_wasm_bg.wasm")))) {
-      const same = manifest && manifest.engine === commit && manifest.rust === lock.rust && manifest.wasmBindgen === lock.wasmBindgen;
-      if (same) console.warn("wasm:check: warning: orbyn_wasm_bg.wasm differs byte for byte from a fresh build on this machine, but the engine commit and toolchain are the ones in the manifest; accepted.");
-      else problems.push(`orbyn_wasm_bg.wasm differs from a fresh build, and the manifest was made for engine ${manifest?.engine ?? "?"} with Rust ${manifest?.rust ?? "?"}, not ${commit} with ${lock.rust}`);
+      const same = manifest && pinned && manifest.rust === lock.rust && manifest.wasmBindgen === lock.wasmBindgen && tidy;
+      if (local && same) console.warn("wasm:check: warning: orbyn_wasm_bg.wasm differs byte for byte from a build on this system, but the engine commit and toolchain are the pinned ones; accepted for a local run. CI rebuilds on Linux and is strict.");
+      else problems.push("orbyn_wasm_bg.wasm differs from a fresh build of the pinned commit. The committed one is the Linux build; rebuild it on Linux (see docs/architecture.md) and commit it.");
     }
     if (problems.length > 0) {
       console.error(`wasm:check: src/generated/wasm is out of date:\n  - ${problems.join("\n  - ")}\nRun npm run wasm.`);

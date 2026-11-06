@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ApiFailure } from "../../api/auth";
 import { authCryptoAvailable, SIGN_IN_UNAVAILABLE } from "../../api/authCrypto";
+import { cryptoLoad } from "../../api/realCrypto";
+import { CryptoProblem } from "./CryptoProblem";
 import { Icon } from "../../components/Icon";
 import { Portal } from "../../components/Portal";
 import { useDialog } from "../../components/useDialog";
@@ -290,7 +292,8 @@ export function AccountSettings() {
       <div className="card" style={{ gap: 6 }}>
         <b style={{ fontWeight: 500 }}>This device only</b>
         <span className="t3">Your planner is saved on this device. An account keeps it on your other devices too.</span>
-        {!authCryptoAvailable() && <span className="t3 small">{SIGN_IN_UNAVAILABLE}.</span>}
+        {!authCryptoAvailable() && cryptoLoad.get() !== "failed" && <span className="t3 small">{SIGN_IN_UNAVAILABLE}.</span>}
+        <CryptoProblem />
       </div>
       <div className="account-actions">
         <button type="button" className="ghost" onClick={() => auth.openAuth("signup")}>Create an account</button>

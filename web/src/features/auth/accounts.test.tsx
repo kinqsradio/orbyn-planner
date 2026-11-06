@@ -4,7 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../../app/App";
 import { ClockProvider } from "../../app/clock";
-import { SIGN_IN_UNAVAILABLE, registerAuthCrypto } from "../../api/authCrypto";
+import { SIGN_IN_UNAVAILABLE, authCryptoAvailable, registerAuthCrypto } from "../../api/authCrypto";
+import { cryptoLoad, ensureRealAuthCrypto, loadRealAuthCrypto, resetCryptoLoad, setCryptoLoader } from "../../api/realCrypto";
 import { createMemoryKeyStore, type KeyStore } from "../../api/keyStore";
 import { FakeAuthCrypto } from "../../api/testing/FakeAuthCrypto";
 import { createMockEngine, type MockEngine } from "../../api/testing/MockEngine";
@@ -481,8 +482,10 @@ describe("adding a device", () => {
     nowMs += 11 * 60_000;
     await userEvent.click(within(dialog).getByRole("button", { name: "They match" }));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("ran out of time");
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("If this keeps happening, check that this device’s clock is right.");
     expect(within(dialog).getByRole("button", { name: "Start again" })).toBeInTheDocument();
     expect(await onDevice.findByRole("alert")).toHaveTextContent("ran out of time");
+    expect(onDevice.getByRole("alert")).toHaveTextContent("check that this device’s clock is right");
   });
 
   it("the trusted device gives up waiting for a new device that never shows up", async () => {
@@ -769,5 +772,45 @@ describe("signing out", () => {
     expect(engine.calls.filter((c) => c.path.startsWith("/v1/accounts") || c.path.includes("/login/")).every((c) => c.authorization === null)).toBe(true);
     expect(localStorage.getItem("token")).toBeNull();
     expect(JSON.stringify({ ...localStorage })).not.toMatch(/token-/);
+  });
+});
+
+describe("the engine's module fails to load", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    setCryptoLoader(loadRealAuthCrypto);
+    resetCryptoLoad();
+    localStorage.removeItem("orbyn-planner.local-only");
+  });
+
+  it("says so, with Retry, instead of saying the build has no sign-in; Retry loads it", async () => {
+    vi.stubEnv("VITE_ENGINE_URL", "http://engine.test");
+    let attempts = 0;
+    setCryptoLoader(async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("blocked");
+      return crypto;
+    });
+    await ensureRealAuthCrypto();
+    expect(cryptoLoad.get()).toBe("failed");
+    localStorage.setItem("orbyn-planner.local-only", "1");
+    await mount(services(), "/settings");
+    await openAccount();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn’t load Orbyn’s security module");
+    expect(screen.queryByText(/isn't available in this build yet/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(cryptoLoad.get()).toBe("ready"));
+    expect(attempts).toBe(2);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(authCryptoAvailable()).toBe(true);
+  });
+
+  it("a build with no engine address has no module to load, and says that plainly", async () => {
+    await ensureRealAuthCrypto();
+    expect(cryptoLoad.get()).toBe("idle");
+    localStorage.setItem("orbyn-planner.local-only", "1");
+    await mount(services(), "/settings");
+    await openAccount();
+    expect(screen.queryByText("Couldn’t load Orbyn’s security module")).not.toBeInTheDocument();
   });
 });

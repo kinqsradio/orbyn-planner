@@ -5,7 +5,7 @@
   "files": {
     "orbyn_wasm.js": "65164279b8dbaa05af697d307061cbc2d1f6500e5adc92a75172de70990bd0ac",
     "orbyn_wasm.d.ts": "02f1427149f720b95e1f7247fcce26ef8f9a8cdadd21a97eeddedb751e2f1086",
-    "orbyn_wasm_bg.wasm": "6ffa243106c361014ff81975a78597cc4c07561a609fc2d0516a8ec3773868a9",
+    "orbyn_wasm_bg.wasm": "83aa4ebee3741f05893d22f2e8f9534e118a91965ef319ce165ff0f0ece0ad1a",
     "orbyn_wasm_bg.wasm.d.ts": "675acb2afdd531f199d4c6703781c8744b0bd65927a7826cee41bf8d4cc489f9"
   }
 }

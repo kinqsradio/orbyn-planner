@@ -17,18 +17,24 @@ import type { RemoveDevice } from "../generated/RemoveDevice";
 
 /** Sign-up between its two requests. */
 export interface PendingRegistration {
+  /** Releases the module's memory, after `finishRegistration`. */
+  free?(): void;
   /** `RegisterStart.registration_request`. */
   readonly request: Uint8Array;
 }
 
 /** Sign-in between its two requests. */
 export interface PendingLogin {
+  /** Releases the module's memory, after `finishLogin`. */
+  free?(): void;
   /** `LoginStart.credential_request`. */
   readonly request: Uint8Array;
 }
 
 /** One device's keys. */
 export interface DeviceKeys {
+  /** Releases the module's memory for these keys. Use after the last call; the keys can't be used again. */
+  free(): void;
   /** The keys sealed under the wrapping secret, for this device's key store (see `wrapSecret.ts`). */
   export(wrapSecret: Uint8Array): Uint8Array;
   signingKey(): string;
@@ -47,6 +53,8 @@ export interface DeviceKeys {
  * once and lives only in memory: reloading the page ends it, and a new approval starts again.
  */
 export interface ApproverPairing {
+  /** Releases the module's memory for this session, once it has ended. */
+  free(): void;
   /** The `CreateApproval` to send (step 1): only a commitment to this device's nonce. */
   readonly createRequest: CreateApproval;
   /** The new device's key fingerprint, shown next to the digits. */
@@ -59,6 +67,8 @@ export interface ApproverPairing {
 
 /** An approval this new device joined (steps 2 and 5). It works once. */
 export interface DevicePairing {
+  /** Releases the module's memory for this session, once it has ended. */
+  free(): void;
   /** The nonce to send (step 2). */
   readonly nonce: ApprovalNonce;
   /** The six digits, given `GET /v1/devices/current` once the approver revealed its nonce. Throws if that nonce does not match the commitment. */
@@ -67,6 +77,8 @@ export interface DevicePairing {
 
 /** The approval functions of the sync engine for one device (orbyn-wasm's `SyncEngine`). */
 export interface ApprovalEngine {
+  /** Releases the module's memory for this engine. Its state must have been saved first. */
+  free(): void;
   /** The engine's state sealed under the wrapping secret, for the key store. It holds who this device trusts and the removal sequence. */
   snapshot(wrapSecret: Uint8Array): Uint8Array;
   /**

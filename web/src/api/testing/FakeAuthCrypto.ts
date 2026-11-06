@@ -46,8 +46,15 @@ export const fakeVerifierFor = (password: string) => passwordTag(utf8(password))
 
 let counter = 0;
 
+/** How many times each kind of object was released, so a test can see that nothing is left to the module. */
+export const fakeFreed = { keys: 0, engine: 0, pairing: 0 };
+
 class FakeDeviceKeys implements DeviceKeys {
   constructor(private readonly signing: Uint8Array, private readonly agreement: Uint8Array) {}
+
+  free() {
+    fakeFreed.keys += 1;
+  }
 
   export(wrapSecret: Uint8Array) {
     return fakeSeal(wrapSecret, "keys", concat(this.signing, this.agreement));
@@ -165,6 +172,9 @@ function fakeApprovals(keys: DeviceKeys, accountId: string, deviceId: string, in
   let counted = initial.counted;
   const pinned = new Set<string>(initial.pinned);
   return {
+    free() {
+      fakeFreed.engine += 1;
+    },
     snapshot(wrapSecret) {
       const state = { accountId, deviceId, signing: keys.signingKey(), pinned: [...pinned], counted };
       return fakeSeal(wrapSecret, "snapshot", utf8(JSON.stringify(state)));
@@ -200,6 +210,7 @@ function fakeApprovals(keys: DeviceKeys, accountId: string, deviceId: string, in
       const rA = random32();
       const state = { parts, pairing, rA, rD: undefined as Uint8Array | undefined, used: false };
       const session: ApproverPairing = {
+        free: () => void (fakeFreed.pairing += 1),
         createRequest: { approval_id: parts.approvalId, device_id: target.id, created_at: nowSecs, commitment: encodeBytes(fakeCommitment(pairing, rA)) },
         deviceFingerprint: () => {
           const d = fakeDigest(utf8("fingerprint"), decodeBytes(target.signing_key), decodeBytes(target.agreement_key));
@@ -234,6 +245,7 @@ function fakeApprovals(keys: DeviceKeys, accountId: string, deviceId: string, in
       const pairing = pairingBytes(partsOfView(accountId, view));
       const rD = random32();
       const session: DevicePairing = {
+        free: () => void (fakeFreed.pairing += 1),
         nonce: { nonce: encodeBytes(rD) },
         sas(v) {
           if (!v.approver_nonce) throw new Error("mismatch: the answer does not match the upload");
