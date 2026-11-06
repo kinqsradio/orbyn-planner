@@ -7,7 +7,7 @@ import { MONTHS, WEEKDAYS, dateKey, startOfDay } from "../../lib/dates";
 import { usePlanner } from "../../store/context";
 import { groupToday } from "../tasks/selectors";
 import { TodayRow } from "../tasks/TaskRow";
-import { SyncLine, useSyncStatus } from "../sync/SyncLine";
+import { SyncLine, useSyncStatus, withPersistence } from "../sync/SyncLine";
 
 function greeting(now: Date): string {
   const h = now.getHours();
@@ -15,7 +15,7 @@ function greeting(now: Date): string {
 }
 
 export function TodayPage() {
-  const { tasks, outbox } = usePlanner();
+  const { tasks, outbox, persistence } = usePlanner();
   const ui = useUi();
   const now = useNow();
   const waiting = useMemo(() => {
@@ -26,7 +26,8 @@ export function TodayPage() {
       return task ? [{ id, label: task.title, at }] : [];
     });
   }, [outbox, tasks]);
-  const { status, retry } = useSyncStatus(outbox.length);
+  const { status: health, retry } = useSyncStatus(outbox.length);
+  const status = withPersistence(health, persistence);
   const g = useMemo(() => groupToday(tasks, now), [tasks, now]);
 
   const todayOpen = g.today.filter((t) => !t.done).length;

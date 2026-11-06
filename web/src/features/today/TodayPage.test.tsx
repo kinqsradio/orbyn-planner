@@ -80,3 +80,27 @@ describe("groupToday", () => {
     expect(groupToday(store.getState().tasks, new Date(2026, 10, 16, 10, 0)).doneThisWeek).toBe(0);
   });
 });
+
+describe("Today when storage fails", () => {
+  it("shows a red pill and says nothing about changes being saved", async () => {
+    window.history.replaceState(null, "", "/today");
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("offline"))));
+    const quota = new DOMException("full", "QuotaExceededError");
+    const memory = new MemoryPersistence();
+    const store = new LocalStore({
+      persistence: { durable: true, setHandlers: () => undefined, load: () => memory.load(), read: (r) => memory.read(r), apply: () => Promise.reject(quota) },
+      now: () => NOW,
+      broadcast: false,
+    });
+    await store.ready;
+    await store.flush();
+    render(
+      <ClockProvider value={() => NOW}>
+        <App store={store} />
+      </ClockProvider>,
+    );
+    const pill = await screen.findByText("Couldn’t save on this device");
+    expect(pill.closest("p")).toHaveClass("red");
+    expect(document.body.textContent).not.toMatch(/saved here/i);
+  });
+});
