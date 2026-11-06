@@ -47,8 +47,12 @@ export async function signUp(services: AuthServices, input: { name: string; emai
     const password = utf8(input.password);
     const pending = crypto.startRegistration(password);
     const started = await services.api.registerStart({ email, registration_request: encodeBytes(pending.request) });
-    const upload = crypto.finishRegistration(pending, password, decodeBytes(started.registration_response));
-    pending.free?.();
+    let upload: Uint8Array;
+    try {
+      upload = crypto.finishRegistration(pending, password, decodeBytes(started.registration_response));
+    } finally {
+      pending.free?.();
+    }
     keys = crypto.deviceKeys.create();
     const created = await services.api.registerFinish({
       email,
@@ -141,8 +145,12 @@ export async function signIn(services: AuthServices, input: { email: string; pas
     }
     const started = await services.api.loginStart({ email, credential_request: encodeBytes(pending.request), trusted_device: trusted });
     // A wrong password fails here, on the device, and nothing more is sent.
-    const finalization = crypto.finishLogin(pending, password, decodeBytes(started.credential_response));
-    pending.free?.();
+    let finalization: Uint8Array;
+    try {
+      finalization = crypto.finishLogin(pending, password, decodeBytes(started.credential_response));
+    } finally {
+      pending.free?.(); // also after a wrong password: the module's memory goes back whatever happened
+    }
 
     keys = known ?? crypto.deviceKeys.create();
     const created = await services.api.loginFinish({
@@ -168,7 +176,7 @@ export async function signIn(services: AuthServices, input: { email: string; pas
  * keys are stored. Keys made for another account are replaced, with the old state wiped; the same
  * account under a new device id means the old row was removed, so the saved trust state is wiped.
  */
-async function bindKeys(services: AuthServices, keys: DeviceKeys, existing: boolean, created: SessionCreated, email: string, replace: boolean): Promise<void> {
+async function bindKeys(services: AuthServices, keys: DeviceKeys, existing: boolean, created: SessionCreated, email: string, replaceKeys: boolean): Promise<void> {
   // Under the engine's lock, so no action in another tab is half-way through saving into what is wiped here.
   await services.engine.exclusive(async () => {
     const identity = await services.keys.loadIdentity();
@@ -180,16 +188,26 @@ async function bindKeys(services: AuthServices, keys: DeviceKeys, existing: bool
         wrap.fill(0);
       }
     };
-    if (replace) {
+    /** Other keys for this device: the old state goes and the new keys and identity arrive in one transaction. */
+    const replace = async () => {
+      const fresh = await services.freshWrap();
+      try {
+        await services.keys.replaceDevice({ keys: keys.export(fresh.secret), wrapKey: fresh.key, identity: { accountId: created.account_id, deviceId: created.device_id, email } });
+      } finally {
+        fresh.secret.fill(0);
+      }
+    };
+    if (replaceKeys) {
       // The person agreed to give up the other account's keys, and this sign-in worked: only now.
-      await services.keys.clearDevice();
-      await seal();
-    } else if (!existing) {
+      await replace();
+      return;
+    }
+    if (!existing) {
       await services.keys.clearSnapshot(); // no keys were here: whatever snapshot there is is not theirs
       await seal();
     } else if (identity && identity.accountId !== created.account_id) {
-      await services.keys.clearDevice();
-      await seal();
+      await replace();
+      return;
     } else if (!identity || identity.deviceId !== created.device_id) {
       await services.keys.clearSnapshot();
     }

@@ -29,6 +29,8 @@ export async function ensureRealAuthCrypto(): Promise<void> {
 /** Where loading the module stands, for the screens that need it. "idle" is a build with no engine, which never loads it. */
 export type CryptoLoad = "idle" | "loading" | "ready" | "failed";
 let load: CryptoLoad = "idle";
+/** How many loads have failed in a row. */
+let failures = 0;
 const listeners = new Set<() => void>();
 const set = (next: CryptoLoad) => {
   load = next;
@@ -36,11 +38,13 @@ const set = (next: CryptoLoad) => {
 };
 /** Puts the state back to "idle". For tests. */
 export function resetCryptoLoad(): void {
+  failures = 0;
   set("idle");
 }
 
 export const cryptoLoad = {
   get: (): CryptoLoad => load,
+  failures: (): number => failures,
   subscribe: (l: () => void) => {
     listeners.add(l);
     return () => listeners.delete(l);
@@ -57,9 +61,11 @@ async function attempt(): Promise<void> {
   set("loading");
   try {
     registerAuthCrypto(await loader());
+    failures = 0;
     set("ready");
   } catch {
     // Not a build without sign-in: the module itself would not load (a blocked request, a browser without WebAssembly).
+    failures += 1;
     set("failed");
   }
 }
