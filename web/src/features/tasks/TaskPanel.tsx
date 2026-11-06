@@ -1,14 +1,17 @@
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNow } from "../../app/clock";
 import { useUi } from "../../app/ui";
 import { Icon } from "../../components/Icon";
+import { Portal } from "../../components/Portal";
+import { PHONE_QUERY, useMediaQuery } from "../../components/useMediaQuery";
 import { useDialog } from "../../components/useDialog";
 import { makeDue, parseDue } from "../../lib/dates";
 import { usePlanner, useStore } from "../../store/context";
+import { inOrder, keyBetween } from "../../store/order";
 import { PRIORITIES, type Task } from "../../store/types";
 import { needsAction } from "./selectors";
 
-const isPhone = () => typeof window.matchMedia === "function" && window.matchMedia("(max-width: 767px)").matches;
+const SAVE_DELAY_MS = 500;
 
 function Panel({ task }: { task: Task }) {
   const store = useStore();
@@ -16,46 +19,88 @@ function Panel({ task }: { task: Task }) {
   const ui = useUi();
   const now = useNow();
   const ref = useRef<HTMLElement>(null);
-  const phone = isPhone();
-  useDialog(ref, ui.closeTask, phone);
+  const phone = useMediaQuery(PHONE_QUERY);
 
   const [title, setTitle] = useState(task.title);
   const [notes, setNotes] = useState(task.notes);
   const [step, setStep] = useState("");
 
+  // Title and notes are saved a moment after typing stops, and always when the panel is left.
+  const latest = useRef({ title, notes, task });
+  useEffect(() => {
+    latest.current = { title, notes, task };
+  });
+  const flush = useCallback(() => {
+    const { title: t, notes: n, task: current } = latest.current;
+    const patch: { title?: string; notes?: string } = {};
+    if (t.trim() !== "" && t.trim() !== current.title) patch.title = t.trim();
+    if (n !== current.notes) patch.notes = n;
+    if (patch.title !== undefined || patch.notes !== undefined) {
+      store.updateTask(current.id, patch);
+      latest.current = { ...latest.current, task: { ...current, ...patch } };
+    }
+  }, [store]);
+  useEffect(() => {
+    const timer = setTimeout(flush, SAVE_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [title, notes, flush]);
+  useEffect(() => flush, [flush]);
+
+  const close = () => {
+    flush();
+    ui.closeTask();
+  };
+  useDialog(ref, close, phone);
+
   const dayValue = task.due ? task.due.slice(0, 10) : "";
   const timeValue = task.due && parseDue(task.due).hasTime ? task.due.slice(11, 16) : "";
+  const steps = inOrder(task.checklist);
   const doneSteps = task.checklist.filter((c) => c.done).length;
 
   const setDue = (day: string, time: string) => {
-    if (!day && !time) return store.updateTask(task.id, { due: null });
-    const base = day ? parseDue(day).date : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    // No day means no due date, so a time left in the field goes with it.
+    if (!day) return store.updateTask(task.id, { due: null });
+    const base = parseDue(day).date;
     const [h = 0, m = 0] = time ? time.split(":").map(Number) : [];
     base.setHours(h, m);
     store.updateTask(task.id, { due: makeDue(base, time !== "") });
   };
 
   const commitTitle = () => {
-    const next = title.trim();
-    if (next === "") setTitle(task.title);
-    else if (next !== task.title) store.updateTask(task.id, { title: next });
+    if (title.trim() === "") setTitle(task.title);
+    else flush();
   };
 
   const addStep = () => {
     const text = step.trim();
     if (!text) return;
-    store.updateTask(task.id, { checklist: [...task.checklist, { id: crypto.randomUUID(), title: text, done: false }] });
+    // A new step goes last: a key after the current last one.
+    const order = keyBetween(steps.at(-1)?.order ?? null, null);
+    if (order === null) return;
+    store.updateTask(task.id, { checklist: [...task.checklist, { id: crypto.randomUUID(), title: text, done: false, order }] });
     setStep("");
   };
 
   const remove = () => {
+    flush();
     store.deleteTask(task.id);
     ui.closeTask();
-    ui.showToast("Task deleted", () => store.restoreTask(task.id));
+    ui.showToast("Task deleted", () => store.restoreTask(task.id), { focusUndo: true });
   };
 
-  return (
-    <aside ref={ref} className="task-panel" role={phone ? "dialog" : "complementary"} aria-modal={phone ? "true" : undefined} aria-label="Task" tabIndex={-1}>
+  const panel = (
+    <aside
+      ref={ref}
+      className="task-panel"
+      role={phone ? "dialog" : "complementary"}
+      aria-modal={phone ? "true" : undefined}
+      aria-label="Task"
+      tabIndex={-1}
+      onBlur={(e) => {
+        // Leaving the panel saves what was typed.
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) flush();
+      }}
+    >
       <div className="tp-head">
         <input
           type="checkbox"
@@ -73,7 +118,7 @@ function Panel({ task }: { task: Task }) {
           onBlur={commitTitle}
           onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
         />
-        <button type="button" className="icon-btn" aria-label="Close" onClick={ui.closeTask}>
+        <button type="button" className="icon-btn" aria-label="Close" onClick={close}>
           <Icon name="x" />
         </button>
       </div>
@@ -111,7 +156,7 @@ function Panel({ task }: { task: Task }) {
         <span>{task.checklist.length > 0 ? `${doneSteps} of ${task.checklist.length}` : ""}</span>
       </div>
       <ul>
-        {task.checklist.map((item) => (
+        {steps.map((item) => (
           <li key={item.id} className="row step-row" data-done={item.done}>
             <input
               type="checkbox"
@@ -164,6 +209,7 @@ function Panel({ task }: { task: Task }) {
       </div>
     </aside>
   );
+  return phone ? <Portal>{panel}</Portal> : panel;
 }
 
 export function TaskPanel() {

@@ -1,11 +1,13 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 
-export const TOAST_MS = 6000;
+export const TOAST_MS = 10_000;
 
 export interface ToastState {
   id: number;
   message: string;
   undo?: () => void;
+  /** Move focus to Undo when it appears, for a change that took the focused thing away. */
+  focusUndo?: boolean;
 }
 
 export interface EventKey {
@@ -37,7 +39,7 @@ interface Ui {
   openSearch: () => void;
   closeSearch: () => void;
   toast: ToastState | null;
-  showToast: (message: string, undo?: () => void) => void;
+  showToast: (message: string, undo?: () => void, options?: { focusUndo?: boolean }) => void;
   dismissToast: () => void;
 }
 
@@ -54,16 +56,10 @@ export function UiProvider({ children }: { children: ReactNode }) {
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
 
-  const showToast = useCallback((message: string, undo?: () => void) => {
-    setToast({ id: ++toastCounter, message, undo });
+  const showToast = useCallback((message: string, undo?: () => void, options?: { focusUndo?: boolean }) => {
+    setToast({ id: ++toastCounter, message, undo, focusUndo: options?.focusUndo });
   }, []);
   const dismissToast = useCallback(() => setToast(null), []);
-
-  useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(() => setToast(null), TOAST_MS);
-    return () => clearTimeout(timer);
-  }, [toast]);
 
   const value = useMemo<Ui>(
     () => ({

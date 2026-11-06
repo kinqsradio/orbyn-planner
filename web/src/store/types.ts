@@ -11,6 +11,8 @@ export interface ChecklistItem {
   id: string;
   title: string;
   done: boolean;
+  /** Position among the steps, a fractional key (see order.ts): a step inserted anywhere changes no other. */
+  order: string;
 }
 
 export interface Task {
@@ -38,15 +40,25 @@ export interface TaskList {
 }
 
 export type RecordType = "task" | "list" | "event" | "calendar";
-export type OutboxOp = "create" | "update" | "delete" | "purge";
+export type OutboxOp = "create" | "update" | "delete";
 
-/** A local change not yet sent to the engine. */
+/**
+ * A local change not yet sent to the engine. There is one entry per record: later edits of the
+ * same record are folded into it, so "N changes waiting" counts records.
+ */
 export interface OutboxEntry {
+  /** The key IndexedDB allocated for the entry. Negative while the write is still in flight. */
   seq: number;
   type: RecordType;
   id: string;
+  /** "create" while the record has never been sent, otherwise the latest kind of change. */
   op: OutboxOp;
-  at: string;
+  /** Field names and their latest values (the whole record for a create). Empty for a purge. */
+  changedFields: Record<string, unknown>;
+  /** Kept while entries are folded together, so a retried send is not applied twice. */
+  idempotencyKey: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type Response = "accepted" | "declined" | "tentative" | "none";
@@ -93,6 +105,13 @@ export interface PlannerCalendar {
   kind: CalendarKind;
 }
 
+/** Whether changes reach this device's storage. */
+export type PersistenceState =
+  | { status: "ok" }
+  /** IndexedDB does not exist here, so nothing outlives this visit. */
+  | { status: "memory" }
+  | { status: "failed"; reason: string };
+
 export interface PlannerState {
   ready: boolean;
   tasks: readonly Task[];
@@ -100,6 +119,7 @@ export interface PlannerState {
   events: readonly CalendarEvent[];
   calendars: readonly PlannerCalendar[];
   outbox: readonly OutboxEntry[];
+  persistence: PersistenceState;
 }
 
 export interface NewTask {

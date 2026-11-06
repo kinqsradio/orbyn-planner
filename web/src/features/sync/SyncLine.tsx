@@ -9,7 +9,11 @@ export type SyncStatus =
   | { kind: "connected" }
   | { kind: "syncing" }
   | { kind: "offline"; waiting: number }
-  | { kind: "error" };
+  | { kind: "error" }
+  /** Changes did not reach this device's storage. Red: a failure. */
+  | { kind: "unsaved"; reason: string }
+  /** IndexedDB is missing, so nothing outlives this visit. */
+  | { kind: "memory" };
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -73,6 +77,15 @@ export function SyncLine({ status, onRetry, waiting = [] }: { status: SyncStatus
       );
     case "offline":
       return <OfflinePill status={status} waiting={waiting} />;
+    case "unsaved":
+      return (
+        <p className="pillx red" role="status" title={status.reason}>
+          Couldn’t save on this device
+          <span className="sr-only"> {status.reason}</span>
+        </p>
+      );
+    case "memory":
+      return <p className="pillx" role="status">Not saved on this device</p>;
     case "error":
       return (
         <p className="pillx red" role="status">
@@ -83,6 +96,13 @@ export function SyncLine({ status, onRetry, waiting = [] }: { status: SyncStatus
         </p>
       );
   }
+}
+
+/** Storage trouble comes first: when changes are not safe on this device, no other state is worth showing. */
+export function withPersistence(status: SyncStatus, persistence: { status: string; reason?: string }): SyncStatus {
+  if (persistence.status === "failed") return { kind: "unsaved", reason: persistence.reason ?? "" };
+  if (persistence.status === "memory") return { kind: "memory" };
+  return status;
 }
 
 /** Seconds until the next health check: slowing down while healthy, quick to retry a failure. */

@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { Portal } from "../../components/Portal";
 import { useDialog } from "../../components/useDialog";
 import type { Scope } from "../../store/eventScope";
 
@@ -13,6 +14,7 @@ export function ScopeDialog({ title, onChoose, onCancel }: { title: string; onCh
   const ref = useRef<HTMLDivElement>(null);
   useDialog(ref, onCancel);
   return (
+    <Portal>
     <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onCancel()}>
       <div ref={ref} className="authcard" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1}>
         <b className="card-title">{title}</b>
@@ -28,5 +30,6 @@ export function ScopeDialog({ title, onChoose, onCancel }: { title: string; onCh
         </div>
       </div>
     </div>
+    </Portal>
   );
 }

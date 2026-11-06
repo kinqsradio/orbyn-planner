@@ -38,9 +38,12 @@ describe("events and calendars in the store", () => {
     expect(store.getState().events[0]!.deletedAt).not.toBeNull();
     store.restoreEvent(e.id);
     expect(store.getState().events[0]).toMatchObject({ title: "Planning", place: "Room 4", deletedAt: null });
-    expect(store.getState().outbox.slice(before).map((x) => `${x.type}:${x.op}`)).toEqual([
-      "event:create", "event:update", "event:delete", "event:update",
-    ]);
+    await store.flush();
+    // One entry for the event, still a create, holding its latest values.
+    const entries = store.getState().outbox.filter((x) => x.type === "event");
+    expect(store.pendingChanges()).toBe(before + 1);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ op: "create", changedFields: { title: "Planning", place: "Room 4", deletedAt: null } });
   });
 
   it("builds a series from a rule and moves it with the event", async () => {
@@ -65,12 +68,15 @@ describe("events and calendars in the store", () => {
     await first.ready;
     const e = first.addEvent(meeting);
     first.deleteEvent(e.id);
+    env.advance(30);
+    first.addEvent({ ...meeting, title: "A later one" }); // brings the newest timestamp up to date
     await first.flush();
-    env.advance(31);
+    env.advance(1);
     const second = env.make();
     await second.ready;
-    expect(second.getState().events).toHaveLength(0);
-    expect(second.getState().outbox.at(-1)).toMatchObject({ type: "event", op: "purge" });
+    await second.flush();
+    expect(second.getState().events.map((x) => x.title)).toEqual(["A later one"]);
+    expect(second.getState().outbox.filter((x) => x.id === e.id)).toEqual([expect.objectContaining({ op: "delete", changedFields: {} })]);
   });
 
   it("adds and changes calendars, and subscriptions", async () => {

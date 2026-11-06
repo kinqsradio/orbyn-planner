@@ -21,7 +21,7 @@ describe("navigation", () => {
     const nav = screen.getByRole("navigation", { name: "Primary" });
     await userEvent.click(within(nav).getByRole("link", { name: "Calendar" }));
     expect(window.location.pathname).toBe("/calendar");
-    expect(screen.getByRole("heading", { level: 1, name: "Calendar" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Week", checked: true })).toBeInTheDocument();
     expect(within(nav).getByRole("link", { name: "Calendar" })).toHaveAttribute("aria-current", "page");
 
     window.history.pushState(null, "", "/lists");

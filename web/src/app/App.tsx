@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../components/Icon";
+import { Portal } from "../components/Portal";
 import { useDialog } from "../components/useDialog";
 import { CalendarPage } from "../features/calendar/CalendarPage";
 import { ListsPage } from "../features/lists/ListsPage";
@@ -18,6 +19,11 @@ import type { PlannerStore } from "../store/types";
 import { Toast } from "../components/Toast";
 import { useNow } from "./clock";
 import { UiProvider, useUi } from "./ui";
+import { PrefsProvider } from "./prefs";
+import { CalendarsDialog } from "../features/calendar/CalendarsDialog";
+import { EventPanel } from "../features/calendar/EventPanel";
+import { NewEventDialog } from "../features/calendar/NewEventDialog";
+import { useSubscriptionRefresh } from "../features/calendar/subscriptions";
 import { TodayPage } from "../features/today/TodayPage";
 import { MORE, NAV, SETTINGS, TABS, type NavItem } from "./nav";
 import { Link, RouterProvider, useRouter } from "./router";
@@ -72,14 +78,14 @@ function MoreSheet({ onClose }: { onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useDialog(ref, onClose);
   return (
-    <>
+    <Portal>
       <button type="button" className="more-backdrop" aria-label="Close" tabIndex={-1} onClick={onClose} />
       <div ref={ref} className="more-sheet" role="dialog" aria-modal="true" aria-label="More" tabIndex={-1}>
         {MORE.map((item) => (
           <NavLink key={item.path} item={item} onNavigate={onClose} />
         ))}
       </div>
-    </>
+    </Portal>
   );
 }
 
@@ -91,6 +97,7 @@ function Shell() {
   const { tasks } = usePlanner();
   const now = useNow();
   const due = dueCount(tasks, now);
+  useSubscriptionRefresh();
   const page = PAGES[path === "/" ? "/today" : path] ?? PAGES["/today"]!;
   const inMore = MORE.some((item) => item.path === path);
 
@@ -116,9 +123,10 @@ function Shell() {
         </nav>
       </aside>
       <main id="content" ref={main} tabIndex={-1} className="sheet">
-        <div className={ui.taskId ? "sheet-grid has-panel" : "sheet-grid"}>
+        <div className={ui.taskId || ui.eventKey ? "sheet-grid has-panel" : "sheet-grid"}>
           <div className="sheet-main">{page()}</div>
           <TaskPanel />
+          <EventPanel />
         </div>
       </main>
       <nav aria-label="Tabs" className="tabbar">
@@ -139,6 +147,8 @@ function Shell() {
       </nav>
       {more && <MoreSheet onClose={() => setMore(false)} />}
       {ui.newTaskOpen && <NewTaskDialog />}
+      {ui.newEventDate !== null && <NewEventDialog />}
+      {ui.calendarsOpen && <CalendarsDialog />}
       {ui.searchOpen && <SearchDialog />}
       <Toast />
     </div>
@@ -150,9 +160,11 @@ export function App({ store }: { store?: PlannerStore }) {
   return (
     <StoreProvider store={own}>
       <UiProvider>
-        <RouterProvider>
-          <Shell />
-        </RouterProvider>
+        <PrefsProvider>
+          <RouterProvider>
+            <Shell />
+          </RouterProvider>
+        </PrefsProvider>
       </UiProvider>
     </StoreProvider>
   );

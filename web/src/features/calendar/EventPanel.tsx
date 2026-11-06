@@ -1,6 +1,8 @@
 import { useMemo, useRef, useState } from "react";
 import { useUi } from "../../app/ui";
 import { Icon } from "../../components/Icon";
+import { Portal } from "../../components/Portal";
+import { PHONE_QUERY, useMediaQuery } from "../../components/useMediaQuery";
 import { useDialog } from "../../components/useDialog";
 import { usePlanner, useStore } from "../../store/context";
 import { deleteOccurrence, duplicateOccurrence, editOccurrence, type Scope } from "../../store/eventScope";
@@ -9,7 +11,6 @@ import type { Person, Response } from "../../store/types";
 import { REMINDERS, REPEAT_CHOICES, RESPONSE_LABELS, choiceOf, parsePeople, ruleOf, type RepeatChoice } from "./eventForm";
 import { ScopeDialog } from "./ScopeDialog";
 
-const isPhone = () => typeof window.matchMedia === "function" && window.matchMedia("(max-width: 767px)").matches;
 const timePart = (value: string) => (value.length > 10 ? value.slice(11, 16) : "");
 
 function Panel({ occ }: { occ: Occurrence }) {
@@ -17,7 +18,7 @@ function Panel({ occ }: { occ: Occurrence }) {
   const { calendars } = usePlanner();
   const ui = useUi();
   const ref = useRef<HTMLElement>(null);
-  const phone = isPhone();
+  const phone = useMediaQuery(PHONE_QUERY);
   useDialog(ref, ui.closeEvent, phone);
 
   const event = occ.event;
@@ -75,7 +76,7 @@ function Panel({ occ }: { occ: Occurrence }) {
     ui.showToast("Event duplicated");
   };
 
-  return (
+  const panel = (
     <aside ref={ref} className="task-panel" role={phone ? "dialog" : "complementary"} aria-modal={phone ? "true" : undefined} aria-label="Event" tabIndex={-1}>
       <div className="tp-head">
         <span className="sw" style={{ background: `var(--${calendar?.colour ?? "c1"})` }} aria-hidden="true" />
@@ -190,6 +191,7 @@ function Panel({ occ }: { occ: Occurrence }) {
       {ask && <ScopeDialog title={ask === "save" ? "Save changes to" : "Delete"} onCancel={() => setAsk(null)} onChoose={(scope) => (ask === "save" ? save(scope) : remove(scope))} />}
     </aside>
   );
+  return phone ? <Portal>{panel}</Portal> : panel;
 }
 
 export function EventPanel() {
