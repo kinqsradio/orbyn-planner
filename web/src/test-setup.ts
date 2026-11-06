@@ -4,6 +4,6 @@ import { afterEach } from "vitest";
 
 afterEach(() => {
   cleanup();
-  localStorage.clear();
-  document.documentElement.removeAttribute("data-theme");
+  if (typeof localStorage !== "undefined") localStorage.clear();
+  if (typeof document !== "undefined") document.documentElement.removeAttribute("data-theme");
 });

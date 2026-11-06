@@ -1,0 +1,297 @@
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { ApiFailure } from "../../api/auth";
+import { authCryptoAvailable, SIGN_IN_UNAVAILABLE } from "../../api/authCrypto";
+import { Icon } from "../../components/Icon";
+import { Portal } from "../../components/Portal";
+import { useDialog } from "../../components/useDialog";
+import type { Device } from "../../generated/Device";
+import { useAuth } from "../../auth/AuthProvider";
+import { removeDevice, verifiedDevices } from "../../auth/flows";
+import { ApproverController } from "../../auth/pairing";
+import { describeError } from "./AuthScreens";
+
+const PLATFORMS: Record<Device["platform"], string> = { web: "Web", ios: "iPhone or iPad", android: "Android", macos: "Mac", windows: "Windows", linux: "Linux" };
+
+function when(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+/** "418207" as "418 207", the way it is read out. */
+export const groupCode = (code: string) => (code.length === 6 ? `${code.slice(0, 3)} ${code.slice(3)}` : code);
+
+function Modal({ label, onClose, children }: { label: string; onClose: () => void; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useDialog(ref, onClose);
+  return (
+    <Portal>
+      <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+        <div ref={ref} className="authcard" style={{ width: 440 }} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1}>
+          {children}
+        </div>
+      </div>
+    </Portal>
+  );
+}
+
+/** The digits and the device's key fingerprint, side by side with the choice: nothing is approved until "They match". */
+function ApproveDialog({ device, onClose, onDone }: { device: Device; onClose: () => void; onDone: () => void }) {
+  const auth = useAuth()!;
+  const { services } = auth;
+  const [attempt, setAttempt] = useState(0);
+  const controller = useMemo(() => {
+    void attempt; // a new attempt is a new approval
+    return new ApproverController(services, auth.session!, device);
+  }, [services, auth.session, device, attempt]);
+  const state = useSyncExternalStore(controller.subscribe, controller.getState);
+
+  useEffect(() => {
+    void controller.start();
+    return () => controller.dispose();
+  }, [controller]);
+
+  const close = () => {
+    // Leaving before it is done closes the approval; a finished or closed one just goes.
+    if (state.phase !== "done" && state.phase !== "closed") void controller.cancel();
+    onClose();
+  };
+
+  return (
+    <Modal label="New sign-in" onClose={close}>
+      <b className="card-title">New sign-in</b>
+      {device.state !== "pending" && <p className="t3 small">{device.name} is signed in, but this device doesn’t trust it (it may have been approved under a device that was removed). Approve it again to trust it.</p>}
+      <div className="kv"><span>Device</span><b>{device.name}</b></div>
+      <div className="kv"><span>Kind</span><b>{PLATFORMS[device.platform]}</b></div>
+      <div className="kv"><span>When</span><b>{when(device.created_at)}</b></div>
+      {(state.phase === "starting" || state.phase === "waiting") && (
+        <>
+          <p className="t3 small" role="status">Waiting for {device.name} to show its code…</p>
+          <p className="t3 small">It appears once that device is open and signed in.</p>
+          <div className="dialog-actions">
+            <button type="button" className="ghost" onClick={() => void controller.cancel()}>Cancel</button>
+          </div>
+        </>
+      )}
+      {state.phase === "compare" && (
+        <>
+          <p className="t3 small">{device.name} should show the same 6 digits. Only if they are identical, choose They match.</p>
+          <span className="mono code" data-testid="approval-code" aria-label={`Code ${state.sas.split("").join(" ")}`}>{groupCode(state.sas)}</span>
+          <div className="kv"><span>Device key</span><b className="mono" data-testid="fingerprint">{state.fingerprint}</b></div>
+          <div className="dialog-actions">
+            <button type="button" className="ghost" onClick={() => void controller.cancel()}>Cancel</button>
+            <button type="button" className="btn" onClick={() => void controller.confirm()}>They match</button>
+          </div>
+        </>
+      )}
+      {(state.phase === "confirming" || state.phase === "finishing") && (
+        <>
+          <p className="t3 small" role="status">Waiting for {device.name} to confirm…</p>
+          <div className="dialog-actions">
+            <button type="button" className="ghost" onClick={() => void controller.cancel()}>Cancel</button>
+          </div>
+        </>
+      )}
+      {state.phase === "done" && (
+        <>
+          <p className="t3 small" role="status">{device.name} is trusted.</p>
+          <div className="dialog-actions">
+            <button type="button" className="btn" onClick={onDone}>Done</button>
+          </div>
+        </>
+      )}
+      {state.phase === "closed" && (
+        <>
+          <p className="err" role="alert">{state.message}</p>
+          <div className="dialog-actions">
+            <button type="button" className="ghost" onClick={onClose}>Close</button>
+            <button type="button" className="btn" onClick={() => setAttempt((n) => n + 1)}>Start again</button>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+function RemoveDialog({ device, onClose, onDone }: { device: Device; onClose: () => void; onDone: () => void }) {
+  const auth = useAuth()!;
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const remove = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await removeDevice(auth.services, auth.session!, device);
+      onDone();
+    } catch (e) {
+      setError(describeError(e));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal label="Remove device" onClose={onClose}>
+      <b className="card-title">Remove “{device.name}”?</b>
+      <p className="t3 small">It is signed out at once and can’t open your planner until you approve it again.</p>
+      {error && <p className="err" role="alert">{error}</p>}
+      <div className="dialog-actions">
+        <button type="button" className="ghost" onClick={onClose}>Cancel</button>
+        <button type="button" className="ghost danger" disabled={busy} onClick={() => void remove()}>Remove</button>
+      </div>
+    </Modal>
+  );
+}
+
+function AddDeviceDialog({ onClose }: { onClose: () => void }) {
+  return (
+    <Modal label="Add a device" onClose={onClose}>
+      <b className="card-title">Add a device</b>
+      <ol className="steps">
+        <li>On the new device, open Orbyn Planner and sign in with your email and password.</li>
+        <li>It will say it is waiting for approval. Come back here and choose Approve next to it.</li>
+        <li>Both devices show the same 6 digits. If they match, choose They match on each.</li>
+      </ol>
+      <div className="dialog-actions">
+        <button type="button" className="btn" onClick={onClose}>Done</button>
+      </div>
+    </Modal>
+  );
+}
+
+function EngineNotice() {
+  const { services } = useAuth()!;
+  const message = useSyncExternalStore(services.engine.notice.subscribe, services.engine.notice.get);
+  if (!message) return null;
+  return (
+    <div className="card" role="status" style={{ gap: 6 }}>
+      <span className="t3">{message}</span>
+      <button type="button" className="ghost" onClick={() => services.engine.notice.clear()}>Dismiss</button>
+    </div>
+  );
+}
+
+function SignedInAccount() {
+  const auth = useAuth()!;
+  const { session, services } = auth;
+  const [devices, setDevices] = useState<Device[] | null>(null);
+  /** The devices this device itself verifies; null until known. Approving is offered from this, never from the server's `state`. */
+  const [verified, setVerified] = useState<Set<string> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [approving, setApproving] = useState<Device | null>(null);
+  const [removing, setRemoving] = useState<Device | null>(null);
+  const [adding, setAdding] = useState(false);
+
+  const load = useCallback(
+    () =>
+      services.api.devices().then(
+        (list) => {
+          setDevices(list.devices);
+          setError(null);
+          if (session) void verifiedDevices(services, session, list).then(setVerified);
+        },
+        (e: unknown) => {
+          // A 401 has signed this device out already, and this screen is going away.
+          if (!(e instanceof ApiFailure && e.status === 401)) setError(describeError(e));
+        },
+      ),
+    [services, session],
+  );
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  // A device this one does not verify can be approved: a new one, or one the server lists as trusted
+  // that this device no longer trusts (stranded by a removal, or approved before the two-way code).
+  const needsApproval = (d: Device) => session?.deviceState === "trusted" && !d.current && verified !== null && !verified.has(d.id);
+
+  return (
+    <>
+      <EngineNotice />
+      <div className="card" style={{ gap: 0, padding: "0 14px" }}>
+        <div className="kv" style={{ height: 44, borderBottom: "1px solid var(--line)" }}><span>Name</span><b>{session?.name || "Not set"}</b></div>
+        <div className="kv" style={{ height: 44 }}><span>Email</span><b>{session?.email}</b></div>
+      </div>
+
+      <div className="bh"><b>Devices</b><span>{devices?.length ?? ""}</span></div>
+      {error && <p className="err" role="alert">{error}</p>}
+      <ul className="card" style={{ gap: 0, padding: "0 14px" }} aria-label="Devices">
+        {(devices ?? []).map((d, i, all) => (
+          <li key={d.id} className="kv device-row" style={{ minHeight: 44, borderBottom: i < all.length - 1 ? "1px solid var(--line)" : undefined }}>
+            <span>
+              {d.name}
+              {d.current && <span className="t3"> · this device</span>}
+            </span>
+            <b className="ctl">
+              {d.state === "pending" ? (
+                <span className="amber-text">Waiting for approval</span>
+              ) : needsApproval(d) ? (
+                <span className="amber-text">Needs approving again</span>
+              ) : (
+                <span className="t3">Added {when(d.created_at)}</span>
+              )}
+              {needsApproval(d) && (
+                <button type="button" className="ghost" aria-label={d.state === "pending" ? `Approve ${d.name}` : `Approve ${d.name} again`} onClick={() => setApproving(d)}>
+                  {d.state === "pending" ? "Approve" : "Approve again"}
+                </button>
+              )}
+              {!d.current && (
+                <button type="button" className="ghost" aria-label={`Remove ${d.name}`} onClick={() => setRemoving(d)}>Remove</button>
+              )}
+            </b>
+          </li>
+        ))}
+      </ul>
+      <div className="account-actions">
+        <button type="button" className="ghost" onClick={() => void auth.signOut()}>Sign out</button>
+        <button type="button" className="ghost" onClick={() => void load()}>Refresh</button>
+        <button type="button" className="ghost" onClick={() => setAdding(true)}>
+          <Icon name="plus" small />
+          Add a device
+        </button>
+      </div>
+
+      {approving && (
+        <ApproveDialog
+          device={approving}
+          onClose={() => setApproving(null)}
+          onDone={() => {
+            setApproving(null);
+            void load();
+          }}
+        />
+      )}
+      {removing && (
+        <RemoveDialog
+          device={removing}
+          onClose={() => setRemoving(null)}
+          onDone={() => {
+            setRemoving(null);
+            void load();
+          }}
+        />
+      )}
+      {adding && <AddDeviceDialog onClose={() => setAdding(false)} />}
+    </>
+  );
+}
+
+/** Settings · Account: who is signed in and which devices, or how to sign in. */
+export function AccountSettings() {
+  const auth = useAuth();
+  if (!auth) return <p className="quiet">Accounts aren’t part of this build.</p>;
+  if (auth.status === "signedIn") return <SignedInAccount />;
+  return (
+    <>
+      <div className="card" style={{ gap: 6 }}>
+        <b style={{ fontWeight: 500 }}>This device only</b>
+        <span className="t3">Your planner is saved on this device. An account keeps it on your other devices too.</span>
+        {!authCryptoAvailable() && <span className="t3 small">{SIGN_IN_UNAVAILABLE}.</span>}
+      </div>
+      <div className="account-actions">
+        <button type="button" className="ghost" onClick={() => auth.openAuth("signup")}>Create an account</button>
+        <button type="button" className="btn" onClick={() => auth.openAuth("signin")}>Sign in</button>
+      </div>
+    </>
+  );
+}

@@ -3,6 +3,7 @@ import { CHOICES, chooseTheme, readStoredChoice, type ThemeChoice } from "../../
 import { usePrefs } from "../../app/prefs";
 import { Icon } from "../../components/Icon";
 import { CalendarForms, CalendarList } from "../calendar/CalendarList";
+import { AccountSettings } from "../auth/AccountSettings";
 import { NotificationsSettings } from "./NotificationsSettings";
 import { InstallHint } from "../../components/InstallHint";
 
@@ -85,6 +86,8 @@ export function SettingsPage() {
               </div>
               <InstallHint />
             </>
+          ) : category === "Account" ? (
+            <AccountSettings />
           ) : category === "Notifications" ? (
             <NotificationsSettings />
           ) : category === "Calendars" ? (

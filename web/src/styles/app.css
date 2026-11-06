@@ -435,3 +435,20 @@ button.pillx { border: 0; }
 .project-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .month-row { display: contents; }
 .md:focus-visible, .slot:focus-visible { outline: 2px solid var(--t1); outline-offset: -2px; }
+
+/* Accounts: the public pages, the approval screen, the devices list */
+.public-page { min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 24px 16px; background: var(--bg); }
+.public { display: flex; flex-direction: column; align-items: center; gap: 16px; max-width: 640px; text-align: center; }
+.public h1 { font-size: 30px; font-weight: 500; letter-spacing: -.02em; color: var(--t1); }
+.public p { color: var(--t3); max-width: 46ch; }
+.public-actions { display: flex; gap: 8px; }
+.auth-title { font-weight: 500; font-size: 18px; line-height: 1.3; color: var(--t1); }
+.authcard .small, .public .small, .small { font-size: 12px; }
+.quiet-link { color: var(--t3); text-decoration: underline; text-underline-offset: 2px; }
+.auth-options { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.mono-input { font-family: var(--mono); font-size: 20px; letter-spacing: .12em; }
+.code { font-size: 24px; color: var(--t1); letter-spacing: .12em; }
+.steps { margin: 0; padding-left: 18px; color: var(--t2); display: flex; flex-direction: column; gap: 6px; }
+.account-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.amber-text { color: var(--amber); font-weight: 500; }
+.device-row b { align-items: center; }

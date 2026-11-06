@@ -21,6 +21,9 @@ import { Toast } from "../components/Toast";
 import { useNow } from "./clock";
 import { useExternalLinks } from "./links";
 import { UiProvider, useUi } from "./ui";
+import { AuthProvider } from "../auth/AuthProvider";
+import type { AuthServices } from "../auth/services";
+import { AuthGate } from "../features/auth/AuthGate";
 import { PrefsProvider } from "./prefs";
 import { CalendarsDialog } from "../features/calendar/CalendarsDialog";
 import { EventPanel } from "../features/calendar/EventPanel";
@@ -160,16 +163,21 @@ function Shell() {
   );
 }
 
-export function App({ store }: { store?: PlannerStore }) {
+/** `auth` turns accounts on: signed out, the public pages show first. Without it the planner runs on this device alone. */
+export function App({ store, auth }: { store?: PlannerStore; auth?: AuthServices }) {
   useExternalLinks();
   const [own] = useState(() => store ?? new LocalStore());
   return (
     <StoreProvider store={own}>
       <UiProvider>
         <PrefsProvider>
-          <RouterProvider>
-            <Shell />
-          </RouterProvider>
+          <AuthProvider services={auth ?? null}>
+            <AuthGate>
+              <RouterProvider>
+                <Shell />
+              </RouterProvider>
+            </AuthGate>
+          </AuthProvider>
         </PrefsProvider>
       </UiProvider>
     </StoreProvider>

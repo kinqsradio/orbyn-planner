@@ -1,0 +1,90 @@
+import { useEffect, useState, type ReactNode } from "react";
+import { useAuth } from "../../auth/AuthProvider";
+import { AuthScreens } from "./AuthScreens";
+import { PendingScreen } from "./PendingScreen";
+
+/**
+ * A trusted device can be asked to pair again (another device no longer trusts it). The server
+ * returns an approval from `GET /v1/devices/current` for any device it is addressed to, so a signed-in
+ * device asks now and then. It only tells the person: nothing is joined, and no nonce is sent, until
+ * they tap "Approve this device again". Dismissing hides the notice for that approval.
+ */
+function useIncomingApproval() {
+  const auth = useAuth();
+  const [id, setId] = useState<string | null>(null);
+  const [dismissed, setDismissed] = useState<string[]>([]);
+  const [accepted, setAccepted] = useState<string | null>(null);
+  const active = auth?.status === "signedIn";
+  const services = auth?.services;
+  useEffect(() => {
+    if (!active || !services) return;
+    let live = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const ask = () => {
+      services.api.currentDevice().then(
+        // Once seen it stays until dealt with: the approval closes when it succeeds.
+        (current) => live && setId((was) => current.approval?.id ?? was),
+        () => undefined,
+      );
+      timer = setTimeout(ask, services.poll.maxMs);
+    };
+    ask();
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [active, services]);
+  const hidden = id !== null && dismissed.includes(id);
+  return {
+    id: hidden ? null : id,
+    accepted: accepted !== null && accepted === id,
+    accept: () => setAccepted(id),
+    dismiss: () => {
+      if (id) setDismissed((d) => [...d, id]);
+      setAccepted(null);
+    },
+  };
+}
+
+/** A passive notice: it joins nothing and sends nothing until the person agrees. */
+function RepairNotice({ onApprove, onDismiss }: { onApprove: () => void; onDismiss: () => void }) {
+  return (
+    <aside className="card" role="status" aria-label="Approval request" style={{ position: "fixed", top: 12, right: 12, zIndex: 60, maxWidth: 320, gap: 8 }}>
+      <b style={{ fontWeight: 500 }}>Another device asked to approve this one again</b>
+      <span className="t3 small">It no longer trusts this device. If you started that, approve it here and compare the digits on both.</span>
+      <div className="dialog-actions">
+        <button type="button" className="ghost" onClick={onDismiss}>Dismiss</button>
+        <button type="button" className="btn" onClick={onApprove}>Approve this device again</button>
+      </div>
+    </aside>
+  );
+}
+
+/** Shows the public pages while signed out, the approval screen while a device waits, and the planner otherwise. */
+export function AuthGate({ children }: { children: ReactNode }) {
+  const auth = useAuth();
+  const incoming = useIncomingApproval();
+  if (!auth) return <>{children}</>;
+  if (auth.status === "loading") return null;
+  if (auth.status === "landing") {
+    return (
+      <>
+        {auth.problem && <p className="err" role="alert" style={{ position: "fixed", top: 8, left: 16, right: 16, zIndex: 60 }}>{auth.problem}</p>}
+        <AuthScreens start="landing" />
+      </>
+    );
+  }
+  if (auth.status === "pending") return <PendingScreen />;
+  if (auth.status === "signedIn" && incoming.id && incoming.accepted) return <PendingScreen key={incoming.id} repair onDone={incoming.dismiss} />;
+  // Over the planner (from Settings): the planner stays mounted but hidden, so coming back finds
+  // the page as it was. It is always in the same wrapper, which takes no part in the layout.
+  return (
+    <>
+      <div hidden={auth.overlay !== null} style={auth.overlay ? undefined : { display: "contents" }}>
+        {children}
+      </div>
+      {auth.overlay && <AuthScreens start={auth.overlay} />}
+      {auth.status === "signedIn" && incoming.id && <RepairNotice onApprove={incoming.accept} onDismiss={incoming.dismiss} />}
+    </>
+  );
+}
