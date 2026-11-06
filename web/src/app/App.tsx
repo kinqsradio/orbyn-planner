@@ -1,5 +1,5 @@
 import { Search } from "lucide-react";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { CalendarPage } from "../features/calendar/CalendarPage";
 import { ListsPage } from "../features/lists/ListsPage";
 import { NotificationsPage } from "../features/notifications/NotificationsPage";
@@ -10,6 +10,12 @@ import { TasksPage } from "../features/tasks/TasksPage";
 import { TodayPage } from "../features/today/TodayPage";
 import { NAV, SETTINGS, TABS, type NavItem } from "./nav";
 import { Link, RouterProvider, useRouter } from "./router";
+import { Toast } from "../components/Toast";
+import { TaskPanel } from "../features/tasks/TaskPanel";
+import { LocalStore } from "../store/LocalStore";
+import { StoreProvider } from "../store/context";
+import type { PlannerStore } from "../store/types";
+import { UiProvider } from "./ui";
 
 const PAGES: Record<string, () => ReactNode> = {
   "/today": () => <TodayPage />,
@@ -75,14 +81,21 @@ function Shell() {
           <NavLink key={item.path} item={item} />
         ))}
       </nav>
+      <TaskPanel />
+      <Toast />
     </div>
   );
 }
 
-export function App() {
+export function App({ store }: { store?: PlannerStore }) {
+  const [own] = useState(() => store ?? new LocalStore());
   return (
-    <RouterProvider>
-      <Shell />
-    </RouterProvider>
+    <StoreProvider store={own}>
+      <UiProvider>
+        <RouterProvider>
+          <Shell />
+        </RouterProvider>
+      </UiProvider>
+    </StoreProvider>
   );
 }
