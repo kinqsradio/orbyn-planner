@@ -67,6 +67,45 @@ describe("the trusted device after a cancel", () => {
   });
 });
 
+describe("the trusted device while the new device finishes", () => {
+  it("is done, not closed, when the new device finishes between its two reads", async () => {
+    const r = await createRig();
+    const approver = new ApproverController(r.a.services, r.a.session, r.d.device);
+    const device = new DeviceController(r.d.services, r.d.session);
+    void approver.start();
+    void device.run();
+    await until(() => approver.getState().phase === "compare" && device.getState().phase === "compare");
+    // The device list the approver reads after confirming still shows the new device as pending, and
+    // the new device types its code before the approver's next read: the approval is then used (410).
+    r.race.afterDevicesOnce = async () => {
+      device.confirm();
+      await until(() => calls(r, "/code").length === 1);
+    };
+    void approver.confirm();
+    await until(() => ["done", "closed"].includes(approver.getState().phase));
+    expect(approver.getState().phase).toBe("done");
+    await until(() => device.getState().phase === "trusted");
+    expect(calls(r, "/cancel")).toHaveLength(0);
+    device.dispose();
+    approver.dispose();
+  });
+
+  it("is still closed when the approval is gone and the new device did not become trusted", async () => {
+    const r = await createRig();
+    const approver = new ApproverController(r.a.services, r.a.session, r.d.device);
+    const device = new DeviceController(r.d.services, r.d.session);
+    void approver.start();
+    void device.run();
+    await until(() => approver.getState().phase === "compare" && device.getState().phase === "compare");
+    void approver.confirm();
+    await until(() => approver.getState().phase === "finishing");
+    await device.cancel(); // closes the approval for good; the new device stays pending
+    await until(() => ["done", "closed"].includes(approver.getState().phase));
+    expect(approver.getState()).toMatchObject({ phase: "closed", reason: "closed" });
+    device.dispose();
+  });
+});
+
 describe("the new device's guards", () => {
   it("They match is ignored unless the digits are showing, and a second tap cannot change what was typed", async () => {
     const r = await createRig();
