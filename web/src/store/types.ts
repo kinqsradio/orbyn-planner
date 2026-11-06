@@ -9,6 +9,8 @@ export interface ChecklistItem {
   id: string;
   title: string;
   done: boolean;
+  /** Position among the steps, a fractional key (see order.ts): a step inserted anywhere changes no other. */
+  order: string;
 }
 
 export interface Task {

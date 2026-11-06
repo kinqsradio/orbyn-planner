@@ -171,3 +171,19 @@ describe("modal dialogs", () => {
     expect(root).not.toHaveAttribute("inert");
   });
 });
+
+describe("checklist order", () => {
+  it("gives each new step a key after the last and shows steps in key order", async () => {
+    const { store, task } = await open();
+    const panel = screen.getByRole("complementary", { name: "Task" });
+    const add = within(panel).getByRole("textbox", { name: "Add a step" });
+    for (const step of ["first", "second", "third"]) await userEvent.type(add, `${step}{Enter}`);
+    const steps = store.getState().tasks.find((t) => t.id === task.id)!.checklist;
+    expect(steps.map((s) => s.title)).toEqual(["first", "second", "third"]);
+    expect(steps.map((s) => s.order)).toEqual(["V", "k", "s"]);
+    // Whatever order they are stored in, they show by key.
+    act(() => store.updateTask(task.id, { checklist: [steps[2]!, steps[0]!, steps[1]!] }));
+    const shown = within(screen.getByRole("complementary", { name: "Task" })).getAllByRole("checkbox").map((c) => c.getAttribute("aria-label"));
+    expect(shown.filter((l) => ["first", "second", "third"].includes(l!))).toEqual(["first", "second", "third"]);
+  });
+});

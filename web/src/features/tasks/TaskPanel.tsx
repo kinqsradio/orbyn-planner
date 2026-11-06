@@ -7,6 +7,7 @@ import { PHONE_QUERY, useMediaQuery } from "../../components/useMediaQuery";
 import { useDialog } from "../../components/useDialog";
 import { makeDue, parseDue } from "../../lib/dates";
 import { usePlanner, useStore } from "../../store/context";
+import { inOrder, keyBetween } from "../../store/order";
 import { PRIORITIES, type Task } from "../../store/types";
 import { needsAction } from "./selectors";
 
@@ -53,6 +54,7 @@ function Panel({ task }: { task: Task }) {
 
   const dayValue = task.due ? task.due.slice(0, 10) : "";
   const timeValue = task.due && parseDue(task.due).hasTime ? task.due.slice(11, 16) : "";
+  const steps = inOrder(task.checklist);
   const doneSteps = task.checklist.filter((c) => c.done).length;
 
   const setDue = (day: string, time: string) => {
@@ -72,7 +74,10 @@ function Panel({ task }: { task: Task }) {
   const addStep = () => {
     const text = step.trim();
     if (!text) return;
-    store.updateTask(task.id, { checklist: [...task.checklist, { id: crypto.randomUUID(), title: text, done: false }] });
+    // A new step goes last: a key after the current last one.
+    const order = keyBetween(steps.at(-1)?.order ?? null, null);
+    if (order === null) return;
+    store.updateTask(task.id, { checklist: [...task.checklist, { id: crypto.randomUUID(), title: text, done: false, order }] });
     setStep("");
   };
 
@@ -151,7 +156,7 @@ function Panel({ task }: { task: Task }) {
         <span>{task.checklist.length > 0 ? `${doneSteps} of ${task.checklist.length}` : ""}</span>
       </div>
       <ul>
-        {task.checklist.map((item) => (
+        {steps.map((item) => (
           <li key={item.id} className="row step-row" data-done={item.done}>
             <input
               type="checkbox"
