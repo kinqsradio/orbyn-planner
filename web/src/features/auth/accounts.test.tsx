@@ -1,3 +1,4 @@
+import { sessionToken } from "../../api/session";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -240,6 +241,7 @@ describe("sign in", () => {
     const start = engine.calls.filter((c) => c.path === "/v1/sessions/login/start").at(-1)!.body as { trusted_device?: { signed_at: number } };
     expect(start.trusted_device?.signed_at).toBe(Math.floor(NOW.getTime() / 1000));
     expect(auth.tokens.getSession()?.deviceState).toBe("trusted");
+    expect(sessionToken()).toBe(auth.tokens.getSession()?.token);
   });
 
   it("a new browser signs in as a pending device and waits for approval", async () => {
@@ -251,6 +253,7 @@ describe("sign in", () => {
     expect(await screen.findByRole("heading", { name: "Approve this device" })).toBeInTheDocument();
     expect(await screen.findByText("Waiting for a trusted device to approve this one.")).toBeInTheDocument();
     expect(second.tokens.getSession()?.deviceState).toBe("pending");
+    expect(sessionToken()).toBeNull();
     expect(engine.state.trustedProofs).toBe(0);
     // The planner behind it is not open.
     expect(screen.queryByRole("navigation", { name: "Primary" })).not.toBeInTheDocument();

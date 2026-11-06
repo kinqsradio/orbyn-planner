@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { StoredSession } from "../api/keyStore";
+import { setSessionToken } from "../api/session";
 import { signOut as signOutFlow } from "./flows";
 import type { AuthServices } from "./services";
 
@@ -59,6 +60,14 @@ export function AuthProvider({ services, children }: { services: AuthServices | 
       live = false;
     };
   }, [services]);
+
+  // Engine requests made outside the auth screens (calendar feeds) read the token from here. Only a
+  // trusted device's session is passed on: the engine refuses the rest.
+  const engineToken = session?.deviceState === "trusted" ? session.token : null;
+  useEffect(() => {
+    setSessionToken(engineToken);
+    return () => setSessionToken(null);
+  }, [engineToken]);
 
   const status: AuthStatus = !services
     ? "local"
