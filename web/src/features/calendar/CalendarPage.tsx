@@ -20,13 +20,18 @@ const VIEWS: readonly { id: View; label: string }[] = [
 ];
 
 /** The days a view shows around `anchor`. */
-export function viewDays(view: View, anchor: string, weekStart: "mon" | "sun", weekDays: 5 | 7): string[] {
+export function viewDays(view: View, anchor: string, weekStart: "mon" | "sun", weekDays: 5 | 7, today: string): string[] {
   const a = dateOf(anchor);
   if (view === "day") return [anchor];
   if (view === "agenda") return Array.from({ length: 7 }, (_, i) => dateKey(addDays(a, i)));
   if (view === "week") {
-    const first = weekDays === 5 ? weekStartOf(a, "mon") : weekStartOf(a, weekStart);
-    return Array.from({ length: weekDays }, (_, i) => dateKey(addDays(first, i)));
+    // Monday to Friday would hide today when today is a weekend day of the week being shown.
+    const monday = weekStartOf(a, "mon");
+    const t = dateOf(today);
+    const todayHidden = (t.getDay() === 0 || t.getDay() === 6) && dateKey(weekStartOf(t, "mon")) === dateKey(monday);
+    const count = weekDays === 5 && !todayHidden ? 5 : 7;
+    const first = count === 5 ? monday : weekStartOf(a, weekStart);
+    return Array.from({ length: count }, (_, i) => dateKey(addDays(first, i)));
   }
   const gridStart = weekStartOf(new Date(a.getFullYear(), a.getMonth(), 1), weekStart);
   return Array.from({ length: 42 }, (_, i) => dateKey(addDays(gridStart, i)));
@@ -47,7 +52,8 @@ export function CalendarPage() {
   const [view, setView] = useState<View>("week");
   const [anchor, setAnchor] = useState(() => dateKey(now));
 
-  const days = useMemo(() => viewDays(view, anchor, prefs.weekStart, prefs.weekDays), [view, anchor, prefs.weekStart, prefs.weekDays]);
+  const todayKey = dateKey(now);
+  const days = useMemo(() => viewDays(view, anchor, prefs.weekStart, prefs.weekDays, todayKey), [view, anchor, prefs.weekStart, prefs.weekDays, todayKey]);
   const shown = useMemo(() => {
     const visible = new Set(calendars.filter((c) => c.visible).map((c) => c.id));
     return events.filter((e) => visible.has(e.calendarId));

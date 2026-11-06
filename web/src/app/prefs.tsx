@@ -3,7 +3,7 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 export interface Prefs {
   /** The first day of the week in the month view and a 7-day week. */
   weekStart: "mon" | "sun";
-  /** Days in the Week view: Monday to Friday, or the whole week. */
+  /** Days in the Week view: the whole week, or Monday to Friday (which still shows 7 on a weekend of the current week). */
   weekDays: 5 | 7;
   /** Task reminders as browser notifications. Turned on in Settings · Notifications, never at load. */
   reminders: boolean;
@@ -18,7 +18,7 @@ export interface QuietHours {
 }
 
 export const DEFAULT_QUIET: QuietHours = { enabled: false, from: "22:00", to: "07:00" };
-export const DEFAULT_PREFS: Prefs = { weekStart: "mon", weekDays: 5, reminders: false, quiet: DEFAULT_QUIET };
+export const DEFAULT_PREFS: Prefs = { weekStart: "mon", weekDays: 7, reminders: false, quiet: DEFAULT_QUIET };
 
 const isTime = (v: unknown): v is string => typeof v === "string" && /^\d{2}:\d{2}$/.test(v);
 export const PREFS_KEY = "orbyn-planner.prefs";
@@ -28,7 +28,7 @@ function read(): Prefs {
     const raw = JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") as Partial<Prefs>;
     return {
       weekStart: raw.weekStart === "sun" ? "sun" : "mon",
-      weekDays: raw.weekDays === 7 ? 7 : 5,
+      weekDays: raw.weekDays === 5 ? 5 : 7,
       reminders: raw.reminders === true,
       quiet: {
         enabled: raw.quiet?.enabled === true,
