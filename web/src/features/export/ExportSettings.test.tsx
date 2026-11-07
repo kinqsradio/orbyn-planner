@@ -8,11 +8,13 @@ import { StoreProvider } from "../../store/context";
 import { LocalStore } from "../../store/LocalStore";
 import { MemoryPersistence } from "../../store/persistence";
 import { SettingsPage } from "../settings/SettingsPage";
+import { fileSize } from "../../lib/fileSize";
+import { EXPORT_WARNING } from "./ExportSettings";
 import { readExport } from "./exportJson";
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe("Settings · Privacy · Export your planner", () => {
+describe("Settings · Privacy · Export your data", () => {
   it("says the file isn't encrypted, and downloads the JSON and the calendar file from this device without touching the network", async () => {
     const store = new LocalStore({ persistence: new MemoryPersistence(), broadcast: false, now: () => new Date("2026-11-07T10:00:00Z") });
     await store.ready;
@@ -42,17 +44,21 @@ describe("Settings · Privacy · Export your planner", () => {
     );
     await userEvent.click(screen.getByRole("button", { name: "Privacy" }));
     await userEvent.click(screen.getByRole("button", { name: "Export…" }));
-    const dialog = screen.getByRole("dialog", { name: "Export your planner" });
-    expect(within(dialog).getByText("The file is not encrypted.")).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog", { name: "Export your data" });
+    expect(within(dialog).getByText(EXPORT_WARNING)).toBeInTheDocument();
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus()); // the safe choice has focus
 
-    await userEvent.click(within(dialog).getByRole("button", { name: "Everything (JSON)" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Export" })); // JSON is chosen to begin with
     await waitFor(() => expect(downloads).toEqual(["orbyn-planner-2026-11-07.json"]));
     const exported = readExport(await blobs[0]!.text());
     expect(exported.tasks.map((t) => t.title)).toEqual(["Passport"]);
-    expect(await screen.findByRole("status")).toHaveTextContent("Saved orbyn-planner-2026-11-07.json.");
+    expect(await screen.findByRole("status")).toHaveTextContent(`Downloaded orbyn-planner-2026-11-07.json · ${fileSize(blobs[0]!.size)}`);
+    await userEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
 
     await userEvent.click(screen.getByRole("button", { name: "Export…" }));
-    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Calendar (.ics)" }));
+    await userEvent.click(screen.getByRole("radio", { name: /Calendar \(\.ics\)/ }));
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Export" }));
     await waitFor(() => expect(downloads).toHaveLength(2));
     expect(downloads[1]).toMatch(/\.ics$/);
     const ics = await blobs[1]!.text();

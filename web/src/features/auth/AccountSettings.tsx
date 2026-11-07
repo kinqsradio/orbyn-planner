@@ -1,4 +1,5 @@
 import { useSyncState } from "../../sync/SyncProvider";
+import { NotAvailable, Planned } from "../../components/Planned";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { ApiFailure } from "../../api/auth";
 import { authCryptoAvailable, SIGN_IN_UNAVAILABLE } from "../../api/authCrypto";
@@ -237,7 +238,8 @@ function SignedInAccount() {
       <EngineNotice />
       <div className="card" style={{ gap: 0, padding: "0 var(--sp-14)" }}>
         <div className="kv" style={{ height: "var(--sp-44)", borderBottom: "var(--bw) solid var(--line)" }}><span>Name</span><b>{session?.name || "Not set"}</b></div>
-        <div className="kv" style={{ height: "var(--sp-44)" }}><span>Email</span><b>{session?.email}</b></div>
+        <div className="kv" style={{ height: "var(--sp-44)", borderBottom: "var(--bw) solid var(--line)" }}><span>Email</span><b>{session?.email}</b></div>
+        <div className="kv" style={{ height: "var(--sp-44)" }}><span>Passkeys <Planned /></span><b><NotAvailable /></b></div>
         <TwoFactorRow />
       </div>
 

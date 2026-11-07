@@ -82,7 +82,7 @@ export function NotificationsPage() {
                     navigate("/settings");
                   }}
                 >
-                  Protection was changed to {levelName(protection.level)} on {protection.name ?? "another device"}
+                  Protection was changed to {levelName(protection.level)} on another device
                   <br />
                   <span className="t3">Opens Data protection in your account</span>
                 </button>

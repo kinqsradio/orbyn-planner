@@ -137,6 +137,13 @@ button { cursor: pointer; }
   background: var(--raise); color: var(--t2); font-size: var(--fs-12);
 }
 .pill.on, .pill[aria-checked="true"] { background: var(--btn); color: var(--btnt); }
+.fine { font-size: var(--fs-12); font-weight: var(--fw-regular); }
+.tgl { width: var(--sp-30); height: var(--sp-18); border-radius: var(--r-pill); background: var(--line2); position: relative; display: inline-block; flex: none; border: 0; padding: 0; }
+.tgl::after { content: ""; position: absolute; left: var(--sp-2); top: var(--sp-2); width: var(--sp-14); height: var(--sp-14); border-radius: var(--r-round); background: var(--main); }
+.tgl.on { background: var(--t1); }
+.tgl.on::after { left: var(--sp-14); }
+.tgl:disabled { opacity: .6; cursor: default; }
+.tgl:focus-visible { outline: var(--bw-2) solid var(--t1); outline-offset: var(--sp-2); }
 .pills { display: flex; gap: var(--sp-6); flex-wrap: wrap; }
 
 .split { display: grid; grid-template-columns: var(--sp-260) minmax(0, 1fr); min-height: 0; flex: 1; }
@@ -457,7 +464,7 @@ button.pillx { border: 0; }
 .st.info { background: var(--blue-bg); color: var(--blue); }
 .st.warn { background: var(--amber-bg); color: var(--amber-text); box-shadow: var(--ring-amber); }
 .st.err { background: var(--red-bg); color: var(--red); }
-.st.planned { background: transparent; color: var(--t3); box-shadow: inset 0 0 0 var(--bw) var(--line2); }
+.st.planned { background: transparent; color: var(--planned-text); box-shadow: inset 0 0 0 var(--bw) var(--line2); }
 .banner { display: flex; align-items: center; gap: var(--sp-12); padding: var(--sp-10) var(--sp-14); border-radius: var(--r-14); background: var(--raise); color: var(--t1); font-size: var(--fs-12-5); }
 .banner.warn { background: var(--amber-bg); box-shadow: var(--ring-amber); }
 .banner.info { background: var(--blue-bg); }
@@ -569,3 +576,13 @@ button.pillx { border: 0; }
   .deleted-card .pv-row { flex-direction: column; }
   .deleted-card .pv-row > * { justify-content: center; height: var(--sp-44); }
 }
+
+/* A passkey button the designs draw but that does nothing yet: dimmed, with the Planned label. */
+.passkey-planned { display: inline-flex; gap: var(--sp-6); align-items: center; justify-content: center; flex-wrap: wrap; height: auto; min-height: var(--sp-32); cursor: not-allowed; }
+
+.pv-choice { display: inline-flex; align-items: center; gap: var(--sp-8); font-weight: var(--fw-medium); }
+.planned-note { color: var(--planned-text); font-size: var(--fs-12); font-weight: var(--fw-regular); }
+.planned-text { color: var(--planned-text); }
+.btn[aria-disabled="true"] { opacity: .6; cursor: not-allowed; }
+.warn-icon { color: var(--amber-text); display: inline-flex; flex: none; margin-top: var(--sp-1); }
+.export-choices { display: flex; flex-direction: column; gap: var(--sp-8); }

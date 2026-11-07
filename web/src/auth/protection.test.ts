@@ -203,7 +203,8 @@ describe("the signed protection setting", () => {
     await b.tokens.set(trusted);
     const report = await readProtection(b, trusted);
     expect(report.head?.seq).toBe(1);
-    expect(report.signer).toMatchObject({ thisDevice: false });
+    expect(report.signer).toMatchObject({ thisDevice: false, listed: true });
+    expect(report.signer).not.toHaveProperty("name"); // nothing signs a device name, so none is carried
     // The second device pins the first only through a recorded approval it can verify: with none it stops, and says why.
     expect(report.state).not.toBe("verified");
     expect(report.stopped).toBe("untrusted_signer");

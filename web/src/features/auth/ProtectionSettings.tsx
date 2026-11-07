@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Planned } from "../../components/Planned";
 import { ApiFailure } from "../../api/auth";
 import { useAuth } from "../../auth/AuthProvider";
 import { PAUSED_PROTECTION_HINT, useDeletionPaused } from "../../auth/deletionNotice";
@@ -31,7 +32,7 @@ function kindOf(report: ProtectionReport): Kind {
   if (report.problem === "rollback") return "rollback";
   if (report.problem === "fork") return "fork";
   // A signer the account doesn't list at all, or one it lists that this browser doesn't know.
-  if (report.stopped === "untrusted_signer") return report.signer?.name ? "unknownDevice" : "unlisted";
+  if (report.stopped === "untrusted_signer") return report.signer?.listed ? "unknownDevice" : "unlisted";
   if (report.stopped === "invalid_signature") return "badSignature";
   if (report.stopped === "gap") return "gap";
   if (report.stopped === "invalid") return "invalid";
@@ -74,7 +75,6 @@ function ConfirmDialog({ report, changedNow, onClose, onNotNow, onDone, onConfli
   const [error, setError] = useState<string | null>(null);
   const head = report.head;
   const level: ProtectionLevel = head?.level ?? "standard";
-  const setBy = report.signer?.name ?? "another device";
   const [openedAt] = useState(() => Date.now() / 1000);
   const sign = async () => {
     if (!auth.session) return;
@@ -109,7 +109,7 @@ function ConfirmDialog({ report, changedNow, onClose, onNotNow, onDone, onConfli
             <>Your account uses <b style={{ fontWeight: "var(--fw-medium)" }}>Advanced protection</b>: only your devices hold the keys. Confirming lets this browser check every later change.</>
           )}
         </p>
-        {head && <div className="kv"><span>Set on</span><b>{setBy} · {openedAt - secsOf(head) < 60 ? "just now" : day(secsOf(head))}</b></div>}
+        {head && <div className="kv"><span>Set on</span><b>{changedNow ? "Another device" : "A device in your list"} · {openedAt - secsOf(head) < 60 ? "just now" : day(secsOf(head))}</b></div>}
         <div className="dialog-actions">
           <button type="button" className="ghost" data-autofocus disabled={busy} onClick={onNotNow}>Not now</button>
           <BusyButton className="btn" busy={busy} idle={head ? "Confirm" : "Set Standard protection"} working="Confirming…" onClick={() => void sign()} />
@@ -128,7 +128,7 @@ function DetailsDialog({ report, kind, confirmed, onClose, onReviewDevices }: { 
   if (report.head) {
     rows.push(["Newest setting on the server", `${levelName(report.head.level)} · change ${report.head.seq}`]);
     const at = new Date(secsOf(report.head) * 1000);
-    rows.push(["Signed by", `${report.signer?.name ?? "A device this account doesn’t list"} · ${at.getDate()} ${MONTHS[at.getMonth()]!.slice(0, 3)} ${formatTime(at)}`]);
+    rows.push(["Signed by", `${report.signer?.listed ? "A device in your list" : "A device this account doesn’t list"} · ${at.getDate()} ${MONTHS[at.getMonth()]!.slice(0, 3)} ${formatTime(at)}`]);
   }
   if (confirmed) rows.push(["Last confirmed on this browser", `${levelName(confirmed.level)} · change ${confirmed.seq} · ${day(confirmed.at)}`]);
   const copy = () => void navigator.clipboard?.writeText(rows.map(([k, v]) => `${k}: ${v}`).join("\n")).catch(() => undefined);
@@ -154,6 +154,19 @@ function DetailsDialog({ report, kind, confirmed, onClose, onReviewDevices }: { 
       </div>
     </Modal>
   );
+}
+
+/** Standard is the level in use and the only one that can be chosen, so it is the selected radio; any other level keeps the shield. */
+function ProtectionMark({ standard }: { standard: boolean }) {
+  return standard ? <StandardRadio /> : <Icon name="shield" small />;
+}
+
+/** The two protection levels are a radio group: Standard is checked and the one tab stop; Advanced is Planned, so disabled. Arrow keys have nowhere to go. */
+const stayPut = (e: React.KeyboardEvent) => {
+  if (["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(e.key)) e.preventDefault();
+};
+function StandardRadio() {
+  return <span className="radio on" role="radio" aria-checked="true" aria-label="Standard protection" tabIndex={0} onKeyDown={stayPut} />;
 }
 
 /**
@@ -230,18 +243,18 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
 
   return (
     <>
-      <div className="bh"><b>Protection</b><span></span></div>
+      <div className="bh"><b>Data protection</b><span></span></div>
       {changed && report?.head && (
         <div className="banner" role="status" style={{ marginBottom: "var(--sp-8)" }}>
           <Icon name="info" small />
-          <span>Protection was changed to {levelName(report.head.level)} on <b style={{ fontWeight: "var(--fw-medium)" }}>{changed.name ?? "another device"} · {when(changed.at, now)}</b></span>
+          <span>Protection was changed to {levelName(report.head.level)} on <b style={{ fontWeight: "var(--fw-medium)" }}>another device · {when(changed.at, now)}</b></span>
           <div className="end">
             <button type="button" className="ghost sm" onClick={() => setDetails(true)}>Review</button>
             <button type="button" className="ghost sm" onClick={() => { writeSeen(accountId, changed.seq); setDismissed(changed.seq); }}>Dismiss</button>
           </div>
         </div>
       )}
-      <div aria-label="Protection" className="pv-cards">
+      <div aria-label="Protection" role="radiogroup" className="pv-cards">
       <div className={`card pv-card${error ? " pv-err" : kind === "verified" || kind === "confirming" || kind === "unlisted" || kind === "unset" || !report ? "" : " pv-bad"}`}>
         {error ? (
           <>
@@ -265,20 +278,21 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
         ) : kind === "verified" ? (
           <>
             <div className="pv-head">
-              <Icon name="shield" small />
+              <ProtectionMark standard={report.level === "standard"} />
               <b style={{ fontWeight: "var(--fw-medium)" }}>{level} protection</b>
               <span className="st ok"><span className="sd" />Verified</span>
             </div>
             <span className="t2 pv-text">
               Confirmed by your devices.
-              {report.head && ` Last change ${day(secsOf(report.head))}${report.signer?.name ? ` on ${report.signer.name}` : ""}.`}
-              {report.level === "standard" && <><br /><span className="t3">Right now only your trusted devices hold your keys, and Orbyn holds no copy of them. Standard’s recovery copy and account recovery are Planned, and so is Advanced protection.</span></>}
+              {/* "on this device" only when the signed record says this device signed the head and that head is the level verified now; no name from the server is ever shown. */}
+              {report.head && ` Last change ${day(secsOf(report.head))}${report.signer?.thisDevice && report.seq === report.head.seq ? " on this device" : ""}.`}
+              {report.level === "standard" && <><br /><span className="t3">Your planner is encrypted on your devices. Right now only your trusted devices hold your keys, and Orbyn holds no copy of them. Standard’s recovery copy, account recovery and server push and email reminders are <Planned />, and so is Advanced protection.</span></>}
             </span>
           </>
         ) : kind === "confirming" ? (
           <>
             <div className="pv-head">
-              <Icon name="shield" small />
+              <ProtectionMark standard={report.level === "standard"} />
               <b style={{ fontWeight: "var(--fw-medium)" }}>{level} protection</b>
               <span className="st info"><span className="sd" />Confirming</span>
             </div>
@@ -316,9 +330,11 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
           </>
         )}
       </div>
-      <div className="srow" style={{ opacity: 0.6 }}>
-        <div className="lab2"><b>Advanced protection</b><small>Only your devices hold the keys.</small></div>
-        <span className="st planned"><span className="sd" />Planned</span>
+      <div className="srow">
+        <div className="lab2">
+          <b className="pv-choice"><span className="radio" role="radio" aria-checked="false" aria-disabled="true" aria-label="Advanced protection" tabIndex={-1} />Advanced protection</b>
+          <small className="planned-text">Advanced is <Planned />. When it ships: switching from Standard deletes Orbyn’s copy of your keys at once; server backups made before the switch may keep a copy until the keys are rotated, which is Planned. An account that starts on Advanced never had one.</small>
+        </div>
       </div>
       </div>
       {details && report && kind && <DetailsDialog report={report} kind={kind} confirmed={confirmed} onClose={() => setDetails(false)} onReviewDevices={onReviewDevices} />}
@@ -350,7 +366,7 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
               const kind = next ? kindOf(next) : null;
               if (next && (kind === "confirming" || kind === "unset")) {
                 setChoosing(true);
-                setChangedNow(next.signer?.name ?? "another device");
+                setChangedNow("another device"); // another device signed it; no name is shown, because nothing signs one
               } else {
                 setChoosing(false);
                 setConfirmOpen(false);

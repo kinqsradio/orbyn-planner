@@ -91,7 +91,7 @@ async function fillSignUp(user = SAM) {
   await userEvent.type(screen.getByLabelText("Name"), user.name);
   await userEvent.type(screen.getByLabelText("Email"), user.email);
   await userEvent.type(screen.getByLabelText("Password"), user.password);
-  await userEvent.click(screen.getByRole("button", { name: "Create account" }));
+  await userEvent.click(screen.getByRole("button", { name: "Continue with a password" }));
   // The code step comes when the engine has sent a code; a refusal before that shows its message instead.
   await waitFor(() => expect(screen.queryByLabelText("Code") ?? screen.queryByRole("alert")).not.toBeNull());
   if (screen.queryByLabelText("Code") && engine.latestEmailCode(user.email)) await verifyEmail(user.email);
@@ -146,15 +146,49 @@ describe("the public pages", () => {
     expect(screen.getByText("This device only")).toBeInTheDocument();
   });
 
-  it("the Can’t sign in page offers approval from a trusted device and says the rest is not ready", async () => {
+  it("the Can’t sign in page offers approval from a trusted device and says the rest is Planned, with the frame's footer", async () => {
     await mount(services());
     await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
-    await userEvent.click(screen.getByRole("button", { name: "Can’t sign in?" }));
+    await userEvent.click(screen.getByRole("button", { name: "Forgot your password?" }));
     const group = screen.getByRole("group", { name: "Can’t sign in?" });
-    expect(within(group).getByText("Approve from a trusted device")).toBeInTheDocument();
-    expect(within(group).getAllByText("Not available yet.")).toHaveLength(3);
+    const items = within(group).getAllByRole("listitem");
+    expect(items.map((li) => li.textContent)).toEqual([
+      "Use a passkey Planned Not available yet.",
+      "Approve from a trusted deviceSign in with your password here first, then approve this device from one you already trust.",
+      "Recover with your email and phone Planned Not available yet.",
+      "Use a recovery key or contact Planned Not available yet.",
+    ]);
+    expect(group).toHaveTextContent("You need your password to sign in today. Recovering without it is Planned.");
+    // The Planned options are marked by their label and note, with nothing to press.
+    for (const li of [items[0]!, items[2]!, items[3]!]) {
+      expect(li).not.toHaveAttribute("aria-disabled"); // a list item is not a control
+      expect(li.querySelector("button, a")).toBeNull();
+      expect(li.querySelector(".st.planned")).not.toBeNull();
+    }
+    expect(items[1]).not.toHaveAttribute("aria-disabled");
+    expect(group).toHaveTextContent("Account recovery with your email and phone, recovery keys and recovery contacts are Planned. Until then, signing in needs your password.");
+    expect(group.textContent).not.toContain("works today");
     await userEvent.click(within(group).getByRole("button", { name: "Back to sign in" }));
     expect(screen.getByRole("form", { name: "Sign in" })).toBeInTheDocument();
+  });
+
+  it("sign up and sign in draw a dimmed Planned passkey button that does nothing, and the primary button reads Continue with a password", async () => {
+    await mount(services());
+    await userEvent.click(await screen.findByRole("button", { name: "Get started" }));
+    const up = screen.getByRole("button", { name: /^Continue with a passkey/ });
+    expect(up).toBeDisabled();
+    expect(up).toHaveAttribute("aria-disabled", "true");
+    expect(up).toHaveTextContent("Continue with a passkey Planned Not available yet.");
+    expect(screen.getByRole("button", { name: "Continue with a password" })).toBeInTheDocument();
+    expect(screen.getByText("Your password never leaves this device. Orbyn checks it without ever seeing it. We email a code to confirm your address.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Use without an account" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    const inn = screen.getByRole("button", { name: /^Sign in with a passkey/ });
+    expect(inn).toBeDisabled();
+    expect(inn).toHaveAttribute("aria-disabled", "true");
+    expect(inn).toHaveTextContent("Sign in with a passkey Planned Not available yet.");
+    expect(screen.getByText(/New here\?/)).toHaveTextContent("New here? Create an account · Forgot your password?");
+    expect(engine.calls).toEqual([]); // nothing was sent
   });
 
   it("says plainly that sign-in is not in this build, and sends nothing", async () => {
@@ -189,7 +223,7 @@ describe("sign up", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Get started" }));
     await userEvent.type(screen.getByLabelText("Email"), "sam@example.com");
     await userEvent.type(screen.getByLabelText("Password"), "short");
-    expect(screen.getByRole("button", { name: "Create account" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Continue with a password" })).toBeDisabled();
   });
 
   it("an email that is taken gets the same code step, and nothing tells it apart", async () => {
@@ -200,7 +234,7 @@ describe("sign up", () => {
     await mount(services());
     await fillSignUp();
     // Sign-up never says whether an address has an account: this one gets the same code step, and no code ever comes.
-    expect(screen.getByRole("form", { name: "Check your email" })).toBeInTheDocument();
+    expect(screen.getByRole("form", { name: "Check your inbox" })).toBeInTheDocument();
     expect(engine.latestEmailCode(SAM.email)).toBeUndefined();
     await userEvent.type(screen.getByLabelText("Code"), "123456");
     await userEvent.click(screen.getByRole("button", { name: "Verify" }));
@@ -253,6 +287,25 @@ describe("sign in", () => {
     expect(screen.queryByRole("checkbox")).toBeNull();
     expect(screen.queryByText(/cancel.*deletion|deletion.*cancel/i)).toBeNull();
     expect(screen.queryByRole("button", { name: /cancel deletion/i })).toBeNull();
+  });
+
+  it("opened from inside the planner, sign-in's quiet link reads Back to the planner", async () => {
+    await mount(services(), "/settings");
+    await userEvent.click(await screen.findByRole("button", { name: "Use without an account" }));
+    await openAccount();
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(screen.getByRole("button", { name: "Back to the planner" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Use without an account" })).toBeNull();
+  });
+
+  it("Settings › Account has a Passkeys row marked Planned, with Not available yet.", async () => {
+    await mount(services(), "/settings");
+    await fillSignUp();
+    await openAccount();
+    const row = (await screen.findByText("Passkeys", { exact: false, selector: "span" })).closest(".kv")!;
+    expect(row).toHaveTextContent("Passkeys PlannedNot available yet.");
+    expect(row.querySelector(".st.planned")).not.toBeNull();
+    expect(row.querySelector("button")).toBeNull(); // nothing to press
   });
 
   it("an unknown email looks exactly like a wrong password", async () => {
@@ -560,7 +613,7 @@ describe("adding a device", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Get started" }));
     await userEvent.type(screen.getByLabelText("Email"), SAM.email);
     await userEvent.type(screen.getByLabelText("Password"), SAM.password);
-    await userEvent.click(screen.getByRole("button", { name: "Create account" }));
+    await userEvent.click(screen.getByRole("button", { name: "Continue with a password" }));
     await verifyEmail(SAM.email);
     await openAccount();
     await userEvent.click(await screen.findByRole("button", { name: "Add a device" }));
@@ -1236,7 +1289,7 @@ describe("signing out", () => {
     await userEvent.click(screen.getByRole("button", { name: "Create an account" }));
     await userEvent.type(screen.getByLabelText("Email"), SAM.email);
     await userEvent.type(screen.getByLabelText("Password"), SAM.password);
-    await userEvent.click(screen.getByRole("button", { name: "Create account" }));
+    await userEvent.click(screen.getByRole("button", { name: "Continue with a password" }));
     await verifyEmail(SAM.email);
     await screen.findByRole("list", { name: "Devices" });
     engine.expireAllSessions();
@@ -1266,16 +1319,20 @@ describe("email verification at sign-up", () => {
     await userEvent.type(screen.getByLabelText("Name"), SAM.name);
     await userEvent.type(screen.getByLabelText("Email"), SAM.email);
     await userEvent.type(screen.getByLabelText("Password"), SAM.password);
-    await userEvent.click(screen.getByRole("button", { name: "Create account" }));
-    await screen.findByRole("form", { name: "Check your email" });
+    await userEvent.click(screen.getByRole("button", { name: "Continue with a password" }));
+    await screen.findByRole("form", { name: "Check your inbox" });
     return { auth, keys };
   }
 
   it("asks for the code, keeps nothing until it is right, says when it didn’t work, and only then signs in and stores the keys", async () => {
     const { auth, keys } = await toCodeStep();
-    const form = screen.getByRole("form", { name: "Check your email" });
+    const form = screen.getByRole("form", { name: "Check your inbox" });
     expect(within(form).getByText(/sam@example\.com/)).toBeInTheDocument();
     expect(within(form).getByText(/It works for 30 minutes\./)).toBeInTheDocument();
+    // Planner Designs v29, verify: the title, the sentence, a ghost Resend the code and "Wrong address? Change email".
+    expect(within(form).getByRole("heading", { name: "Check your inbox" })).toBeInTheDocument();
+    expect(within(form).getByText("We sent a 6-digit code to sam@example.com. It works for 30 minutes.")).toBeInTheDocument();
+    expect(form).toHaveTextContent("Wrong address? Change email");
     // No account and no session: nothing is stored.
     expect(auth.tokens.getSession()).toBeNull();
     expect(await keys.loadKeys()).toBeNull();
@@ -1313,13 +1370,14 @@ describe("email verification at sign-up", () => {
     for (let i = 1; i <= 3; i++) {
       nowMs += 61_000;
       const resend = await screen.findByRole("button", { name: "Send a new code" }, { timeout: 3000 });
+      expect(resend).toHaveClass("link-btn"); // a link, as the designer decided after v29
       await userEvent.click(resend);
       await waitFor(() => expect(engine.latestEmailCode(SAM.email)).not.toBe(first));
       if (i < 3) await screen.findByText(/Send a new code in/);
     }
     // After the third the limit shows, in amber, with no wait: the code boxes stay usable.
     expect(await screen.findByText("You’ve asked for several codes. Try again later, or check your spam folder.")).toBeInTheDocument();
-    expect(screen.getByText("Send a new code · not available right now")).toBeInTheDocument();
+    expect(screen.getByText("Send a new code · not available right now")).toBeInTheDocument(); // throttled: a muted line, with nothing to press
     expect(screen.queryByRole("button", { name: "Send a new code" })).toBeNull();
     await userEvent.type(screen.getByLabelText("Code"), first);
     await userEvent.click(screen.getByRole("button", { name: "Verify" }));
@@ -1331,7 +1389,10 @@ describe("email verification at sign-up", () => {
     engine.refuseNext("/v1/accounts/email/resend", 429, "too_many_attempts");
     nowMs += 61_000;
     await userEvent.click(await screen.findByRole("button", { name: "Send a new code" }, { timeout: 3000 }));
-    expect(await screen.findByText("You’ve asked for several codes. Try again later, or check your spam folder.")).toBeInTheDocument();
+    const banner = (await screen.findByText("You’ve asked for several codes. Try again later, or check your spam folder.")).closest(".banner")!;
+    expect(banner).toHaveClass("warn"); // the throttled state is a warn banner
+    expect(screen.getByText("Send a new code · not available right now").tagName).toBe("SPAN"); // muted text, not a control
+    expect(screen.queryByRole("button", { name: "Send a new code" })).toBeNull(); // with no resend action
     expect(screen.getByLabelText("Code")).toBeEnabled();
   });
 
@@ -1362,7 +1423,7 @@ describe("email verification at sign-up", () => {
     await userEvent.type(screen.getByLabelText("Name"), SAM.name);
     await userEvent.type(screen.getByLabelText("Email"), SAM.email);
     await userEvent.type(screen.getByLabelText("Password"), SAM.password);
-    await userEvent.click(screen.getByRole("button", { name: "Create account" }));
+    await userEvent.click(screen.getByRole("button", { name: "Continue with a password" }));
     const card = await screen.findByRole("alert", { name: "This browser can’t create an Orbyn account" });
     expect(card).toHaveTextContent("Orbyn has to keep your encryption keys, and this browser won’t store them or hold them in memory. Nothing was created.");
     expect(within(card).getByRole("button", { name: "Copy this page’s address" })).toBeInTheDocument();
@@ -1475,9 +1536,27 @@ describe("the protection level", () => {
     await privacy();
     const card = await screen.findByLabelText("Protection");
     expect(await within(card).findByText("Standard protection")).toBeInTheDocument();
+    expect(screen.getByText("Data protection", { selector: "b" })).toBeInTheDocument();
+    expect(screen.queryByText("Access your planner on the web")).toBeNull(); // under Standard the web works after sign-in: no Web card
+    expect(card).not.toHaveTextContent("Web access under Advanced"); // that line belongs to the Advanced frame, not this one
+    expect(screen.getByText("Export your data")).toBeInTheDocument();
+    expect(screen.getByText("Planner as open files")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete account…" })).toHaveClass("red");
     expect(card).toHaveTextContent("Verified");
+    // The two levels are a radio group: Standard checked and the one tab stop, Advanced Planned and disabled.
+    expect(card).toHaveAttribute("role", "radiogroup");
+    const standard = within(card).getByRole("radio", { name: "Standard protection" });
+    const advanced = within(card).getByRole("radio", { name: "Advanced protection" });
+    expect(standard).toHaveAttribute("aria-checked", "true");
+    expect(standard).toHaveAttribute("tabindex", "0");
+    expect(advanced).toHaveAttribute("aria-checked", "false");
+    expect(advanced).toHaveAttribute("aria-disabled", "true");
+    expect(advanced).toHaveAttribute("tabindex", "-1");
+    standard.focus();
+    await userEvent.keyboard("{ArrowDown}");
+    expect(standard).toHaveAttribute("aria-checked", "true"); // arrow keys have nowhere to go: Advanced is not available
     expect(card).toHaveTextContent("Confirmed by your devices. Last change 7 Nov on");
-    expect(card).toHaveTextContent("Advanced protectionOnly your devices hold the keys.Planned"); // shown, and not available yet
+    expect(card).toHaveTextContent("Advanced protectionAdvanced is Planned. When it ships: switching from Standard deletes Orbyn’s copy of your keys at once; server backups made before the switch may keep a copy until the keys are rotated, which is Planned. An account that starts on Advanced never had one."); // shown, and not available yet
     expect(engine.accounts.get("sam@example.com")!.protection).toHaveLength(1); // signed once, at sign-up
   });
 
@@ -1570,7 +1649,8 @@ describe("the protection level", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Account" }));
     await userEvent.click(await screen.findByRole("button", { name: "Privacy" }));
     const note = await screen.findByText(/Protection was changed to Standard on/);
-    expect(note).toHaveTextContent(phone.name);
+    expect(note).toHaveTextContent("on another device"); // never the name the device list gives it
+    expect(note).not.toHaveTextContent(phone.name);
     expect(screen.getByRole("button", { name: "Review" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(screen.queryByText(/Protection was changed to/)).toBeNull();

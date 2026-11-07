@@ -34,6 +34,7 @@ export const ICONS = {
   lock: [{"t":"rect","x":"5","y":"10.5","width":"14","height":"9.5","rx":"2"},{"t":"path","d":"M8 10.5V8a4 4 0 0 1 8 0v2.5"}],
   copy: [{"t":"rect","x":"8","y":"8","width":"11.5","height":"11.5","rx":"2"},{"t":"path","d":"M5 15.5V6a1.5 1.5 0 0 1 1.5-1.5H16"}],
   download: [{"t":"path","d":"M12 4.5v11M7 11l5 5 5-5M5 19.5h14"}],
+  key: [{"t":"circle","cx":"8","cy":"14","r":"4"},{"t":"path","d":"M11 11l8.5-8.5M16 6l2.5 2.5"}],
   check2: [{"t":"path","d":"M5.5 12.5l4 4 9-9"}],
 } satisfies Record<string, IconShape[]>;
 

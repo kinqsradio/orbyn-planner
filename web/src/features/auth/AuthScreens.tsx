@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { NotAvailable, PasskeyButton, Planned } from "../../components/Planned";
 import { ApiFailure } from "../../api/auth";
 import { SignInUnavailable } from "../../api/authCrypto";
 import { BusyButton } from "../../components/BusyButton";
@@ -118,9 +119,9 @@ function CheckEmail({ pending, onBack, onDone }: { pending: PendingSignUp; onBac
 
   const seconds = `${Math.floor(wait / 60)}:${String(wait % 60).padStart(2, "0")}`;
   return (
-    <form className="authcard" onSubmit={(e) => void verify(e)} aria-label="Check your email" noValidate>
-      <h1 className="auth-title">Check your email</h1>
-      <p className="t2">We sent a 6-digit code to <b style={{ fontWeight: "var(--fw-medium)" }}>{pending.email}</b>. It works for 30 minutes.</p>
+    <form className="authcard" onSubmit={(e) => void verify(e)} aria-label="Check your inbox" noValidate>
+      <h1 className="auth-title">Check your inbox</h1>
+      <p className="t3">We sent a 6-digit code to {pending.email}. It works for 30 minutes.</p>
       <div className="cboxes">
         {Array.from({ length: 6 }, (_, i) => (
           <span key={i} className={`cbox${wrong ? " err" : ""}${focused && !wrong && i === Math.min(digits.length, 5) ? " on" : ""}`} aria-hidden="true">{digits[i] ?? ""}</span>
@@ -150,14 +151,15 @@ function CheckEmail({ pending, onBack, onDone }: { pending: PendingSignUp; onBac
         </div>
       )}
       <BusyButton type="submit" className="btn lg" busy={busy} disabled={!ready} idle="Verify" working="Checking…" />
+      {/* Throttled: the banner above says so and the resend line is muted, with nothing to press. Otherwise a countdown, then the link. */}
       {limited ? (
-        <span className="t4 small">Send a new code · not available right now</span>
+        <span className="t3 small">Send a new code · not available right now</span>
       ) : wait > 0 ? (
         <span className="t3 small">Send a new code in {seconds}</span>
       ) : (
         <button type="button" className="link-btn small" onClick={() => void resend()}>Send a new code</button>
       )}
-      <span className="t4 small">
+      <span className="t3 small">
         Wrong address? <button type="button" className="link-btn link" onClick={onBack}>Change email</button>
       </span>
     </form>
@@ -236,11 +238,12 @@ function SignUp({ go }: { go: (s: AuthScreen) => void }) {
         <label htmlFor="su-password">Password</label>
         <input id="su-password" className="field" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
       </div>
-      <p className="t3 small">Your password never leaves this device. Only a sealed proof of it is sent. We’ll email you a code to check the address.</p>
+      <p className="t3 small">Your password never leaves this device. Orbyn checks it without ever seeing it. We email a code to confirm your address.</p>
       <CryptoProblem />
       {error && <p className="err" role="alert">{error}</p>}
+      <PasskeyButton label="Continue with a passkey" />
       <button type="submit" className="btn" disabled={busy || !email.trim() || password.length < 8}>
-        {busy ? "Creating your account…" : "Create account"}
+        {busy ? "Creating your account…" : "Continue with a password"}
       </button>
       <span className="t3 small">
         Already have an account? <button type="button" className="link-btn" onClick={() => go("signin")}>Sign in</button>
@@ -384,9 +387,10 @@ function SignIn({ go }: { go: (s: AuthScreen) => void }) {
       <button type="submit" className="btn" disabled={busy || !email.trim() || !password}>
         {busy ? "Signing in…" : "Sign in"}
       </button>
+      <PasskeyButton label="Sign in with a passkey" />
       <span className="t3 small">
         New here? <button type="button" className="link-btn" onClick={() => go("signup")}>Create an account</button> ·{" "}
-        <button type="button" className="link-btn" onClick={() => go("cant")}>Can’t sign in?</button>
+        <button type="button" className="link-btn" onClick={() => go("cant")}>Forgot your password?</button>
       </span>
       <button type="button" className="link-btn quiet-link" onClick={auth.overlay ? auth.closeAuth : auth.useWithoutAccount}>
         {auth.overlay ? "Back to the planner" : "Use without an account"}
@@ -396,27 +400,42 @@ function SignIn({ go }: { go: (s: AuthScreen) => void }) {
 }
 
 function CantSignIn({ go }: { go: (s: AuthScreen) => void }) {
-  const options: { icon: "check" | "bell" | "pin" | "users"; label: string; note: string; ready: boolean }[] = [
-    { icon: "check", label: "Approve from a trusted device", note: "Sign in with your password here. This device then waits for one you already use to approve it.", ready: true },
-    { icon: "pin", label: "Use a passkey", note: "Not available yet.", ready: false },
-    { icon: "bell", label: "Recover with your email and phone", note: "Not available yet.", ready: false },
-    { icon: "users", label: "Use a recovery key or contact", note: "Not available yet.", ready: false },
+  const options: { icon: "key" | "check" | "bell" | "shield"; label: string; planned: boolean; note?: string }[] = [
+    { icon: "key", label: "Use a passkey", planned: true },
+    { icon: "check", label: "Approve from a trusted device", planned: false, note: "Sign in with your password here first, then approve this device from one you already trust." },
+    { icon: "bell", label: "Recover with your email and phone", planned: true },
+    { icon: "shield", label: "Use a recovery key or contact", planned: true },
   ];
   return (
     <div className="authcard" role="group" aria-label="Can’t sign in?" style={{ width: "var(--sp-420)" }}>
+      <button type="button" className="ghost sm" style={{ alignSelf: "flex-start" }} onClick={() => go("signin")}><Icon name="left" small />Back to sign in</button>
       <h1 className="auth-title">Can’t sign in?</h1>
+      <span className="t3" style={{ fontSize: "var(--fs-12-5)" }}>You need your password to sign in today. Recovering without it is Planned.</span>
       <ul className="auth-options">
         {options.map((o) => (
-          <li key={o.label} className="nav" style={{ height: "auto", minHeight: "var(--sp-44)", background: "var(--raise)", alignItems: "flex-start", padding: "var(--sp-10) var(--sp-8)", opacity: o.ready ? 1 : 0.7 }}>
+          <li key={o.label} className="nav" style={{ minHeight: "var(--sp-44)", height: "auto", background: "var(--raise)" }}>
             <Icon name={o.icon} small />
             <span>
-              <span style={{ display: "block", color: "var(--t1)" }}>{o.label}</span>
-              <span className="t3 small">{o.note}</span>
+              {o.label}
+              {o.planned && (
+                <>
+                  {" "}
+                  <Planned /> <NotAvailable />
+                </>
+              )}
+              {o.note && (
+                <>
+                  <br />
+                  <span className="t3 small">{o.note}</span>
+                </>
+              )}
             </span>
           </li>
         ))}
       </ul>
-      <button type="button" className="ghost" onClick={() => go("signin")}>Back to sign in</button>
+      <span className="t3" style={{ fontSize: "var(--fs-12-5)" }}>
+        Account recovery with your email and phone, recovery keys and recovery contacts are Planned. Until then, signing in needs your password.
+      </span>
     </div>
   );
 }

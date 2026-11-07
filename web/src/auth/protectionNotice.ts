@@ -58,17 +58,17 @@ export function writeSeen(accountId: string, seq: number) {
 /** Takes a read of the chain: remembers the setting this browser verified, and a change another device made. */
 export function recordReport(accountId: string, next: ProtectionReport) {
   if (next.state === "verified" && next.head && next.seq === next.head.seq) writeConfirmed(accountId, { seq: next.head.seq, level: next.head.level, at: Number(next.head.signed_at) });
-  if (next.changedBy && next.head) write(changedKey(accountId), { seq: next.head.seq, name: next.changedBy.name });
+  if (next.changedBy && next.head) write(changedKey(accountId), { seq: next.head.seq });
 }
 
-/** A change by another device that this browser verified and the person has not dismissed: only a setting this browser verified names a device. */
-export function pendingChange(accountId: string, report: ProtectionReport | null, dismissed = 0): { seq: number; name: string | null; level: string; at: number } | null {
-  const changed = read<{ seq: number; name: string | null }>(changedKey(accountId));
+/** A change by another device that this browser verified and the person has not dismissed: only a setting this browser verified is reported, and no device name is kept. */
+export function pendingChange(accountId: string, report: ProtectionReport | null, dismissed = 0): { seq: number; level: string; at: number } | null {
+  const changed = read<{ seq: number }>(changedKey(accountId));
   if (!changed || !report?.head || report.state !== "verified" || report.seq !== changed.seq || changed.seq <= Math.max(readSeen(accountId), dismissed)) return null;
-  return { seq: changed.seq, name: changed.name, level: report.head.level, at: Number(report.head.signed_at) };
+  return { seq: changed.seq, level: report.head.level, at: Number(report.head.signed_at) };
 }
 
-/** Signing out removes what these kept: the account id in the key names and another device's name in a value. */
+/** Signing out removes what these kept: the account id in the key names. */
 export function forgetProtectionNotice(accountId: string): void {
   try {
     for (const key of [seenKey(accountId), changedKey(accountId), confirmedKey(accountId), skippedKey(accountId), readKey(accountId)]) browserStorage.remove(key);

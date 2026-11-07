@@ -222,9 +222,10 @@ export interface ProtectionReport {
   /** The server's newest setting, verified or not: what "Confirm protection level" signs after. */
   head: ProtectionLink | null;
   /** The device that signed the head, if it is still a device of the account (`name`), and whether that is this one. */
-  signer: { id: string; name: string | null; thisDevice: boolean } | null;
+  /** Who signed the head: the id is in the signed record; whether the account lists that device is the device list's word. No name is carried, because nothing signs one. */
+  signer: { id: string; listed: boolean; thisDevice: boolean } | null;
   /** The head was signed by another device after the setting this device had verified before this read: "Protection was changed on …". */
-  changedBy: { id: string; name: string | null } | null;
+  changedBy: { id: string } | null;
 }
 
 /** Walks the server's chain page by page into the engine. Throws the engine's `protection_rollback` or `protection_fork`. */
@@ -264,7 +265,7 @@ export async function readProtection(services: AuthServices, session: StoredSess
     // A rollback or a fork is refused with no change, so the engine still says what it said before: that is not a verified level now.
     const state: ProtectionReport["state"] = problem ? (now.level ? "provisional" : "unknown") : now.state;
     const signerDevice = head ? devices.devices.find((d) => d.id === head!.signer_device_id) : undefined;
-    const signer = head ? { id: head.signer_device_id, name: signerDevice?.name ?? null, thisDevice: head.signer_device_id === session.deviceId } : null;
+    const signer = head ? { id: head.signer_device_id, listed: signerDevice !== undefined, thisDevice: head.signer_device_id === session.deviceId } : null;
     return {
       seq: now.seq,
       state,
@@ -274,7 +275,7 @@ export async function readProtection(services: AuthServices, session: StoredSess
       head,
       signer,
       // Named only when this device verified that head: a setting it could not check names no one.
-      changedBy: !problem && signer && !signer.thisDevice && before.seq > 0 && head!.seq > before.seq && now.seq === head!.seq ? { id: signer.id, name: signer.name } : null,
+      changedBy: !problem && signer && !signer.thisDevice && before.seq > 0 && head!.seq > before.seq && now.seq === head!.seq ? { id: signer.id } : null,
     };
   });
 }

@@ -9,7 +9,7 @@ afterEach(() => setMemoryOnly(false));
 const report: ProtectionReport = {
   seq: 2, state: "verified", level: "standard", stopped: null, problem: null,
   head: { level: "standard", seq: 2, prev: "p", signed_at: 1_793_000_000n, signer_device_id: "d2", signature: "s" },
-  signer: { id: "d2", name: "iPhone 16", thisDevice: false }, changedBy: { id: "d2", name: "iPhone 16" },
+  signer: { id: "d2", listed: true, thisDevice: false }, changedBy: { id: "d2" },
 };
 
 describe("what the account screens remember", () => {
@@ -19,7 +19,7 @@ describe("what the account screens remember", () => {
     recordReport("acct-1", report);
     expect(localStorage.length).toBe(0); // nothing was written
     expect(readConfirmed("acct-1")).toMatchObject({ seq: 2 }); // but this tab still remembers it
-    expect(pendingChange("acct-1", report)).toMatchObject({ seq: 2, name: "iPhone 16" });
+    expect(pendingChange("acct-1", report)).toMatchObject({ seq: 2 });
     setMemoryOnly(false); // the memory goes with the held state
     expect(readConfirmed("acct-1")).toBeNull();
     recordReport("acct-1", report);
@@ -28,7 +28,7 @@ describe("what the account screens remember", () => {
 });
 
 describe("pendingChange", () => {
-  it("names a device only for a setting this browser verified, and only the one it was recorded for", () => {
+  it("reports a change by another device only for a setting this browser verified, and only the one it was recorded for", () => {
     recordReport("acct-1", report);
     expect(pendingChange("acct-1", report)).not.toBeNull();
     expect(pendingChange("acct-1", { ...report, state: "provisional" })).toBeNull(); // not verified: names no one

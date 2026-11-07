@@ -70,6 +70,8 @@
   --fw-regular: 400; --fw-medium: 500;
   /* The body text's line height (as `.sheet` sets it). */
   --lh-body: 1.45;
+  /* The text colour of everything that says Planned or Not available yet; the designer is defining its value for each theme. */
+  --planned-text: var(--t3);
   --ls-title: -.015em; --ls-heading: -.02em; --ls-code: .12em;
 }
 
