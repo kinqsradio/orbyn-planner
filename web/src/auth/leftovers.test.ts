@@ -8,6 +8,7 @@ import { signIn, signUp } from "./flows";
 import { ApproverController, DeviceController } from "./pairing";
 import { createAuthServices } from "./services";
 import { calls, createRig, until } from "./testing/rig";
+import { signedUp } from "./testing/signedUp";
 
 beforeEach(() => {
   globalThis.indexedDB = new IDBFactory();
@@ -28,7 +29,7 @@ describe("the module's memory when sign-in or sign-up fails", () => {
     const { crypto, freed } = counting();
     const engine = createMockEngine();
     const services = createAuthServices({ fetch: engine.fetch, baseUrl: "http://e.test", keys: createMemoryKeyStore(), crypto: () => crypto, wrapSecret: async () => new Uint8Array(32).fill(1) });
-    await signUp(services, { name: "S", email: "s@example.com", password: "correct horse battery" });
+    await signedUp(engine, services, { name: "S", email: "s@example.com", password: "correct horse battery" });
     expect(freed.registration).toBe(1);
     await services.tokens.clear();
     await expect(signIn(services, { email: "s@example.com", password: "wrong wrong wrong" })).rejects.toThrow();
@@ -184,8 +185,8 @@ describe("replacing a device's keys is one transaction", () => {
     const engine = createMockEngine();
     const keys = createMemoryKeyStore();
     const services = createAuthServices({ fetch: engine.fetch, baseUrl: "http://e.test", keys, crypto: () => crypto, wrapSecret: async () => new Uint8Array(32).fill(3) });
-    const first = await signUp(services, { name: "S", email: "s@example.com", password: "correct horse battery" });
-    await signUp(createAuthServices({ fetch: engine.fetch, baseUrl: "http://e.test", keys: createMemoryKeyStore(), crypto: () => crypto, wrapSecret: async () => new Uint8Array(32).fill(4) }), { name: "A", email: "alex@example.com", password: "another long password" });
+    const first = await signedUp(engine, services, { name: "S", email: "s@example.com", password: "correct horse battery" });
+    await signedUp(engine, createAuthServices({ fetch: engine.fetch, baseUrl: "http://e.test", keys: createMemoryKeyStore(), crypto: () => crypto, wrapSecret: async () => new Uint8Array(32).fill(4) }), { name: "A", email: "alex@example.com", password: "another long password" });
     await services.tokens.clear();
     const before = await keys.loadKeys();
     const real = keys.replaceDevice;

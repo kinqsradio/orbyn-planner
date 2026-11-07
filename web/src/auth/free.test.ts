@@ -10,6 +10,7 @@ import { signIn, signUp } from "./flows";
 import { DIGITS_MISMATCH, ApproverController, DeviceController } from "./pairing";
 import { createAuthServices } from "./services";
 import { calls, createRig, until } from "./testing/rig";
+import { signedUp } from "./testing/signedUp";
 
 const session: StoredSession = { token: "t", accountId: "a", deviceId: "d", deviceState: "trusted", expiresAt: "2030-01-01T00:00:00Z", email: "a@b.co", name: "" };
 
@@ -38,14 +39,32 @@ describe("the module's memory is given back", () => {
     expect(log).toEqual(expect.arrayContaining(["ApproverSession.free", "DeviceSession.free", "SyncEngine.free"]));
   });
 
+  it("a sign-up that is cancelled before its code is right frees its keys and stores nothing", async () => {
+    const crypto = new FakeAuthCrypto();
+    const engine = createMockEngine();
+    const keys = createMemoryKeyStore();
+    const services = createAuthServices({ fetch: engine.fetch, baseUrl: "http://e.test", keys, crypto: () => crypto, wrapSecret: async () => new Uint8Array(32).fill(2) });
+    const before = fakeFreed.keys;
+    const pending = await signUp(services, { name: "S", email: "s@example.com", password: "correct horse battery" });
+    expect(fakeFreed.keys).toBe(before); // held in memory for the code step
+    await expect(pending.verify("000000")).rejects.toThrow();
+    expect(fakeFreed.keys).toBe(before); // a wrong code leaves it open
+    pending.cancel();
+    pending.cancel(); // harmless twice
+    expect(fakeFreed.keys).toBe(before + 1);
+    expect(await keys.loadKeys()).toBeNull();
+    expect(services.tokens.getSession()).toBeNull();
+  });
+
   it("sign-up and sign-in free the keys they held", async () => {
     const crypto = new FakeAuthCrypto();
     const engine = createMockEngine();
     const keys = createMemoryKeyStore();
     const services = createAuthServices({ fetch: engine.fetch, baseUrl: "http://e.test", keys, crypto: () => crypto, wrapSecret: async () => new Uint8Array(32).fill(2) });
     const before = fakeFreed.keys;
-    await signUp(services, { name: "S", email: "s@example.com", password: "correct horse battery" });
-    expect(fakeFreed.keys).toBe(before + 1);
+    await signedUp(engine, services, { name: "S", email: "s@example.com", password: "correct horse battery" });
+    // The keys the sign-up held, and the copy the engine opened to sign the protection setting right after.
+    expect(fakeFreed.keys).toBe(before + 2);
     await keys.clearSession();
     await services.tokens.clear();
     const mid = fakeFreed.keys;
@@ -80,7 +99,7 @@ describe("what a refusal says", () => {
     void approver.start();
     void device.run();
     await until(() => device.getState().phase === "closed");
-    expect(device.getState()).toMatchObject({ reason: "mismatch", message: "The two devices didn’t agree. Start again from the other device." });
+    expect(device.getState()).toMatchObject({ reason: "mismatch", message: "The two devices didn’t agree. Start again." });
     approver.dispose();
 
     const q = await createRig();

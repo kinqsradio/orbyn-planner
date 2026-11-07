@@ -22,7 +22,7 @@ export const DIGITS_MISMATCH = "The digits didn’t match, so this approval was 
 
 const REASONS: Record<CloseReason, string> = {
   cancelled: "This approval was cancelled.",
-  mismatch: "The two devices didn’t agree. Start again from the other device.",
+  mismatch: "The two devices didn’t agree. Start again.",
   expired: `This approval ran out of time. ${CLOCK_HINT}`,
   closed: `This approval was closed, by the other device or because it ran out of time. ${CLOCK_HINT}`,
   failed: "Something went wrong, so this approval was closed.",
@@ -133,6 +133,8 @@ const isGone = (e: unknown) => e instanceof ApiFailure && (e.status === 404 || e
 export class ApproverController extends Controller<ApproverState> {
   private id: string | null = null;
   private pairing: ApproverPairing | null = null;
+  /** When this approval was made (ms, this device's clock), to tell an expiry from the other device closing it. */
+  private startedAt: number | null = null;
 
   constructor(
     private readonly services: AuthServices,
@@ -156,6 +158,7 @@ export class ApproverController extends Controller<ApproverState> {
       this.pairing = pairing;
       const created = await this.services.api.createApproval(pairing.createRequest);
       this.id = created.id;
+      this.startedAt = this.services.now();
       if (this.ended) {
         // Cancelled while it was being created: close what the server just made.
         await this.services.api.cancelApproval(created.id).catch(() => undefined);
@@ -255,6 +258,11 @@ export class ApproverController extends Controller<ApproverState> {
     let reason: CloseReason = "failed";
     let message: string = REASONS.failed;
     if (error instanceof ApiFailure && error.code === "poll_timeout") {
+      reason = "expired";
+      message = REASONS.expired;
+    } else if (isGone(error) && this.startedAt !== null && this.services.now() - this.startedAt >= APPROVAL_SECS * 1000) {
+      // The engine answers an approval that ran out of time and one the other device closed alike ("gone"), so the clock tells them
+      // apart: ten minutes since this approval was made is a real expiry.
       reason = "expired";
       message = REASONS.expired;
     } else if (isGone(error)) {

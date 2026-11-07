@@ -1,8 +1,10 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ApiFailure } from "../../api/auth";
 import { SignInUnavailable } from "../../api/authCrypto";
+import { BusyButton } from "../../components/BusyButton";
+import { appsAvailable, downloadUrl } from "../../api/site";
 import { Icon } from "../../components/Icon";
-import { KeysForAnotherAccount, SecondFactorNeeded, signIn, signUp } from "../../auth/flows";
+import { KeysForAnotherAccount, SecondFactorNeeded, signIn, signUp, type PendingSignUp } from "../../auth/flows";
 import { cryptoLoad } from "../../api/realCrypto";
 import { CryptoProblem, MODULE_LOAD_FAILED } from "./CryptoProblem";
 import { useAuth, type AuthScreen } from "../../auth/AuthProvider";
@@ -33,6 +35,164 @@ function Landing({ go }: { go: (s: AuthScreen) => void }) {
   );
 }
 
+/** A new code can be asked for this long after the last one was sent. */
+const RESEND_AFTER_MS = 60_000;
+/** The engine allows three new codes an hour; the page counts them, since it answers the same whether or not one was sent. */
+const RESENDS_PER_HOUR = 3;
+const HOUR_MS = 3_600_000;
+
+/** The code step of a sign-up: no account and no session exist until the code from the email is right. */
+function CheckEmail({ pending, onBack, onDone }: { pending: PendingSignUp; onBack: () => void; onDone: () => void }) {
+  const auth = useAuth()!;
+  const clock = auth.services.now;
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [lastSent, setLastSent] = useState(clock());
+  const [resends, setResends] = useState<number[]>([]);
+  const [, tick] = useState(0);
+  const [engineLimited, setEngineLimited] = useState(false);
+
+  // Leaving this screen lets the sign-up go: its keys were only ever in memory. React's development check unmounts and mounts a
+  // screen at once to test this very cleanup, so the sign-up is let go only if no mount follows straight after.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      setTimeout(() => {
+        if (!mounted.current) pending.cancel();
+      }, 0);
+    };
+  }, [pending]);
+  // The countdown on "Send a new code".
+  useEffect(() => {
+    const id = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const recent = resends.filter((t) => clock() - t < HOUR_MS);
+  const wait = Math.max(0, Math.ceil((lastSent + RESEND_AFTER_MS - clock()) / 1000));
+  const limited = engineLimited || recent.length >= RESENDS_PER_HOUR;
+  const digits = code.replace(/\D/g, "").slice(0, 6);
+  const ready = digits.length === 6;
+  const [focused, setFocused] = useState(true);
+  const [wrong, setWrong] = useState(false);
+
+  const verify = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    setWrong(false);
+    try {
+      await pending.verify(digits);
+      onDone();
+    } catch (e) {
+      if (e instanceof ApiFailure && e.code === "invalid_email_code") {
+        // A wrong, an expired and a made-up code are one answer; "Send a new code" is always there.
+        setWrong(true);
+        setError("That code isn’t right. Use the code in the newest email.");
+      } else {
+        setError(describeError(e));
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resend = async () => {
+    setError(null);
+    setWrong(false);
+    try {
+      await pending.resend();
+      setResends([...recent, clock()]);
+      setLastSent(clock());
+      setCode("");
+    } catch (e) {
+      // The engine answers a resend it will not do with its own "too many attempts"; the page shows the same state it shows after three.
+      if (e instanceof ApiFailure && e.code === "too_many_attempts") setEngineLimited(true);
+      else setError(describeError(e));
+    }
+  };
+
+  const seconds = `${Math.floor(wait / 60)}:${String(wait % 60).padStart(2, "0")}`;
+  return (
+    <form className="authcard" onSubmit={(e) => void verify(e)} aria-label="Check your email" noValidate>
+      <h1 className="auth-title">Check your email</h1>
+      <p className="t2">We sent a 6-digit code to <b style={{ fontWeight: "var(--fw-medium)" }}>{pending.email}</b>. It works for 30 minutes.</p>
+      <div className="cboxes">
+        {Array.from({ length: 6 }, (_, i) => (
+          <span key={i} className={`cbox${wrong ? " err" : ""}${focused && !wrong && i === Math.min(digits.length, 5) ? " on" : ""}`} aria-hidden="true">{digits[i] ?? ""}</span>
+        ))}
+        {/* One real field under the six boxes: typing, paste and autofill all land in it. */}
+        <input
+          id="su-code"
+          aria-label="Code"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          value={digits}
+          onChange={(e) => {
+            setCode(e.target.value);
+            setWrong(false);
+            setError(null);
+          }}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          autoFocus
+        />
+      </div>
+      {error && <span className="err" role="alert">{error}</span>}
+      {limited && (
+        <div className="banner warn" role="status">
+          <Icon name="alert" small />
+          You’ve asked for several codes. Try again later, or check your spam folder.
+        </div>
+      )}
+      <BusyButton type="submit" className="btn lg" busy={busy} disabled={!ready} idle="Verify" working="Checking…" />
+      {limited ? (
+        <span className="t4 small">Send a new code · not available right now</span>
+      ) : wait > 0 ? (
+        <span className="t3 small">Send a new code in {seconds}</span>
+      ) : (
+        <button type="button" className="link-btn small" onClick={() => void resend()}>Send a new code</button>
+      )}
+      <span className="t4 small">
+        Wrong address? <button type="button" className="link-btn link" onClick={onBack}>Change email</button>
+      </span>
+    </form>
+  );
+}
+
+/** Sign-up on a browser that can neither store the keys nor hold them in memory (WebAssembly or WebCrypto off, say). Nothing was created. */
+function NoMemory() {
+  return (
+    <div className="authcard keys-card" role="alert" aria-label="This browser can’t create an Orbyn account">
+      <span className="pv-red"><Icon name="alert" size={22} /></span>
+      <h1 className="keys-title">This browser can’t create an Orbyn account</h1>
+      <span className="t2">Orbyn has to keep your encryption keys, and this browser won’t store them or hold them in memory. Nothing was created.</span>
+      <span className="t3 pv-text">This often means WebAssembly is turned off or blocked. Try another browser, or turn off any setting that blocks it.</span>
+      <div className="pv-stack">
+        <a className="btn lg" href={downloadUrl()} target="_blank" rel="noopener noreferrer">
+          {appsAvailable() && <Icon name="down" small />}
+          {appsAvailable() ? "Install the Orbyn app" : "See the Orbyn apps"}
+        </a>
+        {!appsAvailable() && <span className="t4 small pv-helper">The apps aren’t out yet. This page lists what’s being built.</span>}
+        <button
+          type="button"
+          className="ghost lg"
+          onClick={() => {
+            void navigator.clipboard?.writeText(window.location.href).catch(() => undefined);
+          }}
+        >
+          <Icon name="copy" small />
+          Copy this page’s address
+        </button>
+      </div>
+      <span className="t4 small">Your email wasn’t verified or saved, so you can start again in another browser.</span>
+    </div>
+  );
+}
+
 function SignUp({ go }: { go: (s: AuthScreen) => void }) {
   const auth = useAuth()!;
   const [name, setName] = useState("");
@@ -40,23 +200,32 @@ function SignUp({ go }: { go: (s: AuthScreen) => void }) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Set once the engine has sent a code: the sign-up waits for it. */
+  const [pending, setPending] = useState<PendingSignUp | null>(null);
+  /** This browser can't hold the keys at all, so nothing was created. */
+  const [noMemory, setNoMemory] = useState(false);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      await signUp(auth.services, { name, email, password });
-      auth.closeAuth();
+      setPending(await signUp(auth.services, { name, email, password }));
+      setPassword(""); // the sign-up is waiting for its code: the password is not needed again, and is not kept in the page
     } catch (e) {
-      setError(describeError(e));
+      if (e instanceof ApiFailure && e.code === "no_memory") setNoMemory(true);
+      else setError(describeError(e));
     } finally {
       setBusy(false);
     }
   };
 
+  if (noMemory) return <NoMemory />;
   return (
-    <form className="authcard" onSubmit={submit} aria-label="Create your account" noValidate>
+    <>
+    {pending && <CheckEmail pending={pending} onBack={() => setPending(null)} onDone={auth.closeAuth} />}
+    {/* Kept while the code is awaited, so "Change email" finds the name and email as they were; the password is cleared as soon as it is sent. */}
+    <form className="authcard" onSubmit={submit} aria-label="Create your account" noValidate hidden={pending !== null}>
       <h1 className="auth-title">Create your account</h1>
       <div className="form" style={{ width: "auto" }}>
         <label htmlFor="su-name">Name</label>
@@ -66,7 +235,7 @@ function SignUp({ go }: { go: (s: AuthScreen) => void }) {
         <label htmlFor="su-password">Password</label>
         <input id="su-password" className="field" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
       </div>
-      <p className="t3 small">Your password never leaves this device. Only a sealed proof of it is sent.</p>
+      <p className="t3 small">Your password never leaves this device. Only a sealed proof of it is sent. We’ll email you a code to check the address.</p>
       <CryptoProblem />
       {error && <p className="err" role="alert">{error}</p>}
       <button type="submit" className="btn" disabled={busy || !email.trim() || password.length < 8}>
@@ -79,6 +248,7 @@ function SignUp({ go }: { go: (s: AuthScreen) => void }) {
         {auth.overlay ? "Back to the planner" : "Use without an account"}
       </button>
     </form>
+    </>
   );
 }
 

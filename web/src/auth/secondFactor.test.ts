@@ -3,7 +3,8 @@ import { ApiFailure } from "../api/auth";
 import { createMemoryKeyStore } from "../api/keyStore";
 import { FakeAuthCrypto } from "../api/testing/FakeAuthCrypto";
 import { createMockEngine, MOCK_TOTP_CODE, type MockEngine } from "../api/testing/MockEngine";
-import { confirmTotp, disableTotp, enrolTotp, SecondFactorNeeded, signIn, signUp } from "./flows";
+import { confirmTotp, disableTotp, enrolTotp, SecondFactorNeeded, signIn } from "./flows";
+import { signedUp } from "./testing/signedUp";
 import { createAuthServices, type AuthServices } from "./services";
 
 const crypto = new FakeAuthCrypto();
@@ -16,7 +17,7 @@ const browser = (engine: MockEngine): AuthServices =>
 async function accountWithTotp() {
   const engine = createMockEngine();
   const first = browser(engine);
-  const session = await signUp(first, SAM);
+  const session = await signedUp(engine, first, SAM);
   await enrolTotp(first, session);
   const { recovery_codes } = await confirmTotp(first, session, MOCK_TOTP_CODE);
   return { engine, first, session, recovery_codes, second: browser(engine) };
@@ -73,7 +74,7 @@ describe("changing two-factor needs this device's signature, and turning it off 
   it("a bare token is refused with device_proof_required, and the signed calls work", async () => {
     const engine = createMockEngine();
     const services = browser(engine);
-    const session = await signUp(services, SAM);
+    const session = await signedUp(engine, services, SAM);
     const bare = await services.api.totpEnrol({ device_signature: null, signed_at: null }).catch((e: unknown) => e);
     expect((bare as ApiFailure).code).toBe("device_proof_required");
 
@@ -90,7 +91,7 @@ describe("changing two-factor needs this device's signature, and turning it off 
   it("each signature is strictly later than the last for that action: retries in the same second sign one second on, and one refusal is answered by signing again", async () => {
     const engine = createMockEngine();
     const services = browser(engine);
-    const session = await signUp(services, SAM);
+    const session = await signedUp(engine, services, SAM);
     await enrolTotp(services, session);
     await enrolTotp(services, session); // the same second, the same action: still accepted
     const signedAt = () => engine.calls.filter((c) => c.path === "/v1/accounts/totp").map((c) => Number((c.body as { signed_at: number }).signed_at));

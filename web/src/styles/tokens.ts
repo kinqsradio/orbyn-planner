@@ -18,6 +18,9 @@ export const MOTION_MS = {
   stag: 60,
 } as const;
 
+/** How long a short note stays (a toast after copying the recovery codes), where the usual toast stays ten seconds. */
+export const TOAST_BRIEF_MS = 8_000;
+
 /** The two easings (`--m-out`, `--m-io`). */
 export const EASING = {
   out: "cubic-bezier(.2, .8, .2, 1)",

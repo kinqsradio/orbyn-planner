@@ -4,7 +4,8 @@
 // with a code and a recovery code, see a replayed code refused, and turn it off with no code. Runs only when ORBYN_E2E_ENGINE is set.
 import { describe, expect, it } from "vitest";
 import { ApiFailure } from "../api/auth";
-import { confirmTotp, disableTotp, enrolTotp, SecondFactorNeeded, signIn, signUp } from "../auth/flows";
+import { confirmTotp, disableTotp, enrolTotp, SecondFactorNeeded, signIn } from "../auth/flows";
+import { signUpVerified } from "./testing/mailbox";
 import { browser, engineUrl, totpCode } from "./testing/support";
 
 const password = "correct horse battery staple";
@@ -14,7 +15,7 @@ describe.skipIf(!engineUrl)("two-factor against a real engine", () => {
   it("is turned on by a signed request, asked for at sign-in (code, replay, recovery code), and turned off with no code", async () => {
     const email = `e2e-2fa-${Date.now()}-${Math.floor(Math.random() * 1e6)}@example.com`;
     const a = await browser();
-    const session = await signUp(a.services, { name: "Sam", email, password });
+    const session = await signUpVerified(a.services, { name: "Sam", email, password });
     expect(await a.services.api.currentDevice()).toMatchObject({ totp_enabled: false, totp_pending: false });
 
     // A bare token is not enough.

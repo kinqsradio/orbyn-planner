@@ -29,6 +29,8 @@ export interface SyncState {
   keysSent: Record<string, string>;
   /** Zones this device made (or chose to make) the key for, so a crash between making a zone and its key can't strand it. */
   made: Record<string, true>;
+  /** Zones whose key was really sent to a device other than this one (an envelope was put), not merely marked as owed to nobody. */
+  keysReached?: Record<string, true>;
   /** True from the moment the engine's snapshot was dropped or replaced until this device has been approved again once: nothing is called stranded, and no delete is offered, while it is true. */
   reset?: boolean;
   /** When (ms) every key was last resent because a device's approval changed, per device: at most once in ten minutes unless an approval completed here. */
@@ -47,7 +49,7 @@ export interface SyncState {
 
 /** What only the engine's snapshot can vouch for. Dropping or replacing the snapshot makes it untrue. */
 export function withoutEngineSide(state: SyncState): SyncState {
-  return { ...state, staged: {}, stagedZone: {}, keysSent: {}, made: {}, quarantined: {}, reset: true };
+  return { ...state, staged: {}, stagedZone: {}, keysSent: {}, keysReached: {}, made: {}, quarantined: {}, reset: true };
 }
 
 export const emptySyncState = (): SyncState => ({ zones: [], zoneOf: {}, staged: {}, stagedZone: {}, keysSent: {}, made: {}, approvals: {}, resentAt: {}, failed: {}, backoff: {}, quarantined: {}, lastSyncedAt: null });
@@ -105,10 +107,24 @@ export interface KeyStore {
    * to store) and identity are written. If anything fails, nothing changes: the old device is as it was,
    * with no moment in which there are keys but no identity. The session is not touched.
    */
-  replaceDevice(next: { keys: Uint8Array; wrapKey: CryptoKey | null; identity: DeviceIdentity }): Promise<void>;
+  replaceDevice(next: ReplacementDevice): Promise<void>;
   loadSession(): Promise<StoredSession | null>;
   saveSession(session: StoredSession): Promise<void>;
   clearSession(): Promise<void>;
+}
+
+/**
+ * What `replaceDevice` writes. The engine's snapshot, the sync state, the quarantine and the session are carried over in the same
+ * transaction when given (a device moving out of memory), and cleared when not; the session is left alone unless `session` is given.
+ */
+export interface ReplacementDevice {
+  keys: Uint8Array;
+  wrapKey: CryptoKey | null;
+  identity: DeviceIdentity;
+  snapshot?: Uint8Array | null;
+  sync?: SyncState | null;
+  quarantine?: Uint8Array[];
+  session?: StoredSession | null;
 }
 
 const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
@@ -224,7 +240,7 @@ export function createIdbKeyStore(factory: IDBFactory = indexedDB): KeyStore {
     },
     replaceDevice: async (next) => {
       const database = await open();
-      const names = [...database.objectStoreNames].filter((n) => n !== "session");
+      const names = [...database.objectStoreNames].filter((n) => n !== "session" || next.session !== undefined);
       const tx = database.transaction(names, "readwrite");
       const done = new Promise<void>((resolve, reject) => {
         tx.oncomplete = () => resolve();
@@ -235,6 +251,10 @@ export function createIdbKeyStore(factory: IDBFactory = indexedDB): KeyStore {
         tx.objectStore("device").put(next.keys, "current");
         if (next.wrapKey) tx.objectStore("wrap").put(next.wrapKey, "current");
         tx.objectStore("identity").put(next.identity, "current");
+        if (next.snapshot) tx.objectStore("snapshot").put(next.snapshot, "current");
+        if (next.sync) tx.objectStore("sync").put(next.sync, "current");
+        next.quarantine?.forEach((blob, i) => tx.objectStore("quarantine").put(blob, i + 1));
+        if (next.session) tx.objectStore("session").put(next.session, "current");
       } catch (error) {
         tx.abort(); // nothing written so far stays
         await done.catch(() => undefined);
@@ -299,11 +319,13 @@ export function createMemoryKeyStore(): KeyStore {
     loadQuarantine: async () => [...quarantined],
     replaceDevice: async (next) => {
       keys = next.keys;
-      snapshot = null;
+      snapshot = next.snapshot ?? null;
       wrap = next.wrapKey;
       identity = next.identity;
-      sync = null;
+      sync = next.sync ?? null;
       quarantined.length = 0;
+      quarantined.push(...(next.quarantine ?? []));
+      if (next.session !== undefined) session = next.session;
     },
     clearDevice: async () => {
       keys = null;
@@ -317,6 +339,96 @@ export function createMemoryKeyStore(): KeyStore {
     saveSession: async (s) => void (session = s),
     clearSession: async () => void (session = null),
   };
+}
+
+/** A key store that can fall back to memory for this tab: see `withMemoryFallback`. */
+export interface FallbackKeyStore extends KeyStore {
+  /** True while the keys, identity, session and engine state are held in this tab's memory only. */
+  readonly inMemory: boolean;
+  /** The store being wrapped. */
+  readonly root: KeyStore;
+  subscribe(listener: () => void): () => void;
+  /** Tells `listener` whenever the sync state is saved. */
+  subscribeSync(listener: () => void): () => void;
+  /** From now on keep everything in memory, never in storage. Nothing already stored is touched. */
+  holdInMemory(): void;
+  /** Moves what is held in memory into storage, in one transaction for the device, and goes back to storage. Throws and stays in memory if storage still refuses. */
+  moveToStorage(): Promise<void>;
+}
+
+/**
+ * Wraps a store so that, when it refuses to keep a new account's keys, the tab can go on with them in memory only (so an approval from
+ * this tab can still run), and move them into storage later if storage starts to work. Memory is gone when the tab closes, and
+ * `clearDevice` (signing out) clears it and goes back to storage.
+ */
+export function withMemoryFallback(real: KeyStore, lock?: <T>(fn: () => Promise<T>) => Promise<T>): FallbackKeyStore {
+  const memory = createMemoryKeyStore();
+  let held = false;
+  const listeners = new Set<() => void>();
+  const syncListeners = new Set<() => void>();
+  const set = (next: boolean) => {
+    if (held === next) return;
+    held = next;
+    listeners.forEach((l) => l());
+  };
+  const own = {
+    get inMemory() {
+      return held;
+    },
+    root: real,
+    subscribe: (l: () => void) => {
+      listeners.add(l);
+      return () => listeners.delete(l);
+    },
+    holdInMemory: () => set(true),
+    subscribeSync: (l: () => void) => {
+      syncListeners.add(l);
+      return () => syncListeners.delete(l);
+    },
+    /** The sync state is saved here so a change tells the listeners at once (the guard on closing a memory-only tab). */
+    saveSyncState: async (state: SyncState) => {
+      await (held ? memory : real).saveSyncState(state);
+      syncListeners.forEach((l) => l());
+    },
+    moveToStorage: async () => {
+      // Under the engine's lock, so no action is half-way through while the device is carried over; one transaction, so a refusal
+      // leaves nothing written and the tab stays in memory.
+      await (lock ?? ((fn) => fn()))(async () => {
+        const keys = await memory.loadKeys();
+        const identity = await memory.loadIdentity();
+        if (!keys || !identity) throw new Error("nothing_held");
+        await real.replaceDevice({
+          keys,
+          wrapKey: await memory.loadWrapKey(),
+          identity,
+          snapshot: await memory.loadSnapshot(),
+          sync: await memory.loadSyncState(),
+          quarantine: await memory.loadQuarantine(),
+          session: await memory.loadSession(),
+        });
+      });
+      await memory.clearDevice();
+      await memory.clearSession();
+      set(false);
+    },
+    clearDevice: async () => {
+      if (held) {
+        await memory.clearDevice();
+        await memory.clearSession();
+        set(false);
+        // Storage is left alone: the keys were written in one transaction or not at all, so nothing of this account is there, and
+        // what is there may be another account's.
+      } else await real.clearDevice();
+    },
+  };
+  return new Proxy(own as unknown as FallbackKeyStore, {
+    get(_target, prop) {
+      if (prop in own) return Reflect.get(own, prop);
+      const source = (held ? memory : real) as unknown as Record<string | symbol, unknown>;
+      const value = source[prop];
+      return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(source) : value;
+    },
+  });
 }
 
 export function defaultKeyStore(): KeyStore {

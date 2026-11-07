@@ -1,6 +1,7 @@
 import type { ApprovalNonce } from "../../generated/ApprovalNonce";
 import type { ConfirmApproval } from "../../generated/ConfirmApproval";
 import type { CreateApproval } from "../../generated/CreateApproval";
+import type { ProtectionLink } from "../../generated/ProtectionLink";
 import type { PendingApproval } from "../../generated/PendingApproval";
 import type { Device } from "../../generated/Device";
 import type { LoginFinish } from "../../generated/LoginFinish";
@@ -8,6 +9,7 @@ import type { LoginStart } from "../../generated/LoginStart";
 import type { RegisterFinish } from "../../generated/RegisterFinish";
 import type { RegisterStart } from "../../generated/RegisterStart";
 import { decodeBytes, encodeBytes, utf8 } from "../bytes";
+import { PROTECTION_CONTEXT, PROTECTION_GENESIS, protectionHash, protectionMessage } from "./protectionFake";
 import {
   DEVICE_LOGIN_CONTEXT,
   DEVICE_REGISTER_CONTEXT,
@@ -40,6 +42,10 @@ interface Account {
   records?: MockRecords;
   /** Two-factor, as the engine keeps it: a pending or enabled secret and the unused recovery codes. */
   totp?: { enabled: boolean; recovery: string[] };
+  /** The signed protection settings, oldest first. */
+  protection?: ProtectionLink[];
+  /** A server that serves the chain from sequence 1 whatever `?from=` asks (how an old chain is shown again). */
+  protectionFromStart?: boolean;
 }
 /** The mock's one-time code: any other six digits are wrong. Recovery codes are `RECOV-0000N`. */
 export const MOCK_TOTP_CODE = "123456";
@@ -84,6 +90,10 @@ export function createMockEngine(now: () => number = () => Date.now()) {
   /** Sign-ins waiting for their second factor, with the wrong codes so far (five close one). */
   const waiting = new Map<string, { email: string; device: LoginFinish["device"]; wrong: number }>();
   const calls: Call[] = [];
+  /** Sign-ups waiting for their email code, and the code each was last sent (the mock has no mailbox: tests read it here). */
+  const signups = new Map<string, { email: string; upload: Uint8Array; device: RegisterFinish["device"]; code: string; wrong: number; sentAt: number; resends: number }>();
+  let codeCounter = 100000;
+  const nextCode = () => String(codeCounter++);
   const subscribers = new Set<(accountId: string, zone: string, token: string, author: string) => void>();
   /** Refuse the next calls to a path (or a path prefix) with this error: `refuseNext("/v1/sessions/login/start", 429, "too_many_attempts")`. */
   const refusals: { path: string; status: number; code: string; message: string; times: number }[] = [];
@@ -159,14 +169,46 @@ export function createMockEngine(now: () => number = () => Date.now()) {
       if (!fakeVerify(keys.signing, DEVICE_REGISTER_CONTEXT, registerMessage(email, upload, keys), decodeBytes(b.device_signature))) {
         return fail(400, "invalid_signature", "The signature is not valid.");
       }
-      if (accounts.has(email)) return fail(409, "email_unavailable", "That email is unavailable.");
+      // No account and no session yet: the sign-up waits for a code. A taken address gets the same answer, belonging to nobody.
+      const signupId = uuid();
+      if (!accounts.has(email)) signups.set(signupId, { email, upload, device: b.device, code: nextCode(), wrong: 0, sentAt: now(), resends: 0 });
+      return json(201, { signup_id: signupId });
+    }
+
+    if (method === "POST" && path === "/v1/accounts/email/verify") {
+      const b = body as { signup_id: string; code: string };
+      const pending = signups.get(b.signup_id);
+      const refuse = () => fail(400, "invalid_email_code", "That code didn't work.");
+      if (!pending) return refuse();
+      if (now() - pending.sentAt > 30 * 60_000) {
+        signups.delete(b.signup_id);
+        return refuse();
+      }
+      if (b.code !== pending.code) {
+        if (++pending.wrong >= 5) signups.delete(b.signup_id);
+        return refuse();
+      }
+      signups.delete(b.signup_id);
+      if (accounts.has(pending.email)) return refuse();
       const device: Device = {
-        id: uuid(), name: b.device.name, platform: b.device.platform, state: "trusted", signing_key: b.device.signing_key,
-        agreement_key: b.device.agreement_key, created_at: new Date(now()).toISOString(), approved_by: null, approval_signature: null, current: false,
+        id: uuid(), name: pending.device.name, platform: pending.device.platform, state: "trusted", signing_key: pending.device.signing_key,
+        agreement_key: pending.device.agreement_key, created_at: new Date(now()).toISOString(), approved_by: null, approval_signature: null, current: false,
       };
-      const account: Account = { id: uuid(), email, verifier: upload.slice("fake-upload:".length), devices: [device] };
-      accounts.set(email, account);
+      const account: Account = { id: uuid(), email: pending.email, verifier: pending.upload.slice("fake-upload:".length), devices: [device] };
+      accounts.set(pending.email, account);
       return json(201, createSession(account, device));
+    }
+
+    if (method === "POST" && path === "/v1/accounts/email/resend") {
+      const pending = signups.get((body as { signup_id: string }).signup_id);
+      // Three an hour; the answer is 204 whatever happens, so nothing tells a real sign-up from a decoy.
+      if (pending && pending.resends < 3) {
+        pending.resends++;
+        pending.code = nextCode();
+        pending.sentAt = now();
+        pending.wrong = 0;
+      }
+      return json(204, null);
     }
 
     if (method === "POST" && path === "/v1/sessions/login/start") {
@@ -238,6 +280,29 @@ export function createMockEngine(now: () => number = () => Date.now()) {
     if (method === "DELETE" && path === "/v1/sessions/current") {
       for (const [t, s] of sessions) if (s.deviceId === device.id && authorization?.endsWith(t)) sessions.delete(t);
       return json(204, null);
+    }
+    if (path.startsWith("/v1/keychain/protection")) {
+      if (device.state !== "trusted") return fail(403, "device_not_trusted", "This device isn't trusted.");
+      const chain = (account.protection ??= []);
+      if (method === "GET") {
+        const from = account.protectionFromStart ? 1 : Number(new URL(`http://x${path}`).searchParams.get("from") ?? 1);
+        return json(200, { links: chain.filter((l) => l.seq >= from).slice(0, 100), more: chain.filter((l) => l.seq >= from).length > 100 });
+      }
+      if (method === "POST") {
+        const b = body as { level: ProtectionLink["level"]; seq: number; prev: string; signed_at: number | bigint; device_signature: string };
+        const signedAt = Number(b.signed_at);
+        const verified =
+          Math.abs(now() / 1000 - signedAt) <= 300 &&
+          fakeVerify(decodeBytes(device.signing_key), PROTECTION_CONTEXT, protectionMessage(account.id, device.id, b.level, b.seq, b.prev, signedAt), decodeBytes(b.device_signature));
+        if (!verified) return fail(400, "invalid_signature", "The signature is not valid.");
+        const head = chain.at(-1);
+        if (b.seq !== (head?.seq ?? 0) + 1 || b.prev !== (head ? protectionHash(account.id, head) : PROTECTION_GENESIS)) {
+          return json(409, { code: "protection_conflict", message: "The setting does not follow the current one.", ...(head ? { head } : {}) });
+        }
+        const link: ProtectionLink = { level: b.level, seq: b.seq, prev: b.prev, signed_at: signedAt as unknown as bigint, signer_device_id: device.id, signature: b.device_signature };
+        chain.push(link);
+        return json(201, link);
+      }
     }
     if (path.startsWith("/v1/accounts/totp") && method === "POST") {
       if (device.state !== "trusted") return fail(403, "device_not_trusted", "This device isn't trusted.");
@@ -402,6 +467,10 @@ export function createMockEngine(now: () => number = () => Date.now()) {
     accounts,
     sessions,
     state,
+    /** The code the mock "emailed" for a sign-up, or undefined for a decoy, a closed or an unknown one. */
+    emailCode: (signupId: string) => signups.get(signupId)?.code,
+    /** The code last "emailed" to an address with a live sign-up. */
+    latestEmailCode: (address: string) => [...signups.values()].filter((s) => s.email === normalizeEmail(address)).at(-1)?.code,
     refuseNext(path: string, status: number, code: string, message = "Refused.", times = 1) {
       refusals.push({ path, status, code, message, times });
     },

@@ -1,9 +1,11 @@
 import { ApiFailure } from "../api/auth";
-import { isAuthFailed, type AuthCrypto, type DeviceKeys } from "../api/authCrypto";
+import { isAuthFailed, type ApprovalEngine, type AuthCrypto, type DeviceKeys } from "../api/authCrypto";
 import { decodeBytes, encodeBytes, utf8 } from "../api/bytes";
 import type { StoredSession } from "../api/keyStore";
 import type { Device } from "../generated/Device";
 import type { DeviceList } from "../generated/DeviceList";
+import type { ProtectionLevel } from "../generated/ProtectionLevel";
+import type { ProtectionLink } from "../generated/ProtectionLink";
 import type { NewDevice } from "../generated/NewDevice";
 import type { SecondFactorLogin } from "../generated/SecondFactorLogin";
 import type { SecondFactorRequired } from "../generated/SecondFactorRequired";
@@ -56,10 +58,39 @@ function emailOrFail(crypto: AuthCrypto, email: string): string {
   return normal;
 }
 
-/** Creates the account and signs this device in as its first, trusted device. */
-export async function signUp(services: AuthServices, input: { name: string; email: string; password: string }): Promise<StoredSession> {
+/**
+ * A sign-up that waits for the code sent to the address. There is no account and no session yet, and nothing is stored: the device's
+ * keys are only in memory until the code is right (then they are stored and the session is kept), and are let go if the sign-up is
+ * cancelled or the page closes, so an abandoned sign-up leaves nothing behind. The engine keeps the sign-up 30 minutes after the
+ * last code it sent.
+ */
+export interface PendingSignUp {
+  readonly signupId: string;
+  readonly email: string;
+  /** The six-digit code from the email. A wrong one throws `invalid_email_code` and leaves the sign-up open (the engine closes it after five). */
+  verify(code: string): Promise<StoredSession>;
+  /** Asks for a new code (the engine allows three an hour and answers the same whatever happens). */
+  resend(): Promise<void>;
+  /** Lets go of the keys: the sign-up is simply gone. */
+  cancel(): void;
+}
+
+/** The account was made, but this browser could not keep the device's keys: signing in again is the way on. */
+/** Nothing was created: this browser cannot make the secret the keys are sealed under, so a sign-up cannot start here. */
+export const NO_MEMORY = "This browser can’t hold the keys of an Orbyn account.";
+export const KEYS_NOT_SAVED = "Account created, but this browser couldn’t save its keys. Sign in with your email and password to continue.";
+
+/** Starts a sign-up: the password steps and the device's first signature, then the engine sends a code to the address. */
+export async function signUp(services: AuthServices, input: { name: string; email: string; password: string }): Promise<PendingSignUp> {
   const crypto = services.crypto(); // refuses before anything is sent when sign-in is not in this build
+  // Before anything is created: if this browser cannot even hold the keys in memory, say so while nothing exists yet.
+  try {
+    (await services.freshWrap()).secret.fill(0);
+  } catch {
+    throw new ApiFailure("no_memory", 0, NO_MEMORY);
+  }
   let keys: DeviceKeys | null = null;
+  let held = false;
   try {
     const email = emailOrFail(crypto, input.email);
     const password = utf8(input.password);
@@ -72,27 +103,209 @@ export async function signUp(services: AuthServices, input: { name: string; emai
       pending.free?.();
     }
     keys = crypto.deviceKeys.create();
-    const created = await services.api.registerFinish({
+    const waiting = await services.api.registerFinish({
       email,
       registration_upload: encodeBytes(upload),
       device: describeDevice(keys),
       device_signature: encodeBytes(keys.signRegistration(email, upload)),
     });
-    const wrap = await services.wrapSecret();
-    try {
-      await services.keys.saveKeys(keys.export(wrap));
-    } finally {
-      wrap.fill(0);
-    }
-    await services.keys.saveIdentity({ accountId: created.account_id, deviceId: created.device_id, email });
-    const session = toStored(created, email, input.name.trim());
-    await services.tokens.set(session);
-    return session;
+    held = true;
+    const mine = keys;
+    // Only what the verify step needs: not the whole input, which holds the password.
+    const name = input.name.trim();
+    let released = false;
+    let keepKeys: (() => Promise<StoredSession>) | null = null;
+    const release = () => {
+      if (released) return;
+      released = true;
+      mine.free();
+    };
+    /** Keeps the keys; they stay in memory only while saving them can still be tried again, and any other end lets them go. */
+    const finish = async (): Promise<StoredSession> => {
+      try {
+        let session: StoredSession;
+        try {
+          session = await keepKeys!();
+        } catch (e) {
+          if (!(e instanceof ApiFailure && e.code === "keys_not_saved")) throw e;
+          // Storage refuses: the account exists, so this tab goes on with the keys in memory only. They are never written anywhere, so
+          // an approval from this tab can run, and "Try saving again" moves them into storage if it starts to work.
+          services.keys.holdInMemory();
+          try {
+            session = await keepKeys!();
+          } catch (inMemory) {
+            await services.keys.clearDevice();
+            throw inMemory;
+          }
+        }
+        release();
+        return session;
+      } catch (e) {
+        if (!(e instanceof ApiFailure && e.code === "keys_not_saved")) release();
+        throw e;
+      }
+    };
+    return {
+      signupId: waiting.signup_id,
+      email,
+      verify: async (code) => {
+        if (released) throw new ApiFailure("invalid_email_code", 400, "That code didn’t work.");
+        const created = await services.api.emailVerify({ signup_id: waiting.signup_id, code: code.replace(/\D/g, "") });
+        // Only now is there an account and a session, so only now are the keys kept.
+        const keep = async (): Promise<StoredSession> => {
+          try {
+            // All or nothing: the keys, the wrapping key they are sealed under and the identity go in one transaction, so a refusal
+            // leaves nothing in storage.
+            const wrap = await services.freshWrap();
+            try {
+              await services.keys.replaceDevice({ keys: mine.export(wrap.secret), wrapKey: wrap.key, identity: { accountId: created.account_id, deviceId: created.device_id, email } });
+            } finally {
+              wrap.secret.fill(0);
+            }
+          } catch {
+            // The account exists now, so this is not "that code didn't work": say what happened.
+            throw new ApiFailure("keys_not_saved", 0, KEYS_NOT_SAVED);
+          }
+          const session = toStored(created, email, name);
+          await services.tokens.set(session);
+          await signStandardProtection(services, session);
+          return session;
+        };
+        keepKeys = keep;
+        return finish();
+      },
+      resend: () => services.api.emailResend({ signup_id: waiting.signup_id }),
+      cancel: release,
+    };
   } catch (error) {
     return asFailure(error);
   } finally {
-    keys?.free();
+    if (!held) keys?.free();
   }
+}
+
+/**
+ * Right after a successful verification the first device signs the account's protection setting as Standard (sequence 1) and sends it,
+ * then verifies its own link. The keys are already saved, so the engine restores them like any later action. It never blocks the
+ * sign-up: if anything here fails (the network, a conflict), the account is made and Settings says the level "can't be confirmed on
+ * this device", with a way to confirm it. On a conflict (another device got there first) it fetches the head and verifies it: it never
+ * signs again on its own.
+ */
+async function signStandardProtection(services: AuthServices, session: StoredSession): Promise<void> {
+  try {
+    await services.engine.run(session, async (engine) => {
+      const devices = await services.api.devices();
+      engine.verifyDevices(devices);
+      try {
+        const link = await services.api.setProtection(engine.protection.sign("standard", Math.floor(services.now() / 1000)));
+        engine.protection.verify({ links: [link], more: false }, devices);
+      } catch (e) {
+        if (!(e instanceof ApiFailure && e.code === "protection_conflict")) throw e;
+        await walkProtection(services, engine, devices);
+      }
+    });
+  } catch {
+    // Not fatal: see above.
+  }
+}
+
+/** What this device knows about the account's protection level after reading the server's chain, for Settings. */
+export interface ProtectionReport {
+  /** The newest verified setting's sequence, 0 for none. */
+  seq: number;
+  state: "verified" | "provisional" | "unknown";
+  level: ProtectionLevel | null;
+  /** Why the walk stopped before the server's head, if it did (the engine's reason). */
+  stopped: string | null;
+  /** The chain broke the engine's rules: the server showed an older setting than this device verified (`rollback`), or another one at a verified sequence (`fork`). */
+  problem: "rollback" | "fork" | null;
+  /** The server's newest setting, verified or not: what "Confirm protection level" signs after. */
+  head: ProtectionLink | null;
+  /** The device that signed the head, if it is still a device of the account (`name`), and whether that is this one. */
+  signer: { id: string; name: string | null; thisDevice: boolean } | null;
+  /** The head was signed by another device after the setting this device had verified before this read: "Protection was changed on …". */
+  changedBy: { id: string; name: string | null } | null;
+}
+
+/** Walks the server's chain page by page into the engine. Throws the engine's `protection_rollback` or `protection_fork`. */
+async function walkProtection(services: AuthServices, engine: ApprovalEngine, devices: DeviceList): Promise<{ head: ProtectionLink | null; stopped: ProtectionReport["stopped"] }> {
+  let from = engine.protection.from();
+  let head: ProtectionLink | null = null;
+  let stopped: ProtectionReport["stopped"] = null;
+  for (let page = 0; page < 100; page++) {
+    const chain = await services.api.protectionChain(from);
+    head = chain.links.at(-1) ?? head;
+    // `stopped` is only in what verifying returns, never in what the engine reports afterwards: the last page says why the walk ended.
+    stopped = engine.protection.verify(chain, devices).stopped ?? null;
+    if (!chain.more || chain.links.length === 0) break;
+    from = chain.links[chain.links.length - 1]!.seq + 1;
+  }
+  return { head, stopped };
+}
+
+/** Reads the server's protection chain and verifies it on this device. Never signs anything. */
+export async function readProtection(services: AuthServices, session: StoredSession): Promise<ProtectionReport> {
+  const devices = await services.api.devices();
+  return services.engine.run(session, async (engine) => {
+    engine.verifyDevices(devices);
+    const before = engine.protection.level();
+    let head: ProtectionLink | null = null;
+    let problem: ProtectionReport["problem"] = null;
+    let stopped: ProtectionReport["stopped"] = null;
+    try {
+      ({ head, stopped } = await walkProtection(services, engine, devices));
+    } catch (e) {
+      const code = e instanceof Error ? e.message.split(":")[0] : "";
+      if (code === "protection_rollback") problem = "rollback";
+      else if (code === "protection_fork") problem = "fork";
+      else throw e;
+    }
+    const now = engine.protection.level();
+    // A rollback or a fork is refused with no change, so the engine still says what it said before: that is not a verified level now.
+    const state: ProtectionReport["state"] = problem ? (now.level ? "provisional" : "unknown") : now.state;
+    const signerDevice = head ? devices.devices.find((d) => d.id === head!.signer_device_id) : undefined;
+    const signer = head ? { id: head.signer_device_id, name: signerDevice?.name ?? null, thisDevice: head.signer_device_id === session.deviceId } : null;
+    return {
+      seq: now.seq,
+      state,
+      level: now.level ?? null,
+      stopped,
+      problem,
+      head,
+      signer,
+      // Named only when this device verified that head: a setting it could not check names no one.
+      changedBy: !problem && signer && !signer.thisDevice && before.seq > 0 && head!.seq > before.seq && now.seq === head!.seq ? { id: signer.id, name: signer.name } : null,
+    };
+  });
+}
+
+/**
+ * Signs `level` after the server's newest setting, even one this device could not verify, and sends it. Only for a level the person
+ * has just chosen on a screen that says what it does: nothing calls this on its own. On a conflict (another device signed first) it
+ * reads the chain again into the engine and throws the engine's `protection_conflict`: the caller shows the new state and the person
+ * chooses again, so the next attempt is after the new head and never a blind retry of this one.
+ */
+export async function confirmProtection(services: AuthServices, session: StoredSession, level: ProtectionLevel, head: ProtectionLink | null): Promise<void> {
+  const devices = await services.api.devices();
+  const conflict = await services.engine.run(session, async (engine) => {
+    engine.verifyDevices(devices);
+    const now = Math.floor(services.now() / 1000);
+    const body = head ? engine.protection.resign(level, head, now) : engine.protection.sign(level, now);
+    try {
+      const link = await services.api.setProtection(body);
+      engine.protection.verify({ links: [link], more: false }, devices);
+      return null;
+    } catch (e) {
+      if (!(e instanceof ApiFailure && e.code === "protection_conflict")) throw e;
+      try {
+        await walkProtection(services, engine, devices);
+      } catch {
+        // The refresh that follows reads and reports it.
+      }
+      return e;
+    }
+  });
+  if (conflict) throw conflict;
 }
 
 /** This browser holds the keys of another account. Signing in to this one would remove them, so the person must agree first. */

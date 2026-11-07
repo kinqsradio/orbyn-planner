@@ -1,6 +1,7 @@
 import { createMemoryKeyStore, type KeyStore, type StoredSession } from "../../api/keyStore";
 import { realAuthCrypto } from "../../api/testing/realModule";
-import { signIn, signUp } from "../../auth/flows";
+import { signIn } from "../../auth/flows";
+import { signUpVerified } from "./mailbox";
 import { ApproverController, DeviceController } from "../../auth/pairing";
 import { createAuthServices, type AuthServices } from "../../auth/services";
 import { LocalStore } from "../../store/LocalStore";
@@ -40,7 +41,7 @@ export async function browser(): Promise<Omit<Browser, "session">> {
 export async function pairedBrowsers(email: string, password = "correct horse battery staple"): Promise<{ a: Browser; b: Browser }> {
   const a = await browser();
   const b = await browser();
-  const first = await signUp(a.services, { name: "Sam", email, password });
+  const first = await signUpVerified(a.services, { name: "Sam", email, password });
   const second = await signIn(b.services, { email, password });
   const pending = (await a.services.api.devices()).devices.find((x) => x.id === second.deviceId)!;
   const approver = new ApproverController(a.services, first, pending);

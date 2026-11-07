@@ -49,7 +49,7 @@ jobs:
           # --no-renames lists both paths of a move, so moving code into docs still counts.
           if ! files=$(git diff --no-renames --name-only "$BASE"...HEAD); then all "could not compare with the base"; exit 0; fi
           docs='^(docs/|[^/]+\.md$|\.github/ISSUE_TEMPLATE/|\.github/pull_request_template\.md$|\.github/(CODEOWNERS|dependabot\.yml)$)'
-          web='^(web/|\.github/workflows/)'
+          web='^(web/|\.github/workflows/|\.github/e2e-mail\.compose\.yaml$|\.github/e2e-mail-certs\.sh$)'
           desktop='^(desktop/|\.github/workflows/)'
           # scripts/ holds the title checker, which the cheap checks run.
           known="$web|$desktop|^scripts/"
@@ -262,6 +262,8 @@ jobs:
     timeout-minutes: 20
     env:
       RUN: ${{ needs.changes.outputs.web }}
+      # The engine's compose file plus a mailbox for the sign-up code (see .github/e2e-mail.compose.yaml).
+      COMPOSE_FILE: compose.yaml:${{ github.workspace }}/.github/e2e-mail.compose.yaml
     defaults:
       run:
         working-directory: web
@@ -303,6 +305,13 @@ jobs:
           ref: ${{ steps.pin.outputs.engine }}
           path: engine
           persist-credentials: false
+      # The mailbox's TLS certificate and the CA the worker trusts for it: made here, per run, never committed.
+      - name: Make the test mailbox's certificates
+        if: env.RUN == 'true'
+        working-directory: .
+        run: |
+          .github/e2e-mail-certs.sh "$RUNNER_TEMP/e2e-certs"
+          echo "E2E_CERTS_DIR=$RUNNER_TEMP/e2e-certs" >> "$GITHUB_ENV"
       # The engine image is the pinned commit built once: the saved image is cached by that commit, so a run that doesn't move the
       # pin loads it (seconds) instead of building it (about 2.5 minutes).
       - id: image
@@ -332,7 +341,7 @@ jobs:
           echo "::add-mask::$setup"
           [ -n "$setup" ] || { echo "auth-setup produced nothing"; exit 1; }
           [ "$(printf '%s\n' "$setup" | wc -l)" -eq 1 ] || { echo "auth-setup printed more than one line"; exit 1; }
-          ORBYN_AUTH_SETUP="$setup" docker compose up -d --no-build postgres migrate server worker
+          ORBYN_AUTH_SETUP="$setup" docker compose up -d --no-build postgres migrate server worker mailpit
           docker compose exec -T postgres psql -U orbyn -d orbyn -c "delete from auth_attempts"
           for _ in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:8080/health; then exit 0; fi
@@ -345,6 +354,7 @@ jobs:
         run: npx vitest run src/e2e
         env:
           ORBYN_E2E_ENGINE: http://127.0.0.1:8080
+          ORBYN_E2E_MAIL: http://127.0.0.1:8025
       - name: Compose logs
         if: env.RUN == 'true' && failure()
         working-directory: engine

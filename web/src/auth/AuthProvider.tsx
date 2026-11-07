@@ -3,6 +3,8 @@ import type { StoredSession } from "../api/keyStore";
 import { setSessionToken } from "../api/session";
 import { closePlanner, removeAccountPlanner } from "../store/planners";
 import { signOut as signOutFlow } from "./flows";
+import { holdMemoryOnly } from "../lib/browserStorage";
+import { forgetProtectionNotice } from "./protectionNotice";
 import type { AuthServices } from "./services";
 
 export type AuthStatus =
@@ -32,6 +34,11 @@ interface AuthApiValue {
   signOut: (options?: { removePlanner?: boolean }) => Promise<void>;
   /** Something that went wrong while signing out, to show. */
   problem: string | null;
+  /** The account's keys and session are held in this tab's memory only, because this browser would not store them. */
+  keysInMemory: boolean;
+  /** The person went on with the keys held in this tab only: the planner opens, and they sign in again next time. */
+  memoryAccepted: boolean;
+  acceptMemoryOnly: () => void;
 }
 
 const LOCAL_ONLY_KEY = "orbyn-planner.local-only";
@@ -54,8 +61,11 @@ export function AuthProvider({ services, children }: { services: AuthServices | 
   const [localOnly, setLocalOnly] = useState(readLocalOnly);
   const [overlay, setOverlay] = useState<AuthScreen | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [accepted, setAccepted] = useState(false);
   const none = useMemo(() => ({ subscribe: () => () => undefined, get: () => null as StoredSession | null }), []);
   const session = useSyncExternalStore(services ? services.tokens.subscribe : none.subscribe, services ? services.tokens.getSession : none.get);
+  const noMemory = useMemo(() => ({ subscribe: () => () => undefined, get: () => false }), []);
+  const keysInMemory = useSyncExternalStore(services ? services.keys.subscribe : noMemory.subscribe, services ? () => services.keys.inMemory : noMemory.get);
 
   useEffect(() => {
     if (!services) return;
@@ -65,6 +75,9 @@ export function AuthProvider({ services, children }: { services: AuthServices | 
       live = false;
     };
   }, [services]);
+
+  // While the keys are held in this tab's memory only, nothing the account screens remember reaches storage either.
+  useEffect(() => (keysInMemory ? holdMemoryOnly() : undefined), [keysInMemory]);
 
   // Another tab signed out: this one drops its session too.
   useEffect(() => {
@@ -113,6 +126,9 @@ export function AuthProvider({ services, children }: { services: AuthServices | 
       closeAuth: () => setOverlay(null),
       useWithoutAccount,
       problem,
+      keysInMemory,
+      memoryAccepted: accepted && keysInMemory,
+      acceptMemoryOnly: () => setAccepted(true),
       signOut: async (options) => {
         setProblem(null);
         const accountId = session?.accountId;
@@ -121,6 +137,7 @@ export function AuthProvider({ services, children }: { services: AuthServices | 
         } catch (e) {
           setProblem(e instanceof Error ? e.message : "Signing out didn’t finish.");
         }
+        if (accountId) forgetProtectionNotice(accountId);
         // The app is on the device-only planner now. This account's stays on disk or goes, as the person chose.
         if (accountId) {
           if (options?.removePlanner) await removeAccountPlanner(accountId).catch(() => setProblem("Signed out, but this account’s planner couldn’t be removed from this browser."));
@@ -129,7 +146,7 @@ export function AuthProvider({ services, children }: { services: AuthServices | 
         setOverlay(null);
       },
     };
-  }, [services, status, session, overlay, problem, useWithoutAccount]);
+  }, [services, status, session, overlay, problem, keysInMemory, accepted, useWithoutAccount]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

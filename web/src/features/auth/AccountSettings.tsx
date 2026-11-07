@@ -1,5 +1,5 @@
 import { useSyncState } from "../../sync/SyncProvider";
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { ApiFailure } from "../../api/auth";
 import { authCryptoAvailable, SIGN_IN_UNAVAILABLE } from "../../api/authCrypto";
 import { cryptoLoad } from "../../api/realCrypto";
@@ -11,12 +11,12 @@ import { TwoFactorRow } from "./TwoFactor";
 import type { Device } from "../../generated/Device";
 import { useAuth } from "../../auth/AuthProvider";
 import { removeDevice, verifiedDevices } from "../../auth/flows";
-import { ApproverController } from "../../auth/pairing";
+import { useApprover } from "./useApprover";
 import { describeError } from "./AuthScreens";
 
-const PLATFORMS: Record<Device["platform"], string> = { web: "Web", ios: "iPhone or iPad", android: "Android", macos: "Mac", windows: "Windows", linux: "Linux" };
+export const PLATFORMS: Record<Device["platform"], string> = { web: "Web", ios: "iPhone or iPad", android: "Android", macos: "Mac", windows: "Windows", linux: "Linux" };
 
-function when(iso: string): string {
+export function when(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
@@ -26,20 +26,11 @@ export const groupCode = (code: string) => (code.length === 6 ? `${code.slice(0,
 
 
 /** The digits and the device's key fingerprint, side by side with the choice: nothing is approved until "They match". */
-function ApproveDialog({ device, onClose, onDone }: { device: Device; onClose: () => void; onDone: () => void }) {
+export function ApproveDialog({ device, onClose, onDone }: { device: Device; onClose: () => void; onDone: () => void }) {
   const auth = useAuth()!;
   const { services } = auth;
   const [attempt, setAttempt] = useState(0);
-  const controller = useMemo(() => {
-    void attempt; // a new attempt is a new approval
-    return new ApproverController(services, auth.session!, device);
-  }, [services, auth.session, device, attempt]);
-  const state = useSyncExternalStore(controller.subscribe, controller.getState);
-
-  useEffect(() => {
-    void controller.start();
-    return () => controller.dispose();
-  }, [controller]);
+  const { controller, state } = useApprover(services, auth.session!, device, attempt);
 
   const close = () => {
     // Leaving before it is done closes the approval; a finished or closed one just goes.
@@ -162,15 +153,22 @@ function RemoveDialog({ device, onClose, onDone }: { device: Device; onClose: ()
   );
 }
 
+/** The steps of adding a device, which Add a device and approving from a tab that can't keep its keys both show. */
+export function AddDeviceSteps() {
+  return (
+    <ol className="steps">
+      <li>On the new device, open Orbyn Planner and sign in with your email and password.</li>
+      <li>It will say it is waiting for approval. Come back here and choose Approve next to it.</li>
+      <li>Both devices show the same 6 digits. If they match, choose They match on each.</li>
+    </ol>
+  );
+}
+
 function AddDeviceDialog({ onClose }: { onClose: () => void }) {
   return (
     <Modal label="Add a device" onClose={onClose}>
       <b className="card-title">Add a device</b>
-      <ol className="steps">
-        <li>On the new device, open Orbyn Planner and sign in with your email and password.</li>
-        <li>It will say it is waiting for approval. Come back here and choose Approve next to it.</li>
-        <li>Both devices show the same 6 digits. If they match, choose They match on each.</li>
-      </ol>
+      <AddDeviceSteps />
       <div className="dialog-actions">
         <button type="button" className="btn" onClick={onClose}>Done</button>
       </div>

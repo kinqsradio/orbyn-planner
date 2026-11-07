@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import { createMemoryKeyStore, emptySyncState } from "../api/keyStore";
 import { FakeAuthCrypto } from "../api/testing/FakeAuthCrypto";
 import { createMockEngine } from "../api/testing/MockEngine";
-import { KeysForAnotherAccount, signIn, signUp } from "./flows";
+import { KeysForAnotherAccount, signIn } from "./flows";
 import { createAuthServices } from "./services";
+import { signedUp } from "./testing/signedUp";
 
 const crypto = new FakeAuthCrypto();
 const SAM = { name: "Sam", email: "sam@example.com", password: "correct horse battery" };
@@ -13,7 +14,7 @@ async function signedUpAndOut() {
   const keys = createMemoryKeyStore();
   const wrap = new Uint8Array(32).fill(4);
   const services = createAuthServices({ fetch: engine.fetch, baseUrl: "http://e.test", keys, crypto: () => crypto, wrapSecret: async () => wrap.slice() });
-  const first = await signUp(services, SAM);
+  const first = await signedUp(engine, services, SAM);
   await keys.saveSnapshot(new Uint8Array([1, 2, 3])); // the engine's state, as an action would have left it
   await keys.clearSession();
   await services.tokens.clear();
@@ -70,7 +71,7 @@ describe("signing in binds the stored state to the account and device", () => {
 
   /** Another account exists on the server, made from another browser. */
   async function otherAccount(engine: ReturnType<typeof createMockEngine>) {
-    await signUp(createAuthServices({ fetch: engine.fetch, baseUrl: "http://e.test", keys: createMemoryKeyStore(), crypto: () => crypto, wrapSecret: async () => new Uint8Array(32).fill(8) }), {
+    await signedUp(engine, createAuthServices({ fetch: engine.fetch, baseUrl: "http://e.test", keys: createMemoryKeyStore(), crypto: () => crypto, wrapSecret: async () => new Uint8Array(32).fill(8) }), {
       name: "Alex", email: "alex@example.com", password: "another long password",
     });
   }

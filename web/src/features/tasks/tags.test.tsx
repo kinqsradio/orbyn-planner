@@ -106,7 +106,7 @@ describe("tags in the planner", () => {
     });
     await userEvent.click(await screen.findByText("water plants"));
     const panel = screen.getByLabelText("Task", { selector: "aside" });
-    expect(within(panel).getByText("A task can have 100 tags at most.")).toBeInTheDocument();
+    expect(within(panel).getByText("A task can have 3 tags at most.")).toBeInTheDocument();
     expect(within(panel).queryByLabelText("Add a tag")).toBeNull();
     expect(within(panel).queryByLabelText("New tag")).toBeNull();
     await userEvent.click(within(panel).getByLabelText("Remove tag Tag 0"));

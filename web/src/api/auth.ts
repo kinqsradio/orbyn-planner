@@ -1,7 +1,10 @@
 import type { ApiError } from "../generated/ApiError";
 import type { DeleteZone } from "../generated/DeleteZone";
 import type { KeyEnvelopeList } from "../generated/KeyEnvelopeList";
+import type { ProtectionChain } from "../generated/ProtectionChain";
+import type { ProtectionLink } from "../generated/ProtectionLink";
 import type { PutKeyEnvelopes } from "../generated/PutKeyEnvelopes";
+import type { SetProtection } from "../generated/SetProtection";
 import type { UploadChanges } from "../generated/UploadChanges";
 import type { UploadResult } from "../generated/UploadResult";
 import type { Zone } from "../generated/Zone";
@@ -21,11 +24,14 @@ import type { DeviceList } from "../generated/DeviceList";
 import type { LoginFinish } from "../generated/LoginFinish";
 import type { LoginStart } from "../generated/LoginStart";
 import type { LoginStarted } from "../generated/LoginStarted";
+import type { EmailResend } from "../generated/EmailResend";
+import type { EmailVerify } from "../generated/EmailVerify";
 import type { RegisterFinish } from "../generated/RegisterFinish";
 import type { RegisterStart } from "../generated/RegisterStart";
 import type { RegisterStarted } from "../generated/RegisterStarted";
 import type { SecondFactorLogin } from "../generated/SecondFactorLogin";
 import type { SessionCreated } from "../generated/SessionCreated";
+import type { SignUpPending } from "../generated/SignUpPending";
 import type { TotpConfirm } from "../generated/TotpConfirm";
 import type { TotpConfirmed } from "../generated/TotpConfirmed";
 import type { TotpDisable } from "../generated/TotpDisable";
@@ -41,8 +47,12 @@ const MESSAGES: Record<string, string> = {
   zone_deleted: "That list or calendar was deleted on another device.",
   email_unavailable: "That email can’t be used for a new account. If it’s yours, sign in instead.",
   login_failed: "That email and password don’t match.",
+  invalid_email_code: "That code didn’t work.",
   second_factor_required: "Enter the code from your authenticator app to finish signing in.",
   second_factor_failed: "That code didn’t work.",
+  protection_conflict: "Another device changed the protection level first. Check it, then try again.",
+  invalid_protection: "That protection setting isn’t valid.",
+  too_many_changes: "The protection level was changed too many times. Try again later.",
   device_proof_required: "This device couldn’t prove the request. Try again, and check that this device’s clock is right.",
   totp_already_enabled: "Two-factor is already on for this account.",
   totp_not_enabled: "Two-factor isn’t on for this account.",
@@ -102,7 +112,12 @@ export function createAuthApi(options: AuthApiOptions) {
   const base = () => options.baseUrl ?? engineUrl();
   const doFetch = () => options.fetch ?? fetch;
 
-  async function call<T>(method: string, path: string, body?: unknown, authed = false): Promise<T> {
+  /**
+   * `keepSession`: this call can be answered 401 with `second_factor_failed` or `device_proof_required`, which are about the request
+   * (a wrong code, a signature the engine wouldn't take), not about the session, so they don't end it. Only the three two-factor
+   * calls say so; on any other call every 401 ends the session.
+   */
+  async function call<T>(method: string, path: string, body?: unknown, authed = false, keepSession = false): Promise<T> {
     const headers: Record<string, string> = {};
     if (body !== undefined) headers["content-type"] = "application/json";
     const token = options.token();
@@ -126,27 +141,36 @@ export function createAuthApi(options: AuthApiOptions) {
       // Not our JSON (a proxy's page, say): fall back to the status.
     }
     const code = typeof error.code === "string" ? error.code : response.status === 401 ? "unauthorized" : response.status >= 500 ? "internal" : "invalid_request";
-    // A 401 on a signed-in call ends the session, except the two answers that are about a request, not the session: a wrong code
-    // and a missing device signature.
-    if (authed && response.status === 401 && code !== "second_factor_failed" && code !== "device_proof_required") options.onUnauthorized();
+    // A 401 on a signed-in call ends the session, except for the two-factor calls' own two answers (see `keepSession`).
+    const aboutTheRequest = keepSession && (code === "second_factor_failed" || code === "device_proof_required");
+    if (authed && response.status === 401 && !aboutTheRequest) options.onUnauthorized();
     const retry = Number(response.headers.get("retry-after"));
     throw new ApiFailure(code, response.status, plainMessage(code), error.message ?? "", error, Number.isFinite(retry) && retry > 0 ? retry : null);
   }
 
   return {
     registerStart: (body: RegisterStart) => call<RegisterStarted>("POST", "/v1/accounts/register/start", body),
-    registerFinish: (body: RegisterFinish) => call<SessionCreated>("POST", "/v1/accounts/register/finish", body),
+    /** No account and no session yet: a sign-up waits for the code sent to the address. */
+    registerFinish: (body: RegisterFinish) => call<SignUpPending>("POST", "/v1/accounts/register/finish", body),
+    /** The six-digit code from the email: creates the account with the signing-up device trusted, and answers its session. */
+    emailVerify: (body: EmailVerify) => call<SessionCreated>("POST", "/v1/accounts/email/verify", body),
+    /** A new code for a pending sign-up: three an hour, and the answer is the same whatever the id. */
+    emailResend: (body: EmailResend) => call<void>("POST", "/v1/accounts/email/resend", body),
     /** `trusted_device` is the optional proof from a device already trusted on the account. */
     loginStart: (body: LoginStart) => call<LoginStarted>("POST", "/v1/sessions/login/start", body),
     loginFinish: (body: LoginFinish) => call<SessionCreated>("POST", "/v1/sessions/login/finish", body),
     /** The second step of a sign-in the engine answered `second_factor_required`: exactly one of a code and a recovery code. */
     loginSecondFactor: (body: SecondFactorLogin) => call<SessionCreated>("POST", "/v1/sessions/login/second-factor", body),
     /** Two-factor, from a trusted device that signs the request: a new secret, pending until confirmed. Shown once. */
-    totpEnrol: (body: TotpEnrol) => call<TotpEnrolment>("POST", "/v1/accounts/totp", body, true),
+    totpEnrol: (body: TotpEnrol) => call<TotpEnrolment>("POST", "/v1/accounts/totp", body, true, true),
     /** A current code from the pending secret turns two-factor on; answers ten recovery codes, shown once. */
-    totpConfirm: (body: TotpConfirm) => call<TotpConfirmed>("POST", "/v1/accounts/totp/confirm", body, true),
+    totpConfirm: (body: TotpConfirm) => call<TotpConfirmed>("POST", "/v1/accounts/totp/confirm", body, true, true),
     /** Turns two-factor off: the trusted device's signature alone, no code. */
-    totpDisable: (body: TotpDisable) => call<void>("POST", "/v1/accounts/totp/disable", body, true),
+    totpDisable: (body: TotpDisable) => call<void>("POST", "/v1/accounts/totp/disable", body, true, true),
+    /** Sets the protection level: this device's signature over the next link. 201 with the stored link; 409 `protection_conflict` carries the head in its body. */
+    setProtection: (body: SetProtection) => call<ProtectionLink>("POST", "/v1/keychain/protection", body, true),
+    /** The signed protection settings from sequence `from`, oldest first (a page of 100; `more` says to ask again). */
+    protectionChain: (from: number) => call<ProtectionChain>("GET", `/v1/keychain/protection?from=${from}`, undefined, true),
     /** Ends this device's session. */
     signOut: () => call<void>("DELETE", "/v1/sessions/current", undefined, true),
     /** Ends every session; a trusted device only. */

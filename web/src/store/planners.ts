@@ -1,5 +1,5 @@
 import { LocalStore } from "./LocalStore";
-import { DEVICE_DB } from "./persistence";
+import { DEVICE_DB, MemoryPersistence } from "./persistence";
 
 /**
  * Whose planner is open. The planner kept on this device alone is one IndexedDB database; each account has
@@ -22,8 +22,22 @@ export function plannerFor(accountId: string | null): LocalStore {
   return store;
 }
 
+const inMemory = new Map<string, LocalStore>();
+
+/** The planner for an account whose keys are held in memory only: nothing of it is written to storage, so it goes with the tab. */
+export function memoryPlannerFor(accountId: string): LocalStore {
+  let store = inMemory.get(accountId);
+  if (!store) {
+    store = new LocalStore({ persistence: new MemoryPersistence({ volatile: true }), broadcast: false });
+    inMemory.set(accountId, store);
+  }
+  return store;
+}
+
 /** Lets go of an account's planner (its database stays). */
 export function closePlanner(accountId: string): void {
+  inMemory.get(accountId)?.close();
+  inMemory.delete(accountId);
   const name = accountDb(accountId);
   open.get(name)?.close();
   open.delete(name);

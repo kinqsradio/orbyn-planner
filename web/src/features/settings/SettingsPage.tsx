@@ -1,3 +1,5 @@
+import { takeSettingsTarget } from "../../app/settingsTarget";
+import { ProtectionSettings } from "../auth/ProtectionSettings";
 import { useState } from "react";
 import { CHOICES, chooseTheme, readStoredChoice, type ThemeChoice } from "../../app/theme";
 import { usePrefs } from "../../app/prefs";
@@ -13,7 +15,7 @@ const LABELS: Record<ThemeChoice, string> = { system: "System", light: "Light", 
 const CATEGORIES = ["Account", "Planning", "Notifications", "Connected apps", "Calendars", "Tags", "Privacy"] as const;
 
 export function SettingsPage() {
-  const [category, setCategory] = useState<(typeof CATEGORIES)[number]>("Planning");
+  const [category, setCategory] = useState<(typeof CATEGORIES)[number]>(() => CATEGORIES.find((c) => c === takeSettingsTarget()) ?? "Planning");
   const [find, setFind] = useState("");
   const [choice, setChoice] = useState<ThemeChoice>(readStoredChoice);
   const { prefs, setPrefs } = usePrefs();
@@ -104,7 +106,10 @@ export function SettingsPage() {
               </span>
             </>
           ) : category === "Privacy" ? (
-            <ExportSettings />
+            <>
+              <ProtectionSettings onReviewDevices={() => setCategory("Account")} />
+              <ExportSettings />
+            </>
           ) : category === "Tags" ? (
             <TagsSettings />
           ) : (
