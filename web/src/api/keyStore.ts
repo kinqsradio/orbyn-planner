@@ -319,6 +319,75 @@ export function createMemoryKeyStore(): KeyStore {
   };
 }
 
+/** A key store that can fall back to memory for this tab: see `withMemoryFallback`. */
+export interface FallbackKeyStore extends KeyStore {
+  /** True while the keys, identity, session and engine state are held in this tab's memory only. */
+  readonly inMemory: boolean;
+  /** The store being wrapped. */
+  readonly root: KeyStore;
+  subscribe(listener: () => void): () => void;
+  /** From now on keep everything in memory, never in storage. Nothing already stored is touched. */
+  holdInMemory(): void;
+  /** Moves what is held in memory into storage, in one transaction for the device, and goes back to storage. Throws and stays in memory if storage still refuses. */
+  moveToStorage(): Promise<void>;
+}
+
+/**
+ * Wraps a store so that, when it refuses to keep a new account's keys, the tab can go on with them in memory only (so an approval from
+ * this tab can still run), and move them into storage later if storage starts to work. Memory is gone when the tab closes, and
+ * `clearDevice` (signing out) clears it and goes back to storage.
+ */
+export function withMemoryFallback(real: KeyStore): FallbackKeyStore {
+  const memory = createMemoryKeyStore();
+  let held = false;
+  const listeners = new Set<() => void>();
+  const set = (next: boolean) => {
+    if (held === next) return;
+    held = next;
+    listeners.forEach((l) => l());
+  };
+  const own = {
+    get inMemory() {
+      return held;
+    },
+    root: real,
+    subscribe: (l: () => void) => {
+      listeners.add(l);
+      return () => listeners.delete(l);
+    },
+    holdInMemory: () => set(true),
+    moveToStorage: async () => {
+      const keys = await memory.loadKeys();
+      const identity = await memory.loadIdentity();
+      const wrapKey = await memory.loadWrapKey();
+      if (!keys || !identity) throw new Error("nothing_held");
+      await real.replaceDevice({ keys, wrapKey, identity });
+      const snapshot = await memory.loadSnapshot();
+      if (snapshot) await real.saveSnapshot(snapshot);
+      const session = await memory.loadSession();
+      if (session) await real.saveSession(session);
+      await memory.clearDevice();
+      await memory.clearSession();
+      set(false);
+    },
+    clearDevice: async () => {
+      if (held) {
+        await memory.clearDevice();
+        await memory.clearSession();
+        set(false);
+      } else await real.clearDevice();
+    },
+  };
+  return new Proxy(own as unknown as FallbackKeyStore, {
+    get(_target, prop) {
+      if (prop in own) return Reflect.get(own, prop);
+      const source = (held ? memory : real) as unknown as Record<string | symbol, unknown>;
+      const value = source[prop];
+      return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(source) : value;
+    },
+  });
+}
+
 export function defaultKeyStore(): KeyStore {
   return typeof indexedDB === "undefined" ? createMemoryKeyStore() : createIdbKeyStore();
 }

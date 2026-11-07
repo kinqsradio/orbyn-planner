@@ -30,7 +30,8 @@ const FAST_POLL = { firstMs: 5, maxMs: 20, totalMs: 5000 };
 
 /** Each browser has a wrapping secret of its own, as each has its own non-extractable key. */
 const wraps = new WeakMap<KeyStore, Uint8Array>();
-const wrapFor = (keys: KeyStore) => {
+const wrapFor = (given: KeyStore) => {
+  const keys = (given as { root?: KeyStore }).root ?? given; // the account services wrap the store they are given
   let w = wraps.get(keys);
   if (!w) wraps.set(keys, (w = Uint8Array.from({ length: 32 }, () => Math.floor(Math.random() * 256))));
   return w;
@@ -570,6 +571,89 @@ describe("adding a device", () => {
   });
 });
 
+describe("keys the browser will not store", () => {
+  it("the tab holds the account in memory only, and a device approved from it gets the keys", async () => {
+    const keysA = createMemoryKeyStore();
+    keysA.saveKeys = () => Promise.reject(new Error("quota"));
+    const keysB = createMemoryKeyStore();
+    const a = services(keysA);
+    const b = services(keysB);
+
+    const first = await mount(a);
+    await fillSignUp();
+    const card = await screen.findByRole("alert", { name: "Account created, keys not saved" });
+    expect(card).toHaveTextContent("Your keys exist only in this tab right now. Keep it open until they’re saved.");
+    expect(card).toHaveTextContent("Approving a device you already use, or the Orbyn app on this computer, gives it the keys while this tab is still open. It uses the same matching digits as Add a device.");
+    expect(a.keys.inMemory).toBe(true);
+    expect(await keysA.loadKeys()).toBeNull(); // nothing reached storage
+    expect(await keysA.loadSession()).toBeNull();
+    expect(a.tokens.getSession()?.deviceState).toBe("trusted");
+    first.unmount();
+
+    // Another device signs in and waits for approval.
+    const second = await mount(b);
+    await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
+    await fillSignIn();
+    await screen.findByRole("heading", { name: "Approve this device" });
+    second.unmount();
+
+    // The tab approves it, with the same digits as Add a device.
+    const onA = await mount(a);
+    await userEvent.click(await screen.findByRole("button", { name: "Approve another device from this tab" }));
+    const list = await screen.findByRole("list", { name: "Devices" });
+    await waitFor(() => expect(within(list).getAllByRole("listitem")).toHaveLength(2));
+    const onB = await mount(b);
+    await userEvent.click(within(list).getByRole("button", { name: `Approve ${deviceName()}` }));
+    const dialog = screen.getByRole("dialog", { name: "New sign-in" });
+    const sasA = (await within(dialog).findByTestId("approval-code")).textContent;
+    expect((await within(onB.root).findByTestId("approval-code")).textContent).toBe(sasA);
+    await userEvent.click(within(dialog).getByRole("button", { name: "They match" }));
+    await userEvent.click(within(onB.root).getByRole("button", { name: "They match" }));
+    expect(await within(dialog).findByText(/is trusted/)).toBeInTheDocument();
+    await userEvent.click(await within(onB.root).findByRole("button", { name: "Continue" }));
+    expect(b.tokens.getSession()?.deviceState).toBe("trusted");
+    expect(await keysB.loadKeys()).not.toBeNull(); // the device that can keep them has them
+    expect(await keysA.loadKeys()).toBeNull(); // and this tab still wrote nothing
+    onB.unmount();
+    onA.unmount();
+  });
+
+  it("Try saving again moves the account into storage once it works, and the planner opens", async () => {
+    const keysA = createMemoryKeyStore();
+    const save = keysA.saveKeys.bind(keysA);
+    const replace = keysA.replaceDevice.bind(keysA);
+    keysA.saveKeys = () => Promise.reject(new Error("quota"));
+    keysA.replaceDevice = () => Promise.reject(new Error("quota"));
+    const a = services(keysA);
+    await mount(a);
+    await fillSignUp();
+    await screen.findByRole("alert", { name: "Account created, keys not saved" });
+    await userEvent.click(screen.getByRole("button", { name: "Try saving again" }));
+    expect(screen.getByRole("alert", { name: "Account created, keys not saved" })).toBeInTheDocument(); // still refused: stays in memory
+    expect(a.keys.inMemory).toBe(true);
+    keysA.saveKeys = save;
+    keysA.replaceDevice = replace;
+    await userEvent.click(screen.getByRole("button", { name: "Try saving again" }));
+    await todayShown();
+    expect(a.keys.inMemory).toBe(false);
+    expect(await keysA.loadKeys()).not.toBeNull();
+    expect((await keysA.loadSession())?.deviceState).toBe("trusted");
+  });
+
+  it("signing out lets the held keys go", async () => {
+    const keysA = createMemoryKeyStore();
+    keysA.saveKeys = () => Promise.reject(new Error("quota"));
+    const a = services(keysA);
+    await mount(a);
+    await fillSignUp();
+    await screen.findByRole("alert", { name: "Account created, keys not saved" });
+    await signOut(a);
+    expect(a.keys.inMemory).toBe(false);
+    expect(await a.keys.loadKeys()).toBeNull();
+    expect(await a.keys.loadIdentity()).toBeNull();
+  });
+});
+
 describe("removing a device and approving one again", () => {
   /** A is signed up; C is a device the server lists as trusted but A never approved (stranded), with a session of its own. */
   async function withStranded() {
@@ -904,22 +988,6 @@ describe("email verification at sign-up", () => {
     expect(screen.getByLabelText("Code").closest("form")!.querySelectorAll(".cbox")).toHaveLength(6);
   });
 
-  it("when the keys can't be saved it says so and Try saving again finishes the sign-up", async () => {
-    const keys = createMemoryKeyStore();
-    const save = keys.saveKeys.bind(keys);
-    keys.saveKeys = () => Promise.reject(new Error("quota"));
-    await toCodeStep(keys);
-    await userEvent.type(screen.getByLabelText("Code"), engine.latestEmailCode(SAM.email)!);
-    await userEvent.click(screen.getByRole("button", { name: "Verify" }));
-    const card = await screen.findByRole("alert", { name: "Account created, keys not saved" });
-    expect(card).toHaveTextContent("Your account is ready, but this browser couldn’t save its keys");
-    expect(card).toHaveTextContent("Your keys exist only in this tab right now. Keep it open until they’re saved.");
-    keys.saveKeys = save;
-    await userEvent.click(within(card).getByRole("button", { name: "Try saving again" }));
-    await todayShown();
-    expect(await keys.loadKeys()).not.toBeNull();
-  });
-
   it("Change email starts over, and the abandoned sign-up leaves nothing behind", async () => {
     const { keys } = await toCodeStep();
     await userEvent.click(screen.getByRole("button", { name: "Change email" }));
@@ -1028,22 +1096,20 @@ describe("the protection level", () => {
     expect(engine.accounts.get("sam@example.com")!.protection).toHaveLength(1); // signed once, at sign-up
   });
 
-  it("says it can’t be confirmed, and why, when the first signing failed; Confirm signs only the level the person picks", async () => {
+  it("says Not set when the first signing failed; Choose opens the confirm dialog and Confirm signs Standard", async () => {
     engine.refuseNext("/v1/keychain/protection", 500, "internal", "Refused.", 1);
     await privacy();
     const card = await screen.findByLabelText("Protection");
-    expect(await within(card).findByText("Protection can’t be confirmed on this device")).toBeInTheDocument();
-    expect(card).toHaveTextContent("Can’t confirm");
-    expect(card).toHaveTextContent("No setting has been signed yet.");
+    expect(await within(card).findByText("Choose your protection level")).toBeInTheDocument();
+    expect(card).toHaveTextContent("Not set");
+    expect(card).toHaveTextContent("No device has set a protection level for this account yet. Until one does, your data uses Standard protection.");
     expect(engine.accounts.get("sam@example.com")!.protection ?? []).toHaveLength(0); // nothing signed it on its own
+    expect(screen.queryByRole("dialog")).toBeNull(); // it opens when the person chooses
 
-    await userEvent.click(within(card).getByRole("button", { name: "Confirm protection level" }));
-    const dialog = screen.getByRole("dialog", { name: "Confirm protection level" });
-    const sign = within(dialog).getByRole("button", { name: "Sign this setting" });
-    expect(sign).toBeDisabled(); // no level picked yet
-    expect(within(dialog).getByRole("radio", { name: /Advanced/ })).toBeDisabled();
-    await userEvent.click(within(dialog).getByRole("radio", { name: /Standard/ }));
-    await userEvent.click(sign);
+    await userEvent.click(within(card).getByRole("button", { name: "Choose" }));
+    const dialog = screen.getByRole("dialog", { name: "Confirm your protection level" });
+    expect(dialog).toHaveTextContent("Your account uses Standard protection");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Confirm" }));
     await waitFor(() => expect(engine.accounts.get("sam@example.com")!.protection).toHaveLength(1));
     expect(await within(await screen.findByLabelText("Protection")).findByText("Standard protection")).toBeInTheDocument();
   });
@@ -1067,7 +1133,7 @@ describe("the protection level", () => {
     const card = await screen.findByLabelText("Protection");
     expect(await within(card).findByText(/Standard protection, last confirmed/)).toBeInTheDocument();
     expect(card).toHaveTextContent("Can’t confirm");
-    expect(card).toHaveTextContent("The server showed an older setting than this device has already confirmed. This device keeps the setting it last confirmed until a trusted device confirms it again.");
+    expect(card).toHaveTextContent("The server showed an older setting than this browser has already confirmed. This browser keeps the setting it last confirmed until a trusted device confirms it again.");
     expect(card).toHaveTextContent("Open Orbyn on a trusted device to fix this.");
     expect(within(card).queryByText("Verified")).toBeNull();
     expect(within(card).queryByRole("button", { name: "Confirm protection level" })).toBeNull(); // there is no head to sign after
@@ -1082,25 +1148,20 @@ describe("the protection level", () => {
     expect(screen.queryByText(/Protection was changed to/)).toBeNull(); // a fork names no device
   });
 
-  it("a conflict in Confirm protection level shows the new state and the person chooses again, after the new head", async () => {
+  it("a conflict in Confirm shows the new setting with a blue line naming the device, and the person confirms again, after the new head", async () => {
     engine.refuseNext("/v1/keychain/protection", 500, "internal", "Refused.", 1);
     await privacy();
     const card = await screen.findByLabelText("Protection");
-    await userEvent.click(await within(card).findByRole("button", { name: "Confirm protection level" }));
-    const dialog = screen.getByRole("dialog", { name: "Confirm protection level" });
-    await userEvent.click(within(dialog).getByRole("radio", { name: /Standard/ }));
+    await userEvent.click(await within(card).findByRole("button", { name: "Choose" }));
+    const dialog = screen.getByRole("dialog", { name: "Confirm your protection level" });
     // Another device signs sequence 1 first.
     const account = engine.accounts.get("sam@example.com")!;
     const other = account.devices[0]!;
-    account.protection = [{ level: "standard", seq: 1, prev: PROTECTION_GENESIS, signed_at: 1_794_000_000 as unknown as bigint, signer_device_id: other.id, signature: "not-checked-here" }];
-    await userEvent.click(within(dialog).getByRole("button", { name: "Sign this setting" }));
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Another device changed the protection level first.");
-    // The choice was cleared and the screen re-read the chain: nothing is signed until the person chooses again.
-    expect(within(dialog).getByRole("radio", { name: /Standard/ })).not.toBeChecked();
-    expect(within(dialog).getByRole("button", { name: "Sign this setting" })).toBeDisabled();
+    account.protection = [{ level: "standard", seq: 1, prev: PROTECTION_GENESIS, signed_at: Math.floor(nowMs / 1000) as unknown as bigint, signer_device_id: other.id, signature: "not-checked-here" }];
+    await userEvent.click(within(dialog).getByRole("button", { name: "Confirm" }));
+    expect(await within(dialog).findByText(/Protection was just changed on/)).toBeInTheDocument();
     expect(account.protection).toHaveLength(1);
-    await userEvent.click(within(dialog).getByRole("radio", { name: /Standard/ }));
-    await userEvent.click(within(dialog).getByRole("button", { name: "Sign this setting" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Confirm" }));
     await waitFor(() => expect(account.protection).toHaveLength(2));
     expect(account.protection![1]!.seq).toBe(2); // after the new head, not a second try at sequence 1
   });

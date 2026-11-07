@@ -80,33 +80,36 @@ describe("the signed protection setting", () => {
     expect(report).toMatchObject({ problem: "rollback", state: "provisional", changedBy: null });
   });
 
-  it("a failure to keep the keys after the code is right says the account was made, not that the code was wrong", async () => {
+  it("when storage refuses the keys after the code is right, the account is kept in memory only and nothing reaches storage", async () => {
     const engine = createMockEngine();
     const keys = createMemoryKeyStore();
     keys.saveKeys = () => Promise.reject(new Error("quota"));
     const a = createAuthServices({ fetch: engine.fetch, baseUrl: "http://e.test", keys, crypto: () => crypto, wrapSecret: async () => new Uint8Array(32).fill(4) });
     const pending = await signUp(a, SAM);
-    const failed = await pending.verify(engine.emailCode(pending.signupId)!).catch((e: unknown) => e);
-    expect((failed as ApiFailure).code).toBe("keys_not_saved");
-    expect((failed as ApiFailure).message).toContain("Account created");
-    expect(a.tokens.getSession()).toBeNull();
+    const session = await pending.verify(engine.emailCode(pending.signupId)!);
+    expect(a.keys.inMemory).toBe(true);
+    expect(a.tokens.getSession()?.accountId).toBe(session.accountId);
+    expect(await keys.loadKeys()).toBeNull(); // never written
+    expect(await keys.loadIdentity()).toBeNull();
+    expect(await keys.loadSession()).toBeNull();
+    expect(await a.keys.loadKeys()).not.toBeNull(); // but this tab has them
     expect(engine.accounts.has("sam@example.com")).toBe(true);
   });
 
-  it("Try saving again keeps the same account: once storage works, the keys are kept and the session starts", async () => {
+  it("moving the held account to storage works once storage does, and the code is not used twice", async () => {
     const engine = createMockEngine();
     const keys = createMemoryKeyStore();
     const save = keys.saveKeys.bind(keys);
     keys.saveKeys = () => Promise.reject(new Error("quota"));
     const a = createAuthServices({ fetch: engine.fetch, baseUrl: "http://e.test", keys, crypto: () => crypto, wrapSecret: async () => new Uint8Array(32).fill(4) });
     const pending = await signUp(a, SAM);
-    await pending.verify(engine.emailCode(pending.signupId)!).catch(() => undefined);
-    expect(await pending.retrySave().catch((e: unknown) => (e as ApiFailure).code)).toBe("keys_not_saved"); // storage is still full
+    await pending.verify(engine.emailCode(pending.signupId)!);
     keys.saveKeys = save;
-    const session = await pending.retrySave();
-    expect(a.tokens.getSession()?.accountId).toBe(session.accountId);
+    await a.keys.moveToStorage();
+    expect(a.keys.inMemory).toBe(false);
     expect(await keys.loadKeys()).not.toBeNull();
-    expect(engine.calls.filter((c) => c.path === "/v1/accounts/email/verify")).toHaveLength(1); // the code was not used twice
+    expect((await keys.loadSession())?.deviceState).toBe("trusted");
+    expect(engine.calls.filter((c) => c.path === "/v1/accounts/email/verify")).toHaveLength(1);
   });
 
   it("a second device, once approved, reads the setting the first signed as verified", async () => {

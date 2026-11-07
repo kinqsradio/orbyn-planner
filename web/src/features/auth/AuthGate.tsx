@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useAuth } from "../../auth/AuthProvider";
 import { AuthScreens } from "./AuthScreens";
+import { KeysNotSaved } from "./KeysNotSaved";
 import { PendingScreen } from "./PendingScreen";
 
 /**
@@ -75,6 +76,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
     );
   }
   if (auth.status === "pending") return <PendingScreen />;
+  // The keys could not be stored: nothing else opens until they are saved or the tab is closed.
+  if (auth.status === "signedIn" && auth.keysInMemory) return <KeysNotSaved />;
   if (auth.status === "signedIn" && incoming.id && incoming.accepted) return <PendingScreen key={incoming.id} repair onDone={incoming.dismiss} />;
   // Over the planner (from Settings): the planner stays mounted but hidden, so coming back finds
   // the page as it was. It is always in the same wrapper, which takes no part in the layout.

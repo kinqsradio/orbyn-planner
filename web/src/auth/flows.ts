@@ -109,21 +109,35 @@ export async function signUp(services: AuthServices, input: { name: string; emai
     const name = input.name.trim();
     let released = false;
     let keepKeys: (() => Promise<StoredSession>) | null = null;
+    const release = () => {
+      if (released) return;
+      released = true;
+      mine.free();
+    };
     /** Keeps the keys; they stay in memory only while saving them can still be tried again, and any other end lets them go. */
     const finish = async (): Promise<StoredSession> => {
       try {
-        const session = await keepKeys!();
+        let session: StoredSession;
+        try {
+          session = await keepKeys!();
+        } catch (e) {
+          if (!(e instanceof ApiFailure && e.code === "keys_not_saved")) throw e;
+          // Storage refuses: the account exists, so this tab goes on with the keys in memory only. They are never written anywhere, so
+          // an approval from this tab can run, and "Try saving again" moves them into storage if it starts to work.
+          services.keys.holdInMemory();
+          try {
+            session = await keepKeys!();
+          } catch (inMemory) {
+            await services.keys.clearDevice();
+            throw inMemory;
+          }
+        }
         release();
         return session;
       } catch (e) {
         if (!(e instanceof ApiFailure && e.code === "keys_not_saved")) release();
         throw e;
       }
-    };
-    const release = () => {
-      if (released) return;
-      released = true;
-      mine.free();
     };
     return {
       signupId: waiting.signup_id,

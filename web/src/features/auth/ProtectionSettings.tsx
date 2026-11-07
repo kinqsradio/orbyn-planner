@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiFailure } from "../../api/auth";
 import { useAuth } from "../../auth/AuthProvider";
-import { changedKey, readConfirmed, readSkipped, seenKey, writeConfirmed, writeSkipped } from "../../auth/protectionNotice";
+import { pendingChange, readConfirmed, readSkipped, recordReport, writeSeen, writeSkipped, type ConfirmedSetting } from "../../auth/protectionNotice";
 import { confirmProtection, readProtection, type ProtectionReport } from "../../auth/flows";
 import type { ProtectionLevel } from "../../generated/ProtectionLevel";
 import { Icon } from "../../components/Icon";
@@ -9,130 +9,60 @@ import { Modal } from "../../components/Modal";
 import { MONTHS, formatTime } from "../../lib/dates";
 import { describeError } from "./AuthScreens";
 
-/** Why the walk of the chain stopped, for the reasons the designs do not draw (the engine's reasons). */
-const REASONS: Record<string, string> = {
-  invalid_signature: "The newest setting’s signature didn’t check out.",
-  gap: "Some settings in between are missing.",
-  invalid: "The newest setting isn’t valid.",
-};
+const KEEPS = "This browser keeps the setting it last confirmed";
 
-const KEEPS = "keeps the setting it last confirmed";
-
-/** What the card says about each way a setting can fail to confirm, as the designs draw them. */
+/** What the card says about each way a setting can fail to confirm, as Orbyn Account Designs draw them ("this browser" on the web). */
 const REASON_LINES = {
-  rollback: `The server showed an older setting than this device has already confirmed. This device ${KEEPS} until a trusted device confirms it again.`,
-  fork: `The server showed two different settings. This device ${KEEPS} until a trusted device confirms it again.`,
-  unknownDevice: `The latest change is signed by a device this device doesn’t know. This device ${KEEPS}.`,
+  rollback: { reason: "The server showed an older setting", line: `The server showed an older setting than this browser has already confirmed. ${KEEPS} until a trusted device confirms it again.` },
+  fork: { reason: "The server showed two different settings", line: `The server showed two different settings. ${KEEPS} until a trusted device confirms it again.` },
+  unknownDevice: { reason: "The latest change is signed by a device this browser doesn’t know", line: `The latest change is signed by a device this browser doesn’t know. ${KEEPS}.` },
+  badSignature: { reason: "The latest change has a signature that doesn’t check out", line: `The latest change has a signature that doesn’t check out. ${KEEPS}.` },
+  gap: { reason: "Some changes are missing between the setting this browser confirmed and the newest one", line: `Some changes are missing between the setting this browser confirmed and the newest one. ${KEEPS}.` },
+  invalid: { reason: "One of the changes isn’t in a form this browser can read", line: `One of the changes isn’t in a form this browser can read. ${KEEPS}.` },
 } as const;
 
-type Kind = "verified" | "confirming" | "rollback" | "fork" | "unknownDevice" | "other";
+type Kind = "verified" | "confirming" | "unset" | keyof typeof REASON_LINES;
 
 function kindOf(report: ProtectionReport): Kind {
   if (report.problem === "rollback") return "rollback";
   if (report.problem === "fork") return "fork";
   if (report.stopped === "untrusted_signer") return "unknownDevice";
+  if (report.stopped === "invalid_signature") return "badSignature";
+  if (report.stopped === "gap") return "gap";
+  if (report.stopped === "invalid") return "invalid";
   if (report.state === "verified") return "verified";
-  if (report.state === "provisional" && !report.stopped) return "confirming";
-  return "other";
+  if (report.state === "provisional") return "confirming";
+  // Unknown with nothing stopping it: no device has signed a setting yet.
+  return "unset";
 }
 
-const levelName = (level: string | null | undefined) => (level === "advanced" ? "Advanced" : "Standard");
+export const levelName = (level: string | null | undefined) => (level === "advanced" ? "Advanced" : "Standard");
 const day = (secs: number) => {
   const d = new Date(secs * 1000);
   return `${d.getDate()} ${MONTHS[d.getMonth()]!.slice(0, 3)}`;
 };
 /** "today 09:41" for the same day, otherwise "3 Nov". */
-const when = (secs: number, now: Date) => {
+export const when = (secs: number, now: Date) => {
   const d = new Date(secs * 1000);
   return d.toDateString() === now.toDateString() ? `today ${formatTime(d)}` : day(secs);
 };
 const secsOf = (link: { signed_at: bigint | number }) => Number(link.signed_at);
 
-function readSeen(accountId: string): number {
-  try {
-    return Number(localStorage.getItem(seenKey(accountId)) ?? 0) || 0;
-  } catch {
-    return 0;
-  }
-}
-function writeSeen(accountId: string, seq: number) {
-  try {
-    localStorage.setItem(seenKey(accountId), String(seq));
-  } catch {
-    // Not remembered across visits; fine.
-  }
-}
-
-/** The first signing never happened, so there is no setting to confirm: pick one. Not in the designs yet, so it is the earlier dialog. */
-function ChooseDialog({ report, onClose, onDone, onConflict }: { report: ProtectionReport; onClose: () => void; onDone: () => void; onConflict: () => void }) {
-  const auth = useAuth()!;
-  const [level, setLevel] = useState<ProtectionLevel | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const sign = async () => {
-    if (!level || !auth.session) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await confirmProtection(auth.services, auth.session, level, report.head);
-      onDone();
-    } catch (e) {
-      setError(describeError(e));
-      setBusy(false);
-      if (e instanceof ApiFailure && e.code === "protection_conflict") {
-        // Another device signed first: the screen shows the new state, and the person chooses again from it.
-        setLevel(null);
-        onConflict();
-      }
-    }
-  };
-  return (
-    <Modal label="Confirm protection level" onClose={busy ? () => undefined : onClose}>
-      <div>
-        <b className="card-title">Confirm your protection level</b>
-        <p className="t3 small">Choose the level you want. This device signs it, and every device of your account will check that signature.</p>
-        <div className="form" style={{ width: "auto" }} role="radiogroup" aria-label="Protection level">
-          <label style={{ display: "flex", gap: "var(--sp-8)", alignItems: "flex-start" }}>
-            <input type="radio" name="level" checked={level === "standard"} onChange={() => setLevel("standard")} />
-            <span>
-              <b style={{ fontWeight: "var(--fw-medium)" }}>Standard</b>
-              <span className="t3 small" style={{ display: "block" }}>Orbyn holds a key that can open your planner so it can help you recover your account. Orbyn can read your data.</span>
-            </span>
-          </label>
-          <label style={{ display: "flex", gap: "var(--sp-8)", alignItems: "flex-start", opacity: 0.6 }}>
-            <input type="radio" name="level" disabled />
-            <span>
-              <b style={{ fontWeight: "var(--fw-medium)" }}>Advanced</b>
-              <span className="t3 small" style={{ display: "block" }}>Coming later.</span>
-            </span>
-          </label>
-        </div>
-        {error && <p className="err" role="alert">{error}</p>}
-        <div className="dialog-actions">
-          <button type="button" className="ghost" disabled={busy} onClick={onClose}>Cancel</button>
-          <button type="button" className="btn" disabled={busy || !level} onClick={() => void sign()}>{busy ? "Signing…" : "Sign this setting"}</button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-
-/** "Confirm your protection level": the setting the server has, who set it and when, to confirm on this device. Not now leaves it for later. */
+/** "Confirm your protection level": the setting the server has, who set it and when, to confirm on this browser. Not now leaves it for later. With no setting yet, Standard is the one offered. */
 function ConfirmDialog({ report, changedNow, onClose, onNotNow, onDone, onConflict }: { report: ProtectionReport; changedNow: string | null; onClose: () => void; onNotNow: () => void; onDone: () => void; onConflict: () => void }) {
   const auth = useAuth()!;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const head = report.head!;
+  const head = report.head;
+  const level: ProtectionLevel = head?.level ?? "standard";
   const setBy = report.signer?.name ?? "another device";
   const [openedAt] = useState(() => Date.now() / 1000);
-  const age = openedAt - secsOf(head);
   const sign = async () => {
     if (!auth.session) return;
     setBusy(true);
     setError(null);
     try {
-      await confirmProtection(auth.services, auth.session, head.level, head);
+      await confirmProtection(auth.services, auth.session, level, head);
       onDone();
     } catch (e) {
       setBusy(false);
@@ -152,13 +82,13 @@ function ConfirmDialog({ report, changedNow, onClose, onNotNow, onDone, onConfli
           </div>
         )}
         <p className="t3">
-          {head.level === "standard" ? (
-            <>Your account uses <b style={{ fontWeight: "var(--fw-medium)" }}>Standard protection</b>: data is encrypted on your devices, and Orbyn keeps a recovery copy of the keys. Confirming lets this device check every later change.</>
+          {level === "standard" ? (
+            <>Your account uses <b style={{ fontWeight: "var(--fw-medium)" }}>Standard protection</b>: data is encrypted on your devices, and Orbyn keeps a recovery copy of the keys. Confirming lets this browser check every later change.</>
           ) : (
-            <>Your account uses <b style={{ fontWeight: "var(--fw-medium)" }}>Advanced protection</b>: only your devices hold the keys. Confirming lets this device check every later change.</>
+            <>Your account uses <b style={{ fontWeight: "var(--fw-medium)" }}>Advanced protection</b>: only your devices hold the keys. Confirming lets this browser check every later change.</>
           )}
         </p>
-        <div className="kv"><span>Set on</span><b>{setBy} · {age < 60 ? "just now" : day(secsOf(head))}</b></div>
+        {head && <div className="kv"><span>Set on</span><b>{setBy} · {openedAt - secsOf(head) < 60 ? "just now" : day(secsOf(head))}</b></div>}
         {error && <p className="err" role="alert">{error}</p>}
         <div className="dialog-actions">
           <button type="button" className="ghost" data-autofocus disabled={busy} onClick={onNotNow}>Not now</button>
@@ -169,20 +99,31 @@ function ConfirmDialog({ report, changedNow, onClose, onNotNow, onDone, onConfli
   );
 }
 
-/** The versions and devices involved, for support. */
-function DetailsDialog({ report, confirmed, onClose }: { report: ProtectionReport; confirmed: { seq: number; level: string } | null; onClose: () => void }) {
-  const now = new Date();
+/** For the person or Orbyn support: the reason, the newest setting and who signed it, and what this browser last confirmed. Nothing in it is secret. */
+function DetailsDialog({ report, kind, confirmed, onClose }: { report: ProtectionReport; kind: Kind; confirmed: ConfirmedSetting | null; onClose: () => void }) {
+  const reason = kind in REASON_LINES ? REASON_LINES[kind as keyof typeof REASON_LINES].reason : null;
+  const rows: Array<[string, string]> = [];
+  if (reason) rows.push(["Reason", reason]);
+  if (report.head) {
+    rows.push(["Newest setting on the server", `${levelName(report.head.level)} · change ${report.head.seq}`]);
+    const at = new Date(secsOf(report.head) * 1000);
+    rows.push(["Signed by", `${report.signer?.name ?? "A device this account doesn’t list"} · ${at.getDate()} ${MONTHS[at.getMonth()]!.slice(0, 3)} ${formatTime(at)}`]);
+  }
+  if (confirmed) rows.push(["Last confirmed on this browser", `${levelName(confirmed.level)} · change ${confirmed.seq} · ${day(confirmed.at)}`]);
+  const copy = () => void navigator.clipboard?.writeText(rows.map(([k, v]) => `${k}: ${v}`).join("\n")).catch(() => undefined);
   return (
     <Modal label="Protection details" onClose={onClose}>
       <div>
         <b className="card-title">Protection details</b>
-        <div className="kv"><span>Newest setting on the server</span><b>{report.head ? `${levelName(report.head.level)} · ${report.head.seq}` : "None"}</b></div>
-        {report.head && <div className="kv"><span>Signed by</span><b>{report.signer?.name ?? "A device this account doesn’t list"}{report.signer?.thisDevice ? " (this device)" : ""} · {when(secsOf(report.head), now)}</b></div>}
-        <div className="kv"><span>Last confirmed on this device</span><b>{confirmed ? `${levelName(confirmed.level)} · ${confirmed.seq}` : "None"}</b></div>
-        {report.stopped && <div className="kv"><span>Stopped at</span><b>{report.stopped}</b></div>}
-        {report.problem && <div className="kv"><span>Problem</span><b>{report.problem}</b></div>}
+        <p className="t3 small">For you or Orbyn support. Nothing here is secret.</p>
+        <div>
+          {rows.map(([k, v]) => (
+            <div className="kv" key={k}><span>{k}</span><b>{v}</b></div>
+          ))}
+        </div>
         <div className="dialog-actions">
-          <button type="button" className="ghost" data-autofocus onClick={onClose}>Close</button>
+          <button type="button" className="ghost" onClick={copy}><Icon name="copy" small />Copy details</button>
+          <button type="button" className="btn" data-autofocus onClick={onClose}>Done</button>
         </div>
       </div>
     </Modal>
@@ -198,8 +139,8 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
   const auth = useAuth();
   const [report, setReport] = useState<ProtectionReport | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [choosing, setChoosing] = useState(false);
   const [details, setDetails] = useState(false);
+  const [choosing, setChoosing] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(true);
   /** Who changed protection while the confirm dialog was open: named in its blue line. */
   const [changedNow, setChangedNow] = useState<string | null>(null);
@@ -212,16 +153,7 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
   /** Takes what the engine verified; a change by another device is remembered until the person dismisses it. */
   const accept = useCallback(
     (next: ProtectionReport) => {
-      if (session && next.state === "verified" && next.head && next.seq === next.head.seq) {
-        writeConfirmed(session.accountId, { seq: next.head.seq, level: next.head.level, at: secsOf(next.head) });
-      }
-      if (next.changedBy && next.head && session) {
-        try {
-          localStorage.setItem(changedKey(session.accountId), JSON.stringify({ seq: next.head.seq, name: next.changedBy.name }));
-        } catch {
-          // The notice then shows only on this visit.
-        }
-      }
+      if (session) recordReport(session.accountId, next);
       setReport(next);
     },
     [session],
@@ -252,34 +184,32 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
     };
   }, [trusted, services, session, accept]);
 
+  // Shown once per device: a setting this browser has not confirmed, with nothing wrong with it. "Not now" is remembered for that setting.
+  const autoAsk =
+    session !== null && report !== null && kindOf(report) === "confirming" && report.head !== null && confirmOpen && report.head.seq > Math.max(readSkipped(session.accountId), skipped);
   if (!auth?.session || !trusted) return null;
   const accountId = auth.session.accountId;
-  let changed: { seq: number; name: string | null } | null = null;
-  try {
-    const raw = localStorage.getItem(changedKey(accountId));
-    changed = raw ? (JSON.parse(raw) as { seq: number; name: string | null }) : null;
-  } catch {
-    changed = null;
-  }
-  // Only a setting this device verified may name a device: a fork or an unverified head names no one.
-  const showChanged = changed !== null && report?.state === "verified" && report.seq === changed.seq && changed.seq > Math.max(readSeen(accountId), dismissed);
+  // Only a setting this browser verified may name a device: a fork or an unverified head names no one.
+  const changed = pendingChange(accountId, report, dismissed);
   const kind = report ? kindOf(report) : null;
   const confirmed = readConfirmed(accountId);
   const level = levelName(report?.level);
   const now = new Date();
-  // Shown once per device: a setting this device has not confirmed, with nothing wrong with it. "Not now" is remembered for that setting.
-  const askToConfirm = report !== null && report.head !== null && kind === "confirming" && confirmOpen && report.head.seq > Math.max(readSkipped(accountId), skipped);
+  // With no setting yet, it opens when the person chooses. 
+  const askToConfirm = report !== null && (choosing || autoAsk);
+  const problemKind = kind !== null && kind in REASON_LINES ? (kind as keyof typeof REASON_LINES) : null;
+  const confirmedOn = report?.level && confirmed ? `, last confirmed ${day(confirmed.at)}` : ", last confirmed on this browser";
 
   return (
     <>
       <div className="bh"><b>Protection</b><span></span></div>
-      {showChanged && changed && report?.head && (
+      {changed && report?.head && (
         <div className="banner" role="status" style={{ marginBottom: "var(--sp-8)" }}>
           <Icon name="info" small />
-          <span>Protection was changed to {levelName(report.head.level)} on <b style={{ fontWeight: "var(--fw-medium)" }}>{changed.name ?? "another device"} · {when(secsOf(report.head), now)}</b></span>
+          <span>Protection was changed to {levelName(report.head.level)} on <b style={{ fontWeight: "var(--fw-medium)" }}>{changed.name ?? "another device"} · {when(changed.at, now)}</b></span>
           <div className="end">
             <button type="button" className="ghost sm" onClick={() => setDetails(true)}>Review</button>
-            <button type="button" className="ghost sm" onClick={() => { writeSeen(accountId, changed!.seq); setDismissed(changed!.seq); }}>Dismiss</button>
+            <button type="button" className="ghost sm" onClick={() => { writeSeen(accountId, changed.seq); setDismissed(changed.seq); }}>Dismiss</button>
           </div>
         </div>
       )}
@@ -302,6 +232,7 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
             <span className="t2 pv-text">
               Confirmed by your devices.
               {report.head && ` Last change ${day(secsOf(report.head))}${report.signer?.name ? ` on ${report.signer.name}` : ""}.`}
+              {report.level === "standard" && <><br /><span className="t3">With Standard, Orbyn keeps a recovery copy of your keys, so it can read your data. Advanced protection, planned, removes that copy.</span></>}
             </span>
           </>
         ) : kind === "confirming" ? (
@@ -311,36 +242,33 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
               <b style={{ fontWeight: "var(--fw-medium)" }}>{level} protection</b>
               <span className="st info"><span className="sd" />Confirming</span>
             </div>
-            <span className="t2 pv-text">Confirmed on this device. Your other devices confirm it the next time they open.</span>
+            <span className="t2 pv-text">Confirmed on this browser. Your other devices confirm it the next time they open.</span>
+          </>
+        ) : kind === "unset" ? (
+          <>
+            <div className="pv-head">
+              <Icon name="shield" small />
+              <b style={{ fontWeight: "var(--fw-medium)" }}>Choose your protection level</b>
+              <span className="st neutral"><span className="sd" />Not set</span>
+            </div>
+            <span className="t2 pv-text">No device has set a protection level for this account yet. Until one does, your data uses Standard protection.</span>
+            <div className="pv-line"><button type="button" className="btn sm" onClick={() => setChoosing(true)}>Choose</button></div>
           </>
         ) : (
           <>
             <div className="pv-head">
               <Icon name="shield" small />
-              <b style={{ fontWeight: "var(--fw-medium)" }}>
-                {report.level ? `${level} protection` : "Protection"}
-                {report.level && confirmed ? `, last confirmed ${day(confirmed.at)}` : ""}
-                {!report.level ? " can’t be confirmed on this device" : ""}
-              </b>
+              <b style={{ fontWeight: "var(--fw-medium)" }}>{level} protection{confirmedOn}</b>
               <span className="st err"><span className="sd" />Can’t confirm</span>
             </div>
-            <span className="t2 pv-text">
-              {kind === "rollback" ? REASON_LINES.rollback
-                : kind === "fork" ? REASON_LINES.fork
-                : kind === "unknownDevice" ? REASON_LINES.unknownDevice
-                : report.stopped ? (REASONS[report.stopped] ?? "This device couldn’t verify the newest setting.")
-                : report.head ? "This device hasn’t verified any setting yet."
-                : "No setting has been signed yet."}
-            </span>
+            <span className="t2 pv-text">{REASON_LINES[problemKind!].line}</span>
             <div className="pv-line">
-              {kind === "rollback" || kind === "fork" ? (
-                <span className="pv-line"><Icon name="laptop" small />Open Orbyn on a trusted device to fix this.</span>
-              ) : kind === "unknownDevice" ? (
+              {kind === "unknownDevice" ? (
                 <button type="button" className="btn sm" onClick={onReviewDevices}>Review devices</button>
-              ) : !report.head ? (
-                <button type="button" className="ghost sm" onClick={() => setChoosing(true)}>Confirm protection level</button>
-              ) : null}
-              {report.head && <button type="button" className="ghost sm" onClick={() => setDetails(true)}>Details</button>}
+              ) : (
+                <span className="pv-line"><Icon name="laptop" small />Open Orbyn on a trusted device to fix this.</span>
+              )}
+              <button type="button" className="ghost sm" onClick={() => setDetails(true)}>Details</button>
             </div>
           </>
         )}
@@ -350,39 +278,33 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
         <span className="st planned"><span className="sd" />Planned</span>
       </div>
       </div>
-      {details && report && <DetailsDialog report={report} confirmed={confirmed} onClose={() => setDetails(false)} />}
-      {askToConfirm && report?.head && (
+      {details && report && kind && <DetailsDialog report={report} kind={kind} confirmed={confirmed} onClose={() => setDetails(false)} />}
+      {askToConfirm && report && (
         <ConfirmDialog
           report={report}
           changedNow={changedNow}
-          onClose={() => setConfirmOpen(false)}
+          onClose={() => {
+            setConfirmOpen(false);
+            setChoosing(false);
+          }}
           onNotNow={() => {
-            writeSkipped(accountId, report.head!.seq);
-            setSkipped(report.head!.seq);
+            if (report.head) {
+              writeSkipped(accountId, report.head.seq);
+              setSkipped(report.head.seq);
+            }
+            setChoosing(false);
             setChangedNow(null);
           }}
           onDone={() => {
             setChangedNow(null);
+            setChoosing(false);
             void load(); // the setting is now confirmed here: the card shows it
           }}
           onConflict={() => {
-            // The setting on the screen is now the other device's: named in the blue line.
+            // The setting on the screen is now the other device's: named in the blue line. The dialog stays open whatever the refresh shows.
+            setChoosing(true);
             void load().then((next) => next && setChangedNow(next.signer?.name ?? "another device"));
           }}
-        />
-      )}
-      {choosing && report && (
-        <ChooseDialog
-          report={report}
-          onClose={() => {
-            setChoosing(false);
-            void load(); // what the engine learned meanwhile is shown, whether or not anything was signed
-          }}
-          onDone={() => {
-            setChoosing(false);
-            void load();
-          }}
-          onConflict={() => void load()}
         />
       )}
     </>

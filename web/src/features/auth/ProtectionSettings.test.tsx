@@ -75,7 +75,15 @@ describe("the protection card", () => {
     expect(within(c).queryByRole("button", { name: /Confirm/ })).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
     await userEvent.click(within(c).getByRole("button", { name: "Details" }));
-    expect(screen.getByRole("dialog", { name: "Protection details" })).toHaveTextContent("Problem");
+    const details = screen.getByRole("dialog", { name: "Protection details" });
+    expect(details).toHaveTextContent("For you or Orbyn support. Nothing here is secret.");
+    expect(details).toHaveTextContent("ReasonThe server showed an older setting");
+    expect(details).toHaveTextContent("Newest setting on the serverStandard · change 1");
+    expect(details).toHaveTextContent("Signed byMacBook Air · 3 Nov");
+    expect(details).toHaveTextContent("Last confirmed on this browserStandard · change 1 · 3 Nov");
+    expect(within(details).getByRole("button", { name: "Copy details" })).toBeInTheDocument();
+    await userEvent.click(within(details).getByRole("button", { name: "Done" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("a change signed by a device this one doesn't know says so, with Review devices first", async () => {
@@ -83,8 +91,33 @@ describe("the protection card", () => {
     const review = vi.fn();
     render(<ProtectionSettings onReviewDevices={review} />);
     const c = await card();
-    expect(await within(c).findByText("The latest change is signed by a device this device doesn’t know. This device keeps the setting it last confirmed.")).toBeInTheDocument();
+    expect(await within(c).findByText("The latest change is signed by a device this browser doesn’t know. This browser keeps the setting it last confirmed.")).toBeInTheDocument();
     await userEvent.click(within(c).getByRole("button", { name: "Review devices" }));
     expect(review).toHaveBeenCalledOnce();
+  });
+});
+
+describe("the other cards", () => {
+  it.each([
+    ["invalid_signature", "The latest change has a signature that doesn’t check out. This browser keeps the setting it last confirmed."],
+    ["gap", "Some changes are missing between the setting this browser confirmed and the newest one. This browser keeps the setting it last confirmed."],
+    ["invalid", "One of the changes isn’t in a form this browser can read. This browser keeps the setting it last confirmed."],
+  ] as const)("a stopped chain (%s) uses the Can’t confirm card with its own line, the laptop line and Details", async (stopped, line) => {
+    read.mockResolvedValue(report({ state: "provisional", stopped }));
+    render(<ProtectionSettings />);
+    const c = await card();
+    expect(await within(c).findByText(line)).toBeInTheDocument();
+    expect(c).toHaveTextContent("Open Orbyn on a trusted device to fix this.");
+    expect(within(c).getByRole("button", { name: "Details" })).toBeInTheDocument();
+  });
+
+  it("with no date known on this browser the title says so, and the verified card says Orbyn can read Standard data", async () => {
+    read.mockResolvedValue(report({ problem: "fork", state: "provisional" }));
+    render(<ProtectionSettings />);
+    expect(await within(await card()).findByText("Standard protection, last confirmed on this browser")).toBeInTheDocument();
+    cleanup();
+    read.mockResolvedValue(report({}));
+    render(<ProtectionSettings />);
+    expect(await card()).toHaveTextContent("With Standard, Orbyn keeps a recovery copy of your keys, so it can read your data. Advanced protection, planned, removes that copy.");
   });
 });

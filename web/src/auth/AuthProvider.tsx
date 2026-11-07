@@ -33,6 +33,8 @@ interface AuthApiValue {
   signOut: (options?: { removePlanner?: boolean }) => Promise<void>;
   /** Something that went wrong while signing out, to show. */
   problem: string | null;
+  /** The account's keys and session are held in this tab's memory only, because this browser would not store them. */
+  keysInMemory: boolean;
 }
 
 const LOCAL_ONLY_KEY = "orbyn-planner.local-only";
@@ -57,6 +59,8 @@ export function AuthProvider({ services, children }: { services: AuthServices | 
   const [problem, setProblem] = useState<string | null>(null);
   const none = useMemo(() => ({ subscribe: () => () => undefined, get: () => null as StoredSession | null }), []);
   const session = useSyncExternalStore(services ? services.tokens.subscribe : none.subscribe, services ? services.tokens.getSession : none.get);
+  const noMemory = useMemo(() => ({ subscribe: () => () => undefined, get: () => false }), []);
+  const keysInMemory = useSyncExternalStore(services ? services.keys.subscribe : noMemory.subscribe, services ? () => services.keys.inMemory : noMemory.get);
 
   useEffect(() => {
     if (!services) return;
@@ -114,6 +118,7 @@ export function AuthProvider({ services, children }: { services: AuthServices | 
       closeAuth: () => setOverlay(null),
       useWithoutAccount,
       problem,
+      keysInMemory,
       signOut: async (options) => {
         setProblem(null);
         const accountId = session?.accountId;
@@ -131,7 +136,7 @@ export function AuthProvider({ services, children }: { services: AuthServices | 
         setOverlay(null);
       },
     };
-  }, [services, status, session, overlay, problem, useWithoutAccount]);
+  }, [services, status, session, overlay, problem, keysInMemory, useWithoutAccount]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
