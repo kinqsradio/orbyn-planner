@@ -1,10 +1,11 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../../app/App";
 import { ClockProvider } from "../../app/clock";
 import { LocalStore } from "../../store/LocalStore";
 import { MemoryPersistence } from "../../store/persistence";
 import { groupToday } from "../tasks/selectors";
+import { TodayError, goalLabel } from "./TodayPage";
 
 // Saturday 7 November 2026, 10:00.
 const NOW = new Date(2026, 10, 7, 10, 0);
@@ -89,6 +90,17 @@ describe("Today page", () => {
     expect(screen.getByText("Saturday 7 November · 4 events")).toBeInTheDocument();
   });
 
+  it("orders all-day events by start, then a multi-day one before a single-day one, then by title", async () => {
+    await openToday((s) => {
+      s.addEvent({ title: "Beta", allDay: true, start: "2026-11-07", end: "2026-11-07" });
+      s.addEvent({ title: "Alpha", allDay: true, start: "2026-11-07", end: "2026-11-07" });
+      s.addEvent({ title: "Zed trip", allDay: true, start: "2026-11-07", end: "2026-11-08" });
+      s.addEvent({ title: "Early", allDay: true, start: "2026-11-06", end: "2026-11-07" });
+    });
+    const titles = Array.from(document.querySelectorAll(".row .what")).map((el) => el.textContent);
+    expect(titles).toEqual(["Early · day 2 of 2", "Zed trip · day 1 of 2", "Alpha", "Beta"]);
+  });
+
   it("shows up to three projects with a goal in the next 30 days, nearest first, and says 'goal today' for today", async () => {
     await openToday((s) => {
       const near = s.addProject({ name: "Spring launch", colour: "c1", goal: "2026-11-07" });
@@ -106,6 +118,17 @@ describe("Today page", () => {
     expect(lines).toEqual(["Spring launch", "Garden", "Taxes"]);
     expect(screen.getByText("50% · goal today")).toBeInTheDocument();
   });
+
+  it("a long list is laid out in steps: the first rows at once, the rest on the next frames, all of them in the end", async () => {
+    await openToday((s) => {
+      for (let i = 0; i < 150; i++) s.addTask({ title: `late ${i}`, due: "2026-11-05" });
+    });
+    const count = () => document.querySelectorAll(".row").length;
+    expect(count()).toBeLessThan(150); // the page does not wait for a hundred and fifty rows
+    expect(count()).toBeGreaterThan(0);
+    await waitFor(() => expect(count()).toBe(150), { timeout: 8000 });
+    expect(stats()[1]).toBe("Overdue150"); // the numbers never depended on how many rows were drawn
+  }, 20_000);
 
   it("greets by the clock: morning from 05:00, afternoon from 12:00, evening from 18:00, and until 04:59", async () => {
     const { greetingAt } = await import("./TodayPage");
@@ -163,6 +186,29 @@ describe("Today while it loads, and on a phone", () => {
     expect(screen.getByText("No events or tasks today. Add one, or look at the week.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open the week" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add a task" })).toBeInTheDocument();
+  });
+});
+
+describe("goal labels and the error card", () => {
+  const at = (goal: string) => goalLabel(goal, new Date(2026, 10, 7, 10, 0)); // Saturday 7 November
+  it("name today and tomorrow, then the weekday for six days, then the date, and mirror it into the past", () => {
+    expect(at("2026-11-07")).toBe("goal today");
+    expect(at("2026-11-08")).toBe("goal tomorrow");
+    expect(at("2026-11-11")).toBe("goal Wednesday");
+    expect(at("2026-11-13")).toBe("goal Friday"); // six days on
+    expect(at("2026-11-14")).toBe("goal 14 Nov"); // seven days on
+    expect(at("2026-11-06")).toBe("goal yesterday");
+    expect(at("2026-11-02")).toBe("goal Monday");
+    expect(at("2026-11-01")).toBe("goal Sunday"); // six days back
+    expect(at("2026-10-31")).toBe("goal 31 Oct");
+  });
+  it("the error card says what happened and offers Try again", async () => {
+    const retry = vi.fn();
+    render(<TodayError onRetry={retry} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Couldn’t open your planner on this device.");
+    expect(screen.getByText("Nothing was changed. Your other devices still have everything.")).toBeInTheDocument();
+    screen.getByRole("button", { name: "Try again" }).click();
+    expect(retry).toHaveBeenCalledTimes(1);
   });
 });
 

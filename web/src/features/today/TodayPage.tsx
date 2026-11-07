@@ -8,7 +8,7 @@ import { motionMs } from "../../styles/tokens";
 import { projectStats } from "../projects/stats";
 import { PageHeader } from "../../components/EmptyState";
 import { Icon } from "../../components/Icon";
-import { MONTHS, WEEKDAYS, addDays, dateKey, formatDue, formatTime, parseDue, startOfDay } from "../../lib/dates";
+import { MONTHS, WEEKDAYS, addDays, dateKey, formatTime, parseDue, startOfDay } from "../../lib/dates";
 import { daysBetween, lastDayOf, touchesDay } from "../../lib/wall";
 import { usePlanner } from "../../store/context";
 import { expandEvents, type Occurrence } from "../../store/occurrences";
@@ -25,7 +25,42 @@ export function greetingAt(now: Date): string {
   return h >= 5 && h < 12 ? "Good morning" : h >= 12 && h < 18 ? "Good afternoon" : "Good evening";
 }
 
+/** "goal today", "goal tomorrow", "goal Wednesday" (the next six days), "goal 14 Nov"; and backwards: "goal yesterday", the weekday, the date. */
+export function goalLabel(goal: string, now: Date): string {
+  const date = parseDue(goal).date;
+  const diff = Math.round((startOfDay(date).getTime() - startOfDay(now).getTime()) / 86_400_000);
+  if (diff === 0) return "goal today";
+  if (diff === 1) return "goal tomorrow";
+  if (diff === -1) return "goal yesterday";
+  if (Math.abs(diff) <= 6) return `goal ${WEEKDAYS[date.getDay()]}`;
+  return `goal ${date.getDate()} ${MONTHS[date.getMonth()]!.slice(0, 3)}`;
+}
+
+/** Shown in place of the lists only when the planner on this device can't be read, which the store does not report yet, so Today does not render it. */
+export function TodayError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="card" role="alert">
+      <span className="line"><Icon name="alert" small /><b>Couldn’t open your planner on this device.</b></span>
+      <span className="t3">Nothing was changed. Your other devices still have everything.</span>
+      <span><button type="button" className="btn" onClick={onRetry}>Try again</button></span>
+    </div>
+  );
+}
+
 const countWords = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** The first rows of a long list are laid out at once; the rest follow a few at a time, a frame apart, so the page paints before a thousand rows are laid out. */
+const FIRST_ROWS = 40;
+const ROWS_PER_FRAME = 60;
+function useProgressive(total: number): number {
+  const [shown, setShown] = useState(FIRST_ROWS);
+  useEffect(() => {
+    if (shown >= total) return;
+    const frame = requestAnimationFrame(() => setShown((n) => n + ROWS_PER_FRAME));
+    return () => cancelAnimationFrame(frame);
+  }, [shown, total]);
+  return Math.min(shown, total);
+}
 
 /** True once `active` has lasted 400 ms: a quick load never flashes a skeleton. */
 function useSlow(active: boolean): boolean {
@@ -110,6 +145,7 @@ export function TodayPage() {
   const status = withPersistence(health, persistence);
   const g = useMemo(() => groupToday(tasks, now), [tasks, now]);
   const skeleton = useSlow(!ready);
+  const lateRows = useProgressive(g.overdue.length);
 
   const shownEvents = useMemo(() => {
     const visible = new Set(calendars.filter((c) => c.visible).map((c) => c.id));
@@ -117,12 +153,17 @@ export function TodayPage() {
   }, [events, calendars]);
   const key = dateKey(now);
   const todayEvents = useMemo(() => expandEvents(shownEvents, key, key), [shownEvents, key]);
-  const allDay = useMemo(() => todayEvents.filter((o) => o.allDay), [todayEvents]);
+  // By start, then a multi-day event before a single-day one, then by title.
+  const allDay = useMemo(() => {
+    const span = (o: Occurrence) => daysBetween(o.date, lastDayOf(o.start, o.end, o.allDay));
+    return todayEvents.filter((o) => o.allDay).sort((a, b) => a.start.localeCompare(b.start) || Number(span(b) > 0) - Number(span(a) > 0) || a.event.title.localeCompare(b.event.title));
+  }, [todayEvents]);
   const entries = useMemo(
     () => inTimeOrder([...g.today.map((task): Entry => ({ kind: "task", task })), ...todayEvents.filter((o) => !o.allDay).map((occ): Entry => ({ kind: "event", occ }))]),
     [g.today, todayEvents],
   );
 
+  const entryRows = useProgressive(entries.length);
   const weekEvents = useMemo(() => expandEvents(shownEvents, dateKey(g.week[0]!.date), dateKey(g.week.at(-1)!.date)), [shownEvents, g.week]);
   const week = useMemo(
     () =>
@@ -198,7 +239,7 @@ export function TodayPage() {
         </PageHeader>
         <div className="grid4 today-stats" style={{ padding: "var(--sp-4) var(--sp-28) 0" }}>
           {["Today", "Overdue", "Coming up", "Done today"].map((l) => (
-            <div className="stat" key={l}><small>{l}</small><b>{skeleton && <span className="skel" />}</b></div>
+            <div className="stat" key={l}><small>{l}</small><b>{skeleton ? <span className="skel" /> : "\u00a0"}</b></div>
           ))}
         </div>
         <div className="cols">
@@ -256,7 +297,7 @@ export function TodayPage() {
                   {entries.length > 0 && <div className="bh"><b>Timed</b><span></span></div>}
                 </>
               )}
-              {entries.length > 0 && <ul>{rows(entries)}</ul>}
+              {entries.length > 0 && <ul>{rows(entries.slice(0, entryRows))}</ul>}
               {g.overdue.length > 0 && (
                 <>
                   <div className="bh" style={{ paddingTop: "var(--sp-16)" }}>
@@ -264,7 +305,7 @@ export function TodayPage() {
                     <span>{g.overdue.length}</span>
                   </div>
                   <ul>
-                    {g.overdue.map((t) => (
+                    {g.overdue.slice(0, lateRows).map((t) => (
                       <TodayRow key={t.id} task={t} late={lateDays(t.due!)} />
                     ))}
                   </ul>
@@ -292,7 +333,7 @@ export function TodayPage() {
               <div className="bh" style={{ paddingTop: "var(--sp-16)" }}><b>Progress</b><span></span></div>
               {progress.map(({ project, percent }) => (
                 <div key={project.id}>
-                  <div className="kv"><span>{project.name}</span><b>{percent}% · goal {project.goal!.slice(0, 10) === key ? "today" : formatDue(project.goal!, now).toLowerCase()}</b></div>
+                  <div className="kv"><span>{project.name}</span><b>{percent}% · {goalLabel(project.goal!, now)}</b></div>
                   <div className="meter" role="progressbar" aria-label={`${project.name} progress`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><i style={{ width: `${percent}%` }} /></div>
                 </div>
               ))}
