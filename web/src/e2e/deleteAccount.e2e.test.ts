@@ -6,7 +6,7 @@
 // that). Runs only when ORBYN_E2E_ENGINE and ORBYN_E2E_MAIL are set.
 import { describe, expect, it } from "vitest";
 import { ApiFailure } from "../api/auth";
-import { cancelDeletion, cancelDeletionByMail, confirmTotp, enrolTotp, scheduleDeletion, SecondFactorNeeded, signIn, signInAgain } from "../auth/flows";
+import { cancelDeletion, confirmTotp, enrolTotp, scheduleDeletion, SecondFactorNeeded, signIn } from "../auth/flows";
 import { cancelTokenSentTo, signUpVerified } from "./testing/mailbox";
 import { browser, engineUrl, totpCode } from "./testing/support";
 
@@ -28,7 +28,7 @@ describe.skipIf(!engineUrl)("a scheduled account deletion against a real engine"
     const second = await (step as SecondFactorNeeded).complete({ recoveryCode: recovery_codes[0]! });
 
     // The password again (a sign-in from the last ten minutes), then a wrong code: nothing is scheduled.
-    const session = await signInAgain(a.services, first, password);
+    const session = await signIn(a.services, { email, password, name: first.name });
     const refused = await scheduleDeletion(a.services, session, { code: "000000" }).catch((e: unknown) => e);
     expect((refused as ApiFailure).code).toBe("second_factor_failed");
     expect((await a.services.api.currentDevice()).deletion_scheduled_at ?? null).toBeNull();
@@ -46,7 +46,7 @@ describe.skipIf(!engineUrl)("a scheduled account deletion against a real engine"
     // The new device cancels with its signature, from its recent sign-in. That ends the first email's link too.
     await cancelDeletion(b.services, second);
     expect((await a.services.api.currentDevice()).deletion_scheduled_at ?? null).toBeNull();
-    const old = await cancelDeletionByMail((await browser()).services, firstToken).catch((e: unknown) => e);
+    const old = await (await browser()).services.api.cancelDeletionByMail({ token: firstToken }).catch((e: unknown) => e);
     expect((old as ApiFailure).code).toBe("invalid_cancel_token");
 
     // Schedule again and cancel from the original, trusted device.
@@ -62,12 +62,12 @@ describe.skipIf(!engineUrl)("a scheduled account deletion against a real engine"
     expect(new Set([firstToken, secondToken, token]).size).toBe(3);
     expect(await scheduleDeletion(a.services, session, { recoveryCode: recovery_codes[4]! })).toBe(third);
     const nobody = await browser();
-    const wrong = await cancelDeletionByMail(nobody.services, "A".repeat(43)).catch((e: unknown) => e);
+    const wrong = await nobody.services.api.cancelDeletionByMail({ token: "A".repeat(43) }).catch((e: unknown) => e);
     expect((wrong as ApiFailure).code).toBe("invalid_cancel_token");
     expect((await a.services.api.currentDevice()).deletion_scheduled_at).toBe(third); // a wrong token burned nothing
-    await cancelDeletionByMail(nobody.services, token);
+    await nobody.services.api.cancelDeletionByMail({ token });
     expect((await a.services.api.currentDevice()).deletion_scheduled_at ?? null).toBeNull();
-    const used = await cancelDeletionByMail(nobody.services, token).catch((e: unknown) => e);
+    const used = await nobody.services.api.cancelDeletionByMail({ token: token }).catch((e: unknown) => e);
     expect((used as ApiFailure).code).toBe("invalid_cancel_token");
     // The link did nothing but cancel: this device's session still works.
     expect((await a.services.api.currentDevice()).totp_enabled).toBe(true);

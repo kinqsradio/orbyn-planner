@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { ApiFailure } from "../../api/auth";
 import { cancelDeletion } from "../../auth/flows";
 import { useAuth } from "../../auth/AuthProvider";
 import type { AuthServices } from "../../auth/services";
@@ -7,7 +6,6 @@ import { deletionCountdown, deletionNotice, useDeletionScheduledAt } from "../..
 import { useNow } from "../../app/clock";
 import { useUi } from "../../app/ui";
 import { BusyButton } from "../../components/BusyButton";
-import { describeError } from "./AuthScreens";
 
 /** Keeps `deletionNotice` current from the engine while a device is signed in (trusted or still waiting): every device sees the date. */
 export function useDeletionPoll() {
@@ -34,38 +32,25 @@ export function useDeletionPoll() {
   }, [active, services]);
 }
 
-/**
- * Cancels the scheduled deletion with this device's signature. A pending device may too, but only within ten minutes of its
- * sign-in: when the engine says so (`reauthentication_required`), `again` is true and the person is offered a new sign-in, with
- * the cancel waiting for them there.
- */
+/** Cancels the scheduled deletion with this device's signature (a pending device may too, within ten minutes of its sign-in). */
 export function useCancelDeletion() {
   const auth = useAuth();
   const ui = useUi();
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [again, setAgain] = useState(false);
   const cancel = async () => {
     if (!auth?.session || busy) return;
     setBusy(true);
-    setError(null);
-    setAgain(false);
     try {
       await cancelDeletion(auth.services, auth.session);
       deletionNotice.set(null);
       ui.showToast("Deletion cancelled. Your account stays as it is.");
-    } catch (e) {
-      setError(describeError(e));
-      setAgain(e instanceof ApiFailure && e.code === "reauthentication_required");
+    } catch {
+      // The designs give a failed cancel no state of its own; the banner and the row stay, and the button works again.
     } finally {
       setBusy(false);
     }
   };
-  const signInAgain = async () => {
-    deletionNotice.setIntent(true);
-    await auth?.signOut();
-  };
-  return { cancel, busy, error, again, signInAgain };
+  return { cancel, busy };
 }
 
 /** Asks the engine for the scheduled date now (a refusal said it is scheduled), instead of waiting for the next check. */
@@ -90,7 +75,7 @@ export function DeletionWatcher() {
 export function DeletionBanner() {
   const at = useDeletionScheduledAt();
   const now = useNow();
-  const { cancel, busy, error, again, signInAgain } = useCancelDeletion();
+  const { cancel, busy } = useCancelDeletion();
   if (!at) return null;
   const when = deletionCountdown(at, now);
   return (
@@ -99,9 +84,7 @@ export function DeletionBanner() {
       <b className="banner-title">Deletion scheduled</b>
       <span className="banner-text long">Your Orbyn account and everything in it will be deleted {when}.</span>
       <span className="banner-text short">Your account will be deleted {when}.</span>
-      {error && <span className="err" role="alert">{error}</span>}
       <div className="end">
-        {again && <button type="button" className="ghost sm" onClick={() => void signInAgain()}>Sign in again</button>}
         <BusyButton className="btn sm" busy={busy} idle="Cancel deletion" working="Cancelling…" onClick={() => void cancel()} />
       </div>
     </aside>

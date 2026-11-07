@@ -71,7 +71,10 @@ export function CancelDeletionPage() {
     setResult("busy");
     const next = await cancelByMail(token.current);
     if (next === "error") pressed.current = false; // Try again presses the button again
-    else token.current = null; // used, or refused: the token is not needed again
+    else {
+      token.current = null; // used, or refused: the token is not needed again
+      taken = ""; // and the copy read from the address goes too
+    }
     setResult(next);
   };
 

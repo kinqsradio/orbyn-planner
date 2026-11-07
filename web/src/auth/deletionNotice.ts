@@ -7,8 +7,6 @@ import { MONTHS, WEEKDAYS } from "../lib/dates";
  * `GET /v1/devices/current`; the dialog and the cancel buttons set it as soon as they know.
  */
 let scheduledAt: string | null | undefined;
-/** The person asked, on the sign-in screen, to cancel the deletion once they are signed in. */
-let wantsCancel = false;
 const listeners = new Set<() => void>();
 
 const emit = () => listeners.forEach((l) => l());
@@ -19,10 +17,6 @@ export const deletionNotice = {
     if (value === scheduledAt) return;
     scheduledAt = value;
     emit();
-  },
-  intent: () => wantsCancel,
-  setIntent(value: boolean) {
-    wantsCancel = value;
   },
   subscribe(listener: () => void) {
     listeners.add(listener);
@@ -43,18 +37,19 @@ export function deletionDay(rfc3339: string): string {
 }
 
 /**
- * The banner's countdown, as the designs word it: "on Saturday 14 November, in 6 days", and on the last day "today at 09:00 UTC, in 5
- * hours" (in the last hour, "in under an hour").
+ * The banner's countdown, as the designs word it, by the UTC calendar: on the day of the deletion "today at 09:00 UTC, in 5 hours" (in
+ * the last hour "in under an hour"), on the day before "tomorrow at 12:00 UTC, in 23 hours", and two or more days out "on Saturday 14
+ * November, in 2 days".
  */
 export function deletionCountdown(rfc3339: string, now: Date): string {
   const at = new Date(rfc3339);
-  const left = at.getTime() - now.getTime();
-  if (left < 86_400_000) {
-    const hours = Math.floor(left / 3_600_000);
+  const utcDay = (d: Date) => Math.floor(d.getTime() / 86_400_000);
+  const days = utcDay(at) - utcDay(now);
+  if (days <= 1) {
+    const hours = Math.floor((at.getTime() - now.getTime()) / 3_600_000);
     const time = `${String(at.getUTCHours()).padStart(2, "0")}:${String(at.getUTCMinutes()).padStart(2, "0")} UTC`;
-    return `today at ${time}, ${hours < 1 ? "in under an hour" : `in ${hours} ${hours === 1 ? "hour" : "hours"}`}`;
+    return `${days <= 0 ? "today" : "tomorrow"} at ${time}, ${hours < 1 ? "in under an hour" : `in ${hours} ${hours === 1 ? "hour" : "hours"}`}`;
   }
-  const days = Math.floor(left / 86_400_000);
   return `on ${deletionDay(rfc3339)}, in ${days} ${days === 1 ? "day" : "days"}`;
 }
 
@@ -75,15 +70,11 @@ export const deleteIntent = {
   subscribe: (listener: () => void) => deletionNotice.subscribe(listener),
 };
 
-/** "November 14, 2026 at 12:00 PM" in the person's own locale and time zone. */
-export function describeDeletionTime(rfc3339: string): string {
-  const at = new Date(rfc3339);
-  if (Number.isNaN(at.getTime())) return rfc3339;
-  return at.toLocaleString(undefined, { dateStyle: "long", timeStyle: "short" });
-}
-
 /** What a paused control says on hover or focus while an account is scheduled for deletion. */
 export const PAUSED_HINT = "Cancel deletion to change this";
+
+/** The same, on the protection controls. */
+export const PAUSED_PROTECTION_HINT = "Cancel deletion to change protection";
 
 /** True while a deletion is scheduled: adding or removing devices, changing protection or two-factor, and signing out everywhere are paused. */
 export function useDeletionPaused(): boolean {

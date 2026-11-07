@@ -536,8 +536,6 @@ button.pillx { border: 0; }
   .deletion-banner .banner-text.short { display: inline; }
   .deletion-banner .end { width: 100%; }
   .deletion-banner .end .btn { flex: 1; height: var(--sp-40); border-radius: var(--r-12); justify-content: center; }
-}
-@media (max-width: 767px) {
   .delete-form .dialog-actions { flex-direction: column-reverse; align-items: stretch; }
   .delete-form .dialog-actions .ghost, .delete-form .dialog-actions .danger { height: var(--sp-40); border-radius: var(--r-12); justify-content: center; }
 }

@@ -101,8 +101,32 @@ describe("the cancel link from the deletion email", () => {
     expect(setItem).not.toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
     setItem.mockRestore();
-    const source = fs.readFileSync(`${(globalThis as { process?: { cwd(): string } }).process!.cwd()}/src/features/auth/CancelDeletionPage.tsx`, "utf8");
-    for (const forbidden of ["/auth/", "/store/", "/sync/", "realCrypto", "AuthProvider"]) expect(source, forbidden).not.toContain(`from "../..${forbidden}`);
-    expect(source).not.toMatch(/from "\.\.\/\.\.\/(auth|store|sync)\b/);
+  });
+
+  it("is isolated all the way: main.tsx loads it before anything of the app, and nothing it imports, however deep, reaches accounts, stores, sync or the wasm module", () => {
+    const root = `${(globalThis as { process?: { cwd(): string } }).process!.cwd()}/src`;
+    // main.tsx: only the page's own styles and the theme are imported statically; the app and the cancel page are dynamic imports.
+    const main = fs.readFileSync(`${root}/main.tsx`, "utf8");
+    const staticImports = [...main.matchAll(/^import\s.*?from\s+"([^"]+)"|^import\s+"([^"]+)"/gm)].map((m) => m[1] ?? m[2]);
+    for (const spec of staticImports) expect(spec, spec).not.toMatch(/\.\/(app\/App|bootApp|api|auth|store|sync)\b/);
+    const route = main.indexOf('"/cancel-deletion"');
+    expect(route).toBeGreaterThan(-1);
+    expect(main.indexOf('import("./bootApp")')).toBeGreaterThan(route); // the app is only reached after the cancel route was checked
+    // The page's whole import graph, followed through relative imports.
+    const seen = new Set<string>();
+    const walk = (file: string) => {
+      if (seen.has(file)) return;
+      seen.add(file);
+      const text = fs.readFileSync(file, "utf8");
+      for (const m of text.matchAll(/(?:from|import\()\s*"(\.[^"]+)"/g)) {
+        const base = new URL(m[1]!, `file://${file}`).pathname;
+        const target = ["", ".ts", ".tsx", "/index.ts", "/index.tsx"].map((x) => base + x).find((x) => { try { return fs.readFileSync(x, "utf8") !== undefined && !x.endsWith("/"); } catch { return false; } });
+        if (target && /\.(ts|tsx)$/.test(target)) walk(target);
+      }
+    };
+    walk(`${root}/features/auth/CancelDeletionPage.tsx`);
+    const reached = [...seen].map((f) => f.slice(root.length));
+    for (const f of reached) expect(f, f).not.toMatch(/^\/(auth|store|sync|generated\/wasm)\b|realCrypto|AuthProvider|bootApp|\/app\/App/);
+    expect(reached).toContain("/features/auth/CancelDeletionPage.tsx");
   });
 });

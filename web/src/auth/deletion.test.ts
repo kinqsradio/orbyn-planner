@@ -3,7 +3,7 @@ import { ApiFailure } from "../api/auth";
 import { createMemoryKeyStore } from "../api/keyStore";
 import { FakeAuthCrypto } from "../api/testing/FakeAuthCrypto";
 import { createMockEngine, type MockEngine } from "../api/testing/MockEngine";
-import { cancelDeletion, cancelDeletionByMail, scheduleDeletion, signIn, signInAgain } from "./flows";
+import { cancelDeletion, scheduleDeletion, signIn } from "./flows";
 import { signedUp } from "./testing/signedUp";
 import { createAuthServices, type AuthServices } from "./services";
 
@@ -36,7 +36,7 @@ describe("a scheduled account deletion", () => {
     expect(services.tokens.getSession()).not.toBeNull(); // about this request, not the session
     expect(engine.accounts.get(SAM.email)!.deletion).toBeUndefined();
 
-    const fresh = await signInAgain(services, session, SAM.password);
+    const fresh = await signIn(services, { email: session.email, password: SAM.password, name: session.name });
     const at = await scheduleDeletion(services, fresh);
     expect(Date.parse(at) - now()).toBe(7 * DAY);
     expect(engine.mail).toHaveLength(1);
@@ -47,7 +47,7 @@ describe("a scheduled account deletion", () => {
 
   it("a wrong password at the sign-in step schedules nothing", async () => {
     const { engine, services, session } = await aSignedUpAccount();
-    const failed = await signInAgain(services, session, "not the password").catch((e: unknown) => e);
+    const failed = await signIn(services, { email: session.email, password: "not the password", name: session.name }).catch((e: unknown) => e);
     expect((failed as ApiFailure).code).toBe("login_failed");
     expect(engine.accounts.get(SAM.email)!.deletion).toBeUndefined();
   });
@@ -83,12 +83,12 @@ describe("a scheduled account deletion", () => {
     const { engine, services, session } = await aSignedUpAccount();
     await scheduleDeletion(services, session);
     const nobody = browser(engine); // no session at all
-    const wrong = await cancelDeletionByMail(nobody, "not-the-token").catch((e: unknown) => e);
+    const wrong = await nobody.api.cancelDeletionByMail({ token: "not-the-token" }).catch((e: unknown) => e);
     expect((wrong as ApiFailure).code).toBe("invalid_cancel_token");
     expect(engine.accounts.get(SAM.email)!.deletion).toBeDefined(); // a wrong attempt burns nothing
-    await cancelDeletionByMail(nobody, engine.mail[0]!.token);
+    await nobody.api.cancelDeletionByMail({ token: engine.mail[0]!.token });
     expect(engine.accounts.get(SAM.email)!.deletion).toBeUndefined();
-    const used = await cancelDeletionByMail(nobody, engine.mail[0]!.token).catch((e: unknown) => e);
+    const used = await nobody.api.cancelDeletionByMail({ token: engine.mail[0]!.token }).catch((e: unknown) => e);
     expect((used as ApiFailure).code).toBe("invalid_cancel_token");
     // The link did nothing but cancel: the session still works.
     expect((await services.api.currentDevice()).device.id).toBe(session.deviceId);

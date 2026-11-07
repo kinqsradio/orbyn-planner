@@ -1586,10 +1586,10 @@ describe("deleting the account", () => {
     const dialog = await openDialog();
     await waitFor(() => expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus());
     expect(dialog).toHaveTextContent("7 days from now. Until then everything keeps working, and you can cancel from Settings or from the email we send.");
-    expect(dialog).toHaveTextContent(/Planner: 0 tasks, \d+ lists?, 0 projects, \d+ calendars?/);
+    expect(dialog).toHaveTextContent(/Orbyn Planner0 tasks, \d+ lists?, 0 projects, \d+ calendars?/);
     expect(dialog).toHaveTextContent("And anything you’ve saved in other Orbyn apps.");
     expect(dialog).not.toHaveTextContent("Plus plan");
-    expect(dialog).toHaveTextContent("it is gone from Orbyn’s servers and from every device the next time it opens. This can’t be undone.");
+    expect(dialog).toHaveTextContent("it is gone from Orbyn’s servers and from every device the next time it opens. Orbyn keeps a record that the account was deleted and the day, with no email and no content. This can’t be undone.");
     expect(within(dialog).queryByLabelText(/Type your email|Your password/)).toBeNull(); // no typed email, no password
     expect(within(dialog).queryByLabelText("Two-factor code")).toBeNull(); // two-factor is off
     const confirm = await within(dialog).findByRole("button", { name: "Delete account" });
@@ -1680,6 +1680,32 @@ describe("while a deletion is scheduled", () => {
     expect(screen.getByRole("button", { name: "Sign out" })).toBeEnabled(); // signing out on this device still works
   });
 
+  it("Remove, Approve, Turn off and Choose are each disabled, with the hint, while a deletion is scheduled", async () => {
+    engine.refuseNext("/v1/keychain/protection", 500, "internal", "Refused.", 1); // no setting was signed: Choose is on the card
+    const auth = services();
+    await mount(auth, "/settings");
+    await fillSignUp();
+    await screen.findByRole("navigation", { name: "Primary" });
+    const session = auth.tokens.getSession()!;
+    await signIn(services(), SAM); // another device, waiting for approval (before two-factor is on)
+    await enrolTotp(auth, session);
+    await confirmTotp(auth, session, MOCK_TOTP_CODE);
+    await scheduleDeletion(auth, session, { code: MOCK_TOTP_CODE });
+    await screen.findByRole("status", { name: "Account deletion" });
+
+    await openAccount();
+    const list = await screen.findByRole("list", { name: "Devices" });
+    await waitFor(() => expect(within(list).getAllByRole("listitem")).toHaveLength(2));
+    for (const button of [within(list).getByRole("button", { name: /^Approve / }), within(list).getByRole("button", { name: /^Remove / }), screen.getByRole("button", { name: "Turn off…" })]) {
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute("title", "Cancel deletion to change this");
+    }
+    await userEvent.click(await screen.findByRole("button", { name: "Privacy" }));
+    const choose = await within(await screen.findByLabelText("Protection")).findByRole("button", { name: "Choose" });
+    expect(choose).toBeDisabled();
+    expect(choose).toHaveAttribute("title", "Cancel deletion to change protection");
+  });
+
   it("a change the engine refuses with deletion_scheduled shows the paused state", async () => {
     const auth = services();
     await mount(auth, "/settings");
@@ -1700,16 +1726,6 @@ describe("cancelling a scheduled deletion", () => {
     await scheduleDeletion(first, session);
     return { first, session };
   }
-
-  it("a new device that chooses ‘cancel deletion’ at sign-in cancels it once signed in", async () => {
-    await scheduled();
-    await mount(services());
-    await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
-    await userEvent.click(screen.getByLabelText("Cancel my account’s scheduled deletion"));
-    await fillSignIn();
-    await waitFor(() => expect(engine.accounts.get("sam@example.com")!.deletion).toBeUndefined());
-    expect(engine.calls.some((c) => c.path === "/v1/accounts/delete/cancel")).toBe(true);
-  });
 
   it("every signed-in device shows the banner, a device waiting for approval too", async () => {
     const { first } = await scheduled();

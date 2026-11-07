@@ -600,7 +600,7 @@ export async function disableTotp(services: AuthServices, session: StoredSession
 /**
  * Schedules the account's deletion and answers when it will happen (RFC 3339), seven days away. Nothing is deleted yet: the account
  * works as usual until then and can be cancelled (`cancelDeletion`, or the link in the email). This device signs the request, from
- * a session that signed in in the last ten minutes (`signInAgain`; an older one is answered `reauthentication_required`), and when
+ * a session that signed in in the last ten minutes (an older one is answered `reauthentication_required`), and when
  * the account has two-factor on, a current code or a recovery code goes with it.
  */
 export async function scheduleDeletion(services: AuthServices, session: StoredSession, factor: { code?: string; recoveryCode?: string } = {}): Promise<string> {
@@ -608,31 +608,9 @@ export async function scheduleDeletion(services: AuthServices, session: StoredSe
   return scheduled.deletes_at;
 }
 
-/**
- * Signs in again on this device with the account's password, so the engine sees a sign-in from the last ten minutes, which it asks
- * for before it schedules a deletion (and before a pending device may cancel one). The device is already known, so no code is asked
- * for; the new session replaces the old one.
- */
-export async function signInAgain(services: AuthServices, session: StoredSession, password: string): Promise<StoredSession> {
-  try {
-    return await signIn(services, { email: session.email, password, name: session.name });
-  } catch (e) {
-    if (e instanceof SecondFactorNeeded) {
-      e.cancel();
-      throw new ApiFailure("second_factor_required", 401, "Sign out and sign in again from the start screen to continue.");
-    }
-    throw e;
-  }
-}
-
 /** Cancels a scheduled deletion with this device's signature (a pending device needs a sign-in from the last ten minutes too). */
 export async function cancelDeletion(services: AuthServices, session: StoredSession): Promise<void> {
   await withProof(async () =>
     services.api.cancelDeletion(await signedByThisDevice(services, session, "cancel-delete", (keys, signedAt) => keys.signAccountDeleteCancel(session.accountId, session.deviceId, signedAt))),
   );
-}
-
-/** Cancels it with the token from the email's link: no session, and nothing else. Call it only when the person asks. */
-export async function cancelDeletionByMail(services: AuthServices, token: string): Promise<void> {
-  await services.api.cancelDeletionByMail({ token });
 }

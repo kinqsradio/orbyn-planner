@@ -23,9 +23,11 @@ function PlannerScope() {
   const open = tasks.filter((t) => t.deletedAt === null).length;
   return (
     <div className="scope2">
+      <span className="appi ap-pl" aria-hidden="true"><Icon name="check" small /></span>
       <div>
-        <b>Planner: {count(open, "task", "tasks")}, {count(lists.length, "list", "lists")}, {count(projects.length, "project", "projects")}, {count(calendars.length, "calendar", "calendars")}</b>
-        <small>And anything you’ve saved in other Orbyn apps.</small>
+        <b>Orbyn Planner</b>
+        <small>{count(open, "task", "tasks")}, {count(lists.length, "list", "lists")}, {count(projects.length, "project", "projects")}, {count(calendars.length, "calendar", "calendars")}</small>
+        <span className="t3">And anything you’ve saved in other Orbyn apps.</span>
       </div>
     </div>
   );
@@ -37,6 +39,9 @@ function DeleteDialog({ onClose }: { onClose: () => void }) {
   const now = useNow();
   /** Whether the account has two-factor on: the engine says. Null until it has. */
   const [totp, setTotp] = useState<boolean | null>(null);
+  /** Why the engine could not say whether two-factor is on: then no dialog is offered, since a code might be needed. */
+  const [totpError, setTotpError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const [recovery, setRecovery] = useState(false);
   const [factor, setFactor] = useState("");
   const [busy, setBusy] = useState(false);
@@ -50,15 +55,16 @@ function DeleteDialog({ onClose }: { onClose: () => void }) {
     let live = true;
     void auth.services.api.currentDevice().then(
       (d) => live && setTotp(d.totp_enabled),
-      () => live && setTotp(false),
+      (e: unknown) => live && setTotpError(describeError(e)),
     );
     return () => {
       live = false;
     };
-  }, [auth.services]);
+  }, [auth.services, attempt]);
 
   const day = deletionDay(new Date(now.getTime() + WEEK_MS).toISOString());
-  const factorOk = totp === false || (totp === true && (recovery ? factor.trim().length >= 5 : digits(factor).length === 6));
+  // A recovery code is complete at ten letters or digits, with or without its dash (the engine's `XXXXX-XXXXX`).
+  const factorOk = totp === false || (totp === true && (recovery ? factor.replace(/[\s-]/g, "").length === 10 : digits(factor).length === 6));
   const trusted = session.deviceState === "trusted";
 
   const submit = async (event: FormEvent) => {
@@ -69,6 +75,7 @@ function DeleteDialog({ onClose }: { onClose: () => void }) {
     try {
       const at = await scheduleDeletion(auth.services, session, totp ? (recovery ? { recoveryCode: factor.trim() } : { code: digits(factor) }) : {});
       deletionNotice.set(at);
+      setFactor(""); // a code is used once
       setScheduled(at);
       setStep("scheduled");
     } catch (e) {
@@ -90,7 +97,7 @@ function DeleteDialog({ onClose }: { onClose: () => void }) {
         <p className="t3">You can only delete your account from a trusted device. This browser isn’t one. Use the Orbyn app on your Mac or phone, or approve this browser from a trusted device first.</p>
         <div className="dialog-actions">
           <button type="button" className="ghost" data-autofocus onClick={onClose}>Cancel</button>
-          <button type="button" className="btn" onClick={onClose}>Approve this browser</button>
+          <button type="button" className="btn" onClick={() => { onClose(); auth.openAuth("cant"); }}>Approve this browser</button>
         </div>
       </Modal>
     );
@@ -144,6 +151,20 @@ function DeleteDialog({ onClose }: { onClose: () => void }) {
     );
   }
 
+  // The engine could not say whether two-factor is on, so no form is offered: it might need a code, and the person would be stuck.
+  if (totpError) {
+    return (
+      <Modal key="check-failed" label="Delete your Orbyn account" onClose={onClose}>
+        <b className="card-title">Delete your Orbyn account?</b>
+        <span className="err" role="alert">{totpError}</span>
+        <div className="dialog-actions">
+          <button type="button" className="ghost" data-autofocus onClick={onClose}>Cancel</button>
+          <button type="button" className="btn" onClick={() => { setTotpError(null); setAttempt((n) => n + 1); }}>Try again</button>
+        </div>
+      </Modal>
+    );
+  }
+
   return (
     <Modal label="Delete your Orbyn account" onClose={busy ? () => undefined : onClose}>
       <form onSubmit={(e) => void submit(e)} aria-label="Delete your Orbyn account" className="delete-form">
@@ -153,7 +174,7 @@ function DeleteDialog({ onClose }: { onClose: () => void }) {
         </p>
         <div><PlannerScope /></div>
         <p className="t3">
-          After {day}, it is gone from Orbyn’s servers and from every device the next time it opens. This can’t be undone.{" "}
+          After {day}, it is gone from Orbyn’s servers and from every device the next time it opens. Orbyn keeps a record that the account was deleted and the day, with no email and no content. This can’t be undone.{" "}
           <button type="button" className="link-btn link" onClick={() => { onClose(); document.getElementById("export-planner")?.click(); }}>Export your data first</button>
         </p>
         {totp === true && (
