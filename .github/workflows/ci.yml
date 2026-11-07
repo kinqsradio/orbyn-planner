@@ -146,11 +146,19 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - if: env.RUN == 'true'
         run: npm ci
-      # The wire types must match orbyn-engine's main branch.
+      # The wire types must match the engine this planner actually runs against: the pinned commit of the wasm manifest, the same one the
+      # wasm and end-to-end jobs use. They change only with a deliberate pin bump, never because engine main moved.
+      - id: pin
+        if: env.RUN == 'true'
+        run: |
+          engine=$(node -p "require('./src/generated/wasm/manifest.json').engine")
+          [[ "$engine" =~ ^[0-9a-f]{40}$ ]] || { echo "manifest.json engine is not a commit: $engine"; exit 1; }
+          echo "engine=$engine" >> "$GITHUB_OUTPUT"
       - if: env.RUN == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: orbyn-dev/orbyn-engine
+          ref: ${{ steps.pin.outputs.engine }}
           path: engine
           persist-credentials: false
       - if: env.RUN == 'true'
