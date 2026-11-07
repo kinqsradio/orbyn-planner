@@ -330,7 +330,7 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
           </>
         )}
       </div>
-      <div className="srow" style={{ opacity: "var(--op-planned)" }}>
+      <div className="srow">
         <div className="lab2">
           <b className="pv-choice"><span className="radio" role="radio" aria-checked="false" aria-disabled="true" aria-label="Advanced protection" tabIndex={-1} />Advanced protection</b>
           <small className="planned-text">Advanced is <Planned />. When it ships: switching from Standard deletes Orbyn’s copy of your keys at once; server backups made before the switch may keep a copy until the keys are rotated, which is Planned. An account that starts on Advanced never had one.</small>

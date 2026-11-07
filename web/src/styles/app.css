@@ -578,7 +578,7 @@ button.pillx { border: 0; }
 }
 
 /* A passkey button the designs draw but that does nothing yet: dimmed, with the Planned label. */
-.passkey-planned { opacity: var(--op-planned); display: inline-flex; gap: var(--sp-6); align-items: center; justify-content: center; flex-wrap: wrap; height: auto; min-height: var(--sp-32); cursor: default; }
+.passkey-planned { display: inline-flex; gap: var(--sp-6); align-items: center; justify-content: center; flex-wrap: wrap; height: auto; min-height: var(--sp-32); cursor: not-allowed; }
 
 .pv-choice { display: inline-flex; align-items: center; gap: var(--sp-8); font-weight: var(--fw-medium); }
 .planned-note { color: var(--planned-text); font-size: var(--fs-12); font-weight: var(--fw-regular); }

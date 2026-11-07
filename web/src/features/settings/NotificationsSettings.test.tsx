@@ -85,7 +85,7 @@ describe("Settings · Notifications", () => {
     }
     expect(card.querySelectorAll(".st.planned")).toHaveLength(3);
     for (const label of ["Server push and email reminders", "When someone changes a shared list", "Daily summary email"]) {
-      expect((row(label) as HTMLElement).style.opacity).toBe("var(--op-planned)"); // dimmed, from a token
+      expect((row(label) as HTMLElement).style.opacity).toBe(""); // Planned rows are not faded
       expect(row(label).querySelector(".planned-note")).not.toBeNull(); // 12px regular, in the one Planned colour
     }
     expect(card.querySelectorAll('[role="switch"]')).toHaveLength(1); // the one real switch

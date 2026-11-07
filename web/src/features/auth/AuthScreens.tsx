@@ -152,13 +152,13 @@ function CheckEmail({ pending, onBack, onDone }: { pending: PendingSignUp; onBac
       )}
       <BusyButton type="submit" className="btn lg" busy={busy} disabled={!ready} idle="Verify" working="Checking…" />
       {limited ? (
-        <span className="t4 small">Send a new code · not available right now</span>
+        <span className="t3 small">Send a new code · not available right now</span>
       ) : wait > 0 ? (
         <span className="t3 small">Send a new code in {seconds}</span>
       ) : (
         <button type="button" className="ghost" onClick={() => void resend()}>Resend the code</button>
       )}
-      <span className="t4 small">
+      <span className="t3 small">
         Wrong address? <button type="button" className="link-btn link" onClick={onBack}>Change it</button>
       </span>
     </form>
@@ -237,7 +237,7 @@ function SignUp({ go }: { go: (s: AuthScreen) => void }) {
         <label htmlFor="su-password">Password</label>
         <input id="su-password" className="field" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
       </div>
-      <p className="t4 small">Your password never leaves this device. Orbyn checks it without ever seeing it. We email a code to confirm your address.</p>
+      <p className="t3 small">Your password never leaves this device. Orbyn checks it without ever seeing it. We email a code to confirm your address.</p>
       <CryptoProblem />
       {error && <p className="err" role="alert">{error}</p>}
       <PasskeyButton label="Continue with a passkey" />
@@ -412,7 +412,7 @@ function CantSignIn({ go }: { go: (s: AuthScreen) => void }) {
       <span className="t3" style={{ fontSize: "var(--fs-12-5)" }}>You need your password to sign in today. Recovering without it is Planned.</span>
       <ul className="auth-options">
         {options.map((o) => (
-          <li key={o.label} className="nav" style={{ minHeight: "var(--sp-44)", height: "auto", background: "var(--raise)", opacity: o.planned ? "var(--op-planned)" : 1 }}>
+          <li key={o.label} className="nav" style={{ minHeight: "var(--sp-44)", height: "auto", background: "var(--raise)" }}>
             <Icon name={o.icon} small />
             <span>
               {o.label}

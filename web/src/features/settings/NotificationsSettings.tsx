@@ -15,13 +15,13 @@ function Label({ title, note, hint }: { title: string; note?: string; hint?: str
       {note && (
         <>
           <br />
-          <span className="t4 fine">{note}</span>
+          <span className="t3 fine">{note}</span>
         </>
       )}
       {hint && (
         <>
           <br />
-          <span className="t4 fine">{hint}</span>
+          <span className="t3 fine">{hint}</span>
         </>
       )}
     </span>
@@ -29,7 +29,7 @@ function Label({ title, note, hint }: { title: string; note?: string; hint?: str
 }
 
 const PlannedRow = ({ label, last = false }: { label: string; last?: boolean }) => (
-  <div className="kv" style={{ ...SETTING, borderBottom: last ? undefined : SETTING.borderBottom, opacity: "var(--op-planned)" }}>
+  <div className="kv" style={{ ...SETTING, borderBottom: last ? undefined : SETTING.borderBottom }}>
     <span>{label}</span>
     <b><Planned /> <NotAvailable /></b>
   </div>
@@ -100,7 +100,7 @@ export function NotificationsSettings() {
           <Label title="Remind me about tasks" note={note} hint={permission === "unsupported" ? "Try another browser to get reminders." : undefined} />
           <b className="ctl">
             {asking ? (
-              <span className="t4"><span className="spin" aria-hidden="true" /> Waiting for your browser</span>
+              <span className="t3"><span className="spin" aria-hidden="true" /> Waiting for your browser</span>
             ) : permission === "granted" ? (
               <span className="st ok"><span className="sd" />Allowed in this browser</span>
             ) : permission === "default" ? (
@@ -116,7 +116,7 @@ export function NotificationsSettings() {
         <PlannedRow label="Daily summary email" last />
       </div>
 
-      <p className="t4 fine">Reminders only work while Orbyn Planner is open in a browser tab.</p>
+      <p className="t3 fine">Reminders only work while Orbyn Planner is open in a browser tab.</p>
 
       <div className="bh"><b>Quiet hours</b><span></span></div>
       <div className="card" style={{ gap: 0, padding: "0 var(--sp-14)" }}>
