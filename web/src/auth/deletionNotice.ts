@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { MONTHS, WEEKDAYS } from "../lib/dates";
 
 /**
  * What this page knows about the account's scheduled deletion, shared by the banner, Settings and the sign-in screens: when it will
@@ -34,9 +35,48 @@ export function useDeletionScheduledAt(): string | null | undefined {
   return useSyncExternalStore(deletionNotice.subscribe, deletionNotice.get);
 }
 
+/** "Saturday 14 November": the day, as the designs word it. */
+export function deletionDay(rfc3339: string): string {
+  const at = new Date(rfc3339);
+  if (Number.isNaN(at.getTime())) return rfc3339;
+  return `${WEEKDAYS[at.getDay()]} ${at.getDate()} ${MONTHS[at.getMonth()]}`;
+}
+
+/** "in 6 days": whole days left, from now. */
+export function deletionIn(rfc3339: string, now: Date): string {
+  const days = Math.floor((new Date(rfc3339).getTime() - now.getTime()) / 86_400_000);
+  if (days < 1) return "today";
+  return `in ${days} ${days === 1 ? "day" : "days"}`;
+}
+
+/** The person chose "Sign in again" in the delete dialog; once they have signed in, the dialog comes back. */
+let reopenAfterSignIn = false;
+let reopened = 0;
+export const deleteIntent = {
+  want: () => void (reopenAfterSignIn = true),
+  /** Called when a sign-in worked: if the person came from the delete dialog, whoever shows it is told to open it again. */
+  signedIn: () => {
+    if (!reopenAfterSignIn) return;
+    reopenAfterSignIn = false;
+    reopened += 1;
+    emit();
+  },
+  /** How many times the dialog was asked to come back. */
+  count: () => reopened,
+  subscribe: (listener: () => void) => deletionNotice.subscribe(listener),
+};
+
 /** "November 14, 2026 at 12:00 PM" in the person's own locale and time zone. */
 export function describeDeletionTime(rfc3339: string): string {
   const at = new Date(rfc3339);
   if (Number.isNaN(at.getTime())) return rfc3339;
   return at.toLocaleString(undefined, { dateStyle: "long", timeStyle: "short" });
+}
+
+/** What a paused control says on hover or focus while an account is scheduled for deletion. */
+export const PAUSED_HINT = "Cancel deletion to change this";
+
+/** True while a deletion is scheduled: adding or removing devices, changing protection or two-factor, and signing out everywhere are paused. */
+export function useDeletionPaused(): boolean {
+  return Boolean(useDeletionScheduledAt());
 }

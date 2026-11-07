@@ -112,6 +112,8 @@ export interface AuthApiOptions {
   token: () => string | null;
   /** Called when a signed-in call is answered 401: the session is over. */
   onUnauthorized: () => void;
+  /** Called when a call is refused because the account is scheduled for deletion: the screens then show it as paused. */
+  onDeletionScheduled?: () => void;
 }
 
 /** Typed calls to the engine's account, session and device routes. */
@@ -152,6 +154,7 @@ export function createAuthApi(options: AuthApiOptions) {
     // signature, and a sign-in that is too old for the request.
     const aboutTheRequest = keepSession && (code === "second_factor_failed" || code === "device_proof_required" || code === "reauthentication_required");
     if (authed && response.status === 401 && !aboutTheRequest) options.onUnauthorized();
+    if (authed && code === "deletion_scheduled") options.onDeletionScheduled?.();
     const retry = Number(response.headers.get("retry-after"));
     throw new ApiFailure(code, response.status, plainMessage(code), error.message ?? "", error, Number.isFinite(retry) && retry > 0 ? retry : null);
   }

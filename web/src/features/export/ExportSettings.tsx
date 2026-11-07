@@ -40,7 +40,7 @@ export function ExportSettings({ children }: { children?: ReactNode }) {
       <div className="card" style={{ gap: 0, padding: "0 var(--sp-14)" }}>
         <div className="kv" style={{ height: "var(--sp-44)" }}>
           <span>Export your planner</span>
-          <button type="button" className="ghost" onClick={() => { setMessage(null); setOpen(true); }}>Export…</button>
+          <button type="button" id="export-planner" className="ghost" onClick={() => { setMessage(null); setOpen(true); }}>Export…</button>
         </div>
         {children}
       </div>

@@ -2,11 +2,15 @@ import { useEffect, useState } from "react";
 import { ApiFailure } from "../../api/auth";
 import { cancelDeletion } from "../../auth/flows";
 import { useAuth } from "../../auth/AuthProvider";
-import { deletionNotice, describeDeletionTime, useDeletionScheduledAt } from "../../auth/deletionNotice";
+import type { AuthServices } from "../../auth/services";
+import { deletionDay, deletionIn, deletionNotice, useDeletionScheduledAt } from "../../auth/deletionNotice";
+import { useNow } from "../../app/clock";
+import { useUi } from "../../app/ui";
+import { BusyButton } from "../../components/BusyButton";
 import { describeError } from "./AuthScreens";
 
 /** Keeps `deletionNotice` current from the engine while a device is signed in (trusted or still waiting): every device sees the date. */
-function useDeletionPoll() {
+export function useDeletionPoll() {
   const auth = useAuth();
   const active = auth?.status === "signedIn" || auth?.status === "pending";
   const services = auth?.services;
@@ -37,6 +41,7 @@ function useDeletionPoll() {
  */
 export function useCancelDeletion() {
   const auth = useAuth();
+  const ui = useUi();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [again, setAgain] = useState(false);
@@ -48,6 +53,7 @@ export function useCancelDeletion() {
     try {
       await cancelDeletion(auth.services, auth.session);
       deletionNotice.set(null);
+      ui.showToast("Deletion cancelled. Your account stays as it is.");
     } catch (e) {
       setError(describeError(e));
       setAgain(e instanceof ApiFailure && e.code === "reauthentication_required");
@@ -62,20 +68,42 @@ export function useCancelDeletion() {
   return { cancel, busy, error, again, signInAgain };
 }
 
-/** On every signed-in device, and on one waiting for approval: the deletion is scheduled, when, and a way to cancel it. */
-export function DeletionBanner() {
+/** Asks the engine for the scheduled date now (a refusal said it is scheduled), instead of waiting for the next check. */
+export async function refreshDeletionNotice(services: AuthServices): Promise<void> {
+  try {
+    deletionNotice.set((await services.api.currentDevice()).deletion_scheduled_at ?? null);
+  } catch {
+    // The next check finds out.
+  }
+}
+
+/** Keeps the date current while a device is signed in or waiting. Renders nothing. */
+export function DeletionWatcher() {
   useDeletionPoll();
+  return null;
+}
+
+/**
+ * On every screen of every app while a deletion is scheduled: amber, because keeping the account needs the person to act. It counts
+ * the days, offers Cancel deletion, and can't be dismissed.
+ */
+export function DeletionBanner() {
   const at = useDeletionScheduledAt();
+  const now = useNow();
   const { cancel, busy, error, again, signInAgain } = useCancelDeletion();
   if (!at) return null;
+  const day = deletionDay(at);
+  const left = deletionIn(at, now);
   return (
-    <aside className="card" role="status" aria-label="Account deletion" style={{ position: "fixed", top: 12, left: "50%", transform: "translateX(-50%)", zIndex: 60, maxWidth: 520, width: "calc(100% - 24px)", gap: 8 }}>
-      <b style={{ fontWeight: 500 }}>Your account will be deleted on {describeDeletionTime(at)}</b>
-      <span className="t3 small">Everything in it goes then. Until then it works as usual. If this wasn’t you, cancel now.</span>
+    <aside className="banner warn deletion-banner" role="status" aria-label="Account deletion">
+      <span className="dot amber" aria-hidden="true" />
+      <b className="banner-title">Deletion scheduled</b>
+      <span className="banner-text long">Your Orbyn account and everything in it will be deleted on {day}, {left}.</span>
+      <span className="banner-text short">Your account will be deleted on {day}, {left}.</span>
       {error && <span className="err" role="alert">{error}</span>}
-      <div className="dialog-actions">
-        {again && <button type="button" className="ghost" onClick={() => void signInAgain()}>Sign in again</button>}
-        <button type="button" className="btn" disabled={busy} onClick={() => void cancel()}>{busy ? "Cancelling…" : "Cancel deletion"}</button>
+      <div className="end">
+        {again && <button type="button" className="ghost sm" onClick={() => void signInAgain()}>Sign in again</button>}
+        <BusyButton className="btn sm" busy={busy} idle="Cancel deletion" working="Cancelling…" onClick={() => void cancel()} />
       </div>
     </aside>
   );

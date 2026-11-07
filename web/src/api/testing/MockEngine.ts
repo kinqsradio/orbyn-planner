@@ -299,6 +299,11 @@ export function createMockEngine(now: () => number = () => Date.now()) {
       for (const [t, s] of sessions) if (s.deviceId === device.id && authorization?.endsWith(t)) sessions.delete(t);
       return json(204, null);
     }
+    // While a deletion is scheduled the engine refuses changes to devices, protection and two-factor.
+    const changes =
+      (method === "POST" && (path === "/v1/devices/approvals" || path === "/v1/keychain/protection" || path.startsWith("/v1/accounts/totp"))) ||
+      (method === "DELETE" && path.startsWith("/v1/devices/") && path !== "/v1/devices/current");
+    if (changes && account.deletion) return fail(409, "deletion_scheduled", "Your account is scheduled for deletion.");
     if (path.startsWith("/v1/keychain/protection")) {
       if (device.state !== "trusted") return fail(403, "device_not_trusted", "This device isn't trusted.");
       const chain = (account.protection ??= []);

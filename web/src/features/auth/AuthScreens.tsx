@@ -6,7 +6,7 @@ import { appsAvailable, downloadUrl } from "../../api/site";
 import { Icon } from "../../components/Icon";
 import type { StoredSession } from "../../api/keyStore";
 import { useUi } from "../../app/ui";
-import { deletionNotice } from "../../auth/deletionNotice";
+import { deleteIntent, deletionNotice } from "../../auth/deletionNotice";
 import { cancelDeletion, KeysForAnotherAccount, SecondFactorNeeded, signIn, signUp, type PendingSignUp } from "../../auth/flows";
 import { cryptoLoad } from "../../api/realCrypto";
 import { CryptoProblem, MODULE_LOAD_FAILED } from "./CryptoProblem";
@@ -273,6 +273,7 @@ function SignIn({ go }: { go: (s: AuthScreen) => void }) {
 
   /** The sign-in worked: cancel the deletion if the person asked, then leave the sign-in screens. */
   const signedIn = async (session: StoredSession) => {
+    deleteIntent.signedIn(); // if the person came here from the delete dialog, it opens again
     deletionNotice.setIntent(false);
     if (cancelIntent) {
       try {

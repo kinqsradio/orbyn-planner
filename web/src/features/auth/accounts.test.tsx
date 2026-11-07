@@ -1575,79 +1575,118 @@ describe("deleting the account", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Privacy" }));
     return { auth, keys };
   }
-
   const openDialog = async () => {
-    await userEvent.click(await screen.findByRole("button", { name: "Delete…" }));
-    return screen.getByRole("dialog", { name: "Delete your account" });
-  };
-  const fill = async (dialog: HTMLElement, password = SAM.password) => {
-    await userEvent.type(within(dialog).getByLabelText(/Type your email/), "sam@example.com"); // any case: the address is compared without it
-    await userEvent.type(within(dialog).getByLabelText(/Your password/), password);
+    await userEvent.click(await screen.findByRole("button", { name: "Delete account…" }));
+    return screen.getByRole("dialog", { name: "Delete your Orbyn account" });
   };
 
-  it("asks for the typed email and the password, schedules the deletion, keeps working, and cancels from the banner", async () => {
+  it("the row sits under Export; the dialog has Cancel focused, names the date and what Planner holds, and Delete works with no code when two-factor is off", async () => {
     const { auth } = await signedIn();
+    expect(screen.getByText("Deletes your Orbyn account and its data in every Orbyn app, after 7 days.")).toBeInTheDocument();
     const dialog = await openDialog();
-    const confirm = within(dialog).getByRole("button", { name: "Delete account" });
-    expect(confirm).toBeDisabled();
-    await userEvent.type(within(dialog).getByLabelText(/Type your email/), "someone@else.example");
-    await userEvent.type(within(dialog).getByLabelText(/Your password/), SAM.password);
-    expect(confirm).toBeDisabled(); // the wrong email
-    await userEvent.clear(within(dialog).getByLabelText(/Type your email/));
-    await userEvent.type(within(dialog).getByLabelText(/Type your email/), "sam@example.com");
-    expect(confirm).toBeEnabled();
-    expect(within(dialog).queryByLabelText(/Code from your authenticator app/)).toBeNull(); // two-factor is off
-
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    expect(dialog).toHaveTextContent("7 days from now. Until then everything keeps working, and you can cancel from Settings or from the email we send.");
+    expect(dialog).toHaveTextContent("Orbyn Planner");
+    expect(dialog).toHaveTextContent("it is gone from Orbyn’s servers and from every device the next time it opens. This can’t be undone.");
+    expect(within(dialog).queryByLabelText(/Type your email|Your password/)).toBeNull(); // no typed email, no password
+    expect(within(dialog).queryByLabelText("Two-factor code")).toBeNull(); // two-factor is off
+    const confirm = await within(dialog).findByRole("button", { name: "Delete account" });
+    await waitFor(() => expect(confirm).toBeEnabled());
     await userEvent.click(confirm);
-    // The sign-in step and the schedule, in that order; nothing is deleted, and this device stays signed in.
-    expect(await screen.findByRole("dialog", { name: "Deletion scheduled" })).toHaveTextContent("Your account will be deleted on");
-    const paths = engine.calls.filter((c) => c.method === "POST").map((c) => c.path);
-    expect(paths.indexOf("/v1/sessions/login/finish")).toBeLessThan(paths.indexOf("/v1/accounts/delete"));
+    // Nothing is deleted: the scheduled card, then the banner and the row say when, and cancel it.
+    const done = await screen.findByRole("dialog", { name: "Deletion scheduled" });
+    expect(done).toHaveTextContent("Everything keeps working until then.");
+    expect(done).toHaveTextContent("We emailed sam@example.com a link to cancel. It works without signing in.");
+    expect(done).toHaveTextContent("Until then you can’t add or remove devices, change protection, change two-factor or sign out everywhere.");
     expect(engine.accounts.get("sam@example.com")!.deletion).toBeDefined();
     expect(auth.tokens.getSession()).not.toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: "Done" }));
+    await userEvent.click(within(done).getByRole("button", { name: "Done" }));
 
-    // The banner and the Settings row say when, and cancel it.
     const banner = await screen.findByRole("status", { name: "Account deletion" });
-    expect(banner).toHaveTextContent("Your account will be deleted on");
+    expect(banner).toHaveTextContent("Deletion scheduled");
+    expect(banner).toHaveTextContent("Your Orbyn account and everything in it will be deleted on");
     expect(screen.getByText(/Deletion scheduled for/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Delete…" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete account…" })).toBeNull();
     await userEvent.click(within(banner).getByRole("button", { name: "Cancel deletion" }));
     await waitFor(() => expect(screen.queryByRole("status", { name: "Account deletion" })).toBeNull());
     expect(engine.accounts.get("sam@example.com")!.deletion).toBeUndefined();
-    expect(await screen.findByRole("button", { name: "Delete…" })).toBeInTheDocument();
+    expect(await screen.findByText("Deletion cancelled. Your account stays as it is.")).toBeInTheDocument(); // the toast
+    expect(await screen.findByRole("button", { name: "Delete account…" })).toBeInTheDocument();
   });
 
-  it("a wrong password says so and schedules nothing", async () => {
-    await signedIn();
-    const dialog = await openDialog();
-    await fill(dialog, "not the password");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Delete account" }));
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent("That email and password don’t match.");
-    expect(engine.accounts.get("sam@example.com")!.deletion).toBeUndefined();
-  });
-
-  it("with two-factor on it asks for a code too, says when it didn’t work, and takes a recovery code instead", async () => {
+  it("with two-factor on the second factor is the confirmation: Delete waits for a full code, a wrong one shows under the field, a recovery code swaps in", async () => {
     const { auth } = await signedIn();
     const session = auth.tokens.getSession()!;
     await enrolTotp(auth, session);
     const { recovery_codes } = await confirmTotp(auth, session, MOCK_TOTP_CODE);
     const dialog = await openDialog();
-    await fill(dialog);
+    const field = await within(dialog).findByLabelText("Two-factor code");
+    expect(dialog).toHaveTextContent("From your authenticator app.");
     const confirm = within(dialog).getByRole("button", { name: "Delete account" });
-    expect(await within(dialog).findByLabelText("Code from your authenticator app")).toBeInTheDocument();
-    expect(confirm).toBeDisabled(); // no code yet
-    await userEvent.type(within(dialog).getByLabelText("Code from your authenticator app"), "000000");
+    expect(confirm).toBeDisabled();
+    await userEvent.type(field, "00000");
+    expect(confirm).toBeDisabled(); // not a full code yet
+    await userEvent.type(field, "0");
+    expect(confirm).toBeEnabled();
     await userEvent.click(confirm);
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("That code didn’t work.");
-    expect(engine.accounts.get("sam@example.com")!.deletion).toBeUndefined(); // nothing was scheduled, and this device is still signed in
-    expect(auth.tokens.getSession()).not.toBeNull();
+    expect(engine.accounts.get("sam@example.com")!.deletion).toBeUndefined(); // the dialog stays open and nothing was scheduled
 
     await userEvent.click(within(dialog).getByRole("button", { name: "Use a recovery code" }));
+    expect(dialog).toHaveTextContent("Each recovery code works once.");
     await userEvent.type(within(dialog).getByLabelText("Recovery code"), recovery_codes[0]!);
     await userEvent.click(within(dialog).getByRole("button", { name: "Delete account" }));
     expect(await screen.findByRole("dialog", { name: "Deletion scheduled" })).toBeInTheDocument();
     expect(engine.accounts.get("sam@example.com")!.deletion).toBeDefined();
+  });
+
+  it("a sign-in older than ten minutes says so, and Sign in again goes to sign-in and comes back to the dialog", async () => {
+    await signedIn();
+    engine.refuseNext("/v1/accounts/delete", 401, "reauthentication_required", "Sign in again to do this.", 1); // the sign-in is older than ten minutes
+    const dialog = await openDialog();
+    const confirm = await within(dialog).findByRole("button", { name: "Delete account" });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    await userEvent.click(confirm);
+    expect(await screen.findByText("For your safety, deleting an account needs a sign-in from the last 10 minutes. Sign in again and you’ll come straight back here.")).toBeInTheDocument();
+    const stale = screen.getByRole("dialog", { name: "Delete your Orbyn account" });
+    expect(within(stale).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    expect(engine.accounts.get("sam@example.com")!.deletion).toBeUndefined();
+    await userEvent.click(within(stale).getByRole("button", { name: "Sign in again" }));
+    await fillSignIn();
+    expect(await screen.findByRole("dialog", { name: "Delete your Orbyn account" })).toBeInTheDocument(); // back, with the dialog open
+  });
+});
+
+describe("while a deletion is scheduled", () => {
+  async function scheduledSignedIn() {
+    const auth = services();
+    const view = await mount(auth, "/settings");
+    await fillSignUp();
+    await screen.findByRole("navigation", { name: "Primary" });
+    await scheduleDeletion(auth, auth.tokens.getSession()!);
+    return { auth, view };
+  }
+
+  it("devices, protection and two-factor are paused with a hint, and the banner stays above", async () => {
+    await scheduledSignedIn();
+    expect(await screen.findByRole("status", { name: "Account deletion" })).toBeInTheDocument();
+    await openAccount();
+    expect(await screen.findByText("Adding devices is paused")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add a device" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Add a device" })).toHaveAttribute("title", "Cancel deletion to change this");
+    expect(screen.getByRole("button", { name: "Turn on…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeEnabled(); // signing out on this device still works
+  });
+
+  it("a change the engine refuses with deletion_scheduled shows the paused state", async () => {
+    const auth = services();
+    await mount(auth, "/settings");
+    await fillSignUp();
+    await screen.findByRole("navigation", { name: "Primary" });
+    // Another device scheduled it; this one has not looked yet.
+    engine.accounts.get("sam@example.com")!.deletion = { at: nowMs + 7 * 86_400_000, token: "t" };
+    await expect(auth.api.setProtection({ level: "standard", seq: 9, prev: "x", signed_at: 1, device_signature: "s" } as never)).rejects.toMatchObject({ code: "deletion_scheduled" });
+    expect(await screen.findByRole("status", { name: "Account deletion" })).toBeInTheDocument();
   });
 });
 
@@ -1659,32 +1698,6 @@ describe("cancelling a scheduled deletion", () => {
     await scheduleDeletion(first, session);
     return { first, session };
   }
-
-  it("the email link's page does nothing when it opens, and sends the token only when the button is pressed, once", async () => {
-    await scheduled();
-    const token = engine.mail[0]!.token;
-    await mount(services(), `/cancel-deletion#${token}`);
-    expect(await screen.findByRole("heading", { name: "Cancel your account’s deletion?" })).toBeInTheDocument();
-    expect(window.location.hash).toBe(""); // the token is off the address
-    expect(engine.calls.some((c) => c.path.endsWith("/cancel-by-mail"))).toBe(false); // opening it acted on nothing
-    expect(engine.accounts.get("sam@example.com")!.deletion).toBeDefined();
-
-    await userEvent.click(screen.getByRole("button", { name: "Cancel deletion" }));
-    expect(await screen.findByRole("heading", { name: "Deletion cancelled" })).toBeInTheDocument();
-    expect(engine.accounts.get("sam@example.com")!.deletion).toBeUndefined();
-    expect(engine.calls.filter((c) => c.path.endsWith("/cancel-by-mail"))).toHaveLength(1);
-  });
-
-  it("an old or wrong link says it isn’t valid, and a link with no token says it is incomplete", async () => {
-    await scheduled();
-    const view = await mount(services(), "/cancel-deletion#not-the-token");
-    await userEvent.click(await screen.findByRole("button", { name: "Cancel deletion" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("This cancel link isn’t valid any more.");
-    expect(engine.accounts.get("sam@example.com")!.deletion).toBeDefined();
-    view.unmount();
-    await mount(services(), "/cancel-deletion");
-    expect(await screen.findByRole("heading", { name: "This link is incomplete" })).toBeInTheDocument();
-  });
 
   it("a new device that chooses ‘cancel deletion’ at sign-in cancels it once signed in", async () => {
     await scheduled();

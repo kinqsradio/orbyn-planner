@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiFailure } from "../../api/auth";
 import { useAuth } from "../../auth/AuthProvider";
+import { PAUSED_HINT, useDeletionPaused } from "../../auth/deletionNotice";
 import { pendingChange, readConfirmed, readSkipped, recordReport, writeSeen, writeSkipped, type ConfirmedSetting } from "../../auth/protectionNotice";
 import { confirmProtection, readProtection, type ProtectionReport } from "../../auth/flows";
 import type { ProtectionLevel } from "../../generated/ProtectionLevel";
@@ -166,6 +167,7 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
   const [error, setError] = useState<string | null>(null);
   const [details, setDetails] = useState(false);
   const [choosing, setChoosing] = useState(false);
+  const paused = useDeletionPaused();
   const [confirmOpen, setConfirmOpen] = useState(true);
   /** Who changed protection while the confirm dialog was open: named in its blue line. */
   const [changedNow, setChangedNow] = useState<string | null>(null);
@@ -222,7 +224,7 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
   const level = levelName(report?.level);
   const now = new Date();
   // With no setting yet, it opens when the person chooses. 
-  const askToConfirm = report !== null && (choosing || autoAsk);
+  const askToConfirm = report !== null && !paused && (choosing || autoAsk);
   const problemKind = kind !== null && kind in REASON_LINES ? (kind as keyof typeof REASON_LINES) : null;
   const confirmedOn = report?.level && confirmed ? `, last confirmed ${day(confirmed.at)}` : ", last confirmed on this browser";
 
@@ -290,7 +292,10 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
               <span className="st neutral"><span className="sd" />Not set</span>
             </div>
             <span className="t2 pv-text">No device has set a protection level for this account yet. Until one does, your data uses Standard protection.</span>
-            <div className="pv-line"><button type="button" className="btn sm" onClick={() => setChoosing(true)}>Choose</button></div>
+            <div className="pv-line">
+              <button type="button" className="btn sm" disabled={paused} title={paused ? PAUSED_HINT : undefined} onClick={() => setChoosing(true)}>Choose</button>
+              {paused && <span className="t3 small">Paused while your account is scheduled for deletion.</span>}
+            </div>
           </>
         ) : (
           <>

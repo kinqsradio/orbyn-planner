@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useAuth } from "../../auth/AuthProvider";
 import { AuthScreens } from "./AuthScreens";
-import { DeletionBanner } from "./DeletionBanner";
+import { DeletionBanner, DeletionWatcher } from "./DeletionBanner";
 import { KeysNotSaved } from "./KeysNotSaved";
 import { PendingScreen } from "./PendingScreen";
 
@@ -79,6 +79,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   if (auth.status === "pending") {
     return (
       <>
+        <DeletionWatcher />
         <DeletionBanner />
         <PendingScreen />
       </>
@@ -95,7 +96,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
         {children}
       </div>
       {auth.overlay && <AuthScreens start={auth.overlay} />}
-      {auth.status === "signedIn" && <DeletionBanner />}
+      {auth.status === "signedIn" && <DeletionWatcher />}
       {auth.status === "signedIn" && incoming.id && <RepairNotice onApprove={incoming.accept} onDismiss={incoming.dismiss} />}
     </>
   );
