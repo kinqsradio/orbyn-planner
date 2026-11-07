@@ -111,6 +111,16 @@ describe("the protection card", () => {
   });
 });
 
+describe("the Standard card when the signing device is gone", () => {
+  it("reads Last change 3 Nov. with no device name, and never a made-up one", async () => {
+    read.mockResolvedValue(report({ signer: { id: "d2", name: null, thisDevice: false } }));
+    render(<ProtectionSettings />);
+    const text = (await card()).textContent!;
+    expect(text).toContain("Confirmed by your devices. Last change 3 Nov.");
+    expect(text).not.toMatch(/Last change 3 Nov on/);
+  });
+});
+
 describe("the other cards", () => {
   it.each([
     ["invalid_signature", "The latest change has a signature that doesn’t check out. This browser keeps the setting it last confirmed."],

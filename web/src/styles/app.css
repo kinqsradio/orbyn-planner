@@ -583,3 +583,5 @@ button.pillx { border: 0; }
 .pv-choice { display: inline-flex; align-items: center; gap: var(--sp-8); font-weight: var(--fw-medium); }
 .planned-note { color: var(--planned-text); font-size: var(--fs-12); font-weight: var(--fw-regular); }
 .planned-text { color: var(--planned-text); }
+.warn-icon { color: var(--amber-text); display: inline-flex; flex: none; margin-top: var(--sp-1); }
+.export-choices { display: flex; flex-direction: column; gap: var(--sp-8); }
