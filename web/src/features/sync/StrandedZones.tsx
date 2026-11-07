@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useSyncController, useSyncState } from "../../sync/SyncProvider";
 import { useStore } from "../../store/context";
-import { Modal } from "../auth/AccountSettings";
+import { Modal } from "../../components/Modal";
 
 const KIND: Record<string, string> = { list: "list", calendar: "calendar", project: "project" };
 

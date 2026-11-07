@@ -5,6 +5,8 @@ import type { StoredSession } from "../api/keyStore";
 import type { Device } from "../generated/Device";
 import type { DeviceList } from "../generated/DeviceList";
 import type { NewDevice } from "../generated/NewDevice";
+import type { SecondFactorLogin } from "../generated/SecondFactorLogin";
+import type { SecondFactorRequired } from "../generated/SecondFactorRequired";
 import type { SessionCreated } from "../generated/SessionCreated";
 import { deviceName } from "./deviceName";
 import type { AuthServices } from "./services";
@@ -21,6 +23,22 @@ const toStored = (s: SessionCreated, email: string, name: string): StoredSession
 
 function describeDevice(keys: DeviceKeys): NewDevice {
   return { name: deviceName(), platform: "web", signing_key: keys.signingKey(), agreement_key: keys.agreementKey() };
+}
+
+/**
+ * The password was right but the account has two-factor on: the engine issued no session and asked for a code. This holds the
+ * sign-in open (the device's keys stay in memory, nothing is stored) until `complete` gets a code or a recovery code that works,
+ * or `cancel` lets it go. A wrong code throws the engine's `second_factor_failed` and leaves the sign-in open to try again; the
+ * engine closes it after five (then `complete` throws `login_failed` and the keys are released).
+ */
+export class SecondFactorNeeded extends Error {
+  constructor(
+    readonly complete: (factor: { code?: string; recoveryCode?: string }) => Promise<StoredSession>,
+    readonly cancel: () => void,
+  ) {
+    super("Enter the code from your authenticator app to finish signing in.");
+    this.name = "SecondFactorNeeded";
+  }
 }
 
 /** A failure the person can read, from anything these flows throw. */
@@ -169,6 +187,8 @@ export async function signIn(services: AuthServices, input: { email: string; pas
   const crypto = services.crypto();
   let keys: DeviceKeys | null = null;
   let known = null as DeviceKeys | null;
+  /** True while a code step holds this attempt's keys: they are released when it finishes or is cancelled. */
+  let holding = false;
   try {
     const email = emailOrFail(crypto, input.email);
     const password = utf8(input.password);
@@ -205,12 +225,43 @@ export async function signIn(services: AuthServices, input: { email: string; pas
     }
 
     keys = known ?? crypto.deviceKeys.create();
-    const created = await services.api.loginFinish({
-      login_id: started.login_id,
-      credential_finalization: encodeBytes(finalization),
-      device: describeDevice(keys),
-      device_signature: encodeBytes(keys.signLogin(started.login_id)),
-    });
+    let created: SessionCreated;
+    try {
+      created = await services.api.loginFinish({
+        login_id: started.login_id,
+        credential_finalization: encodeBytes(finalization),
+        device: describeDevice(keys),
+        device_signature: encodeBytes(keys.signLogin(started.login_id)),
+      });
+    } catch (e) {
+      if (!(e instanceof ApiFailure && e.code === "second_factor_required")) throw e;
+      // Two-factor is on: no session yet. The keys stay in memory for the code step, and the finally below must not release them.
+      const held = keys;
+      holding = true;
+      const loginId = (e.body as Partial<SecondFactorRequired> | null)?.login_id ?? started.login_id;
+      const wasKnown = known !== null;
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        held.free();
+      };
+      throw new SecondFactorNeeded(async (factor) => {
+        const body: SecondFactorLogin = { login_id: loginId, code: factor.code ?? null, recovery_code: factor.recoveryCode ?? null };
+        try {
+          const done = await services.api.loginSecondFactor(body);
+          await bindKeys(services, held, wasKnown, done, email, foreign);
+          const session = toStored(done, email, input.name ?? "");
+          await services.tokens.set(session);
+          release();
+          return session;
+        } catch (err) {
+          // A wrong code leaves the sign-in open for another try; anything else ends it.
+          if (!(err instanceof ApiFailure && err.code === "second_factor_failed")) release();
+          throw err;
+        }
+      }, release);
+    }
     await bindKeys(services, keys, known !== null, created, email, foreign);
     const session = toStored(created, email, input.name ?? "");
     await services.tokens.set(session);
@@ -219,7 +270,7 @@ export async function signIn(services: AuthServices, input: { email: string; pas
     return asFailure(error);
   } finally {
     // Whichever keys this attempt held (the saved ones opened, or new ones), they go back to the module.
-    (keys ?? known)?.free();
+    if (!holding) (keys ?? known)?.free();
   }
 }
 
@@ -315,4 +366,57 @@ export async function verifiedDevices(services: AuthServices, session: StoredSes
   } catch {
     return null;
   }
+}
+
+/** The time each device last signed for each action, in memory: the engine takes a signature only if it is strictly later than the last one it accepted. */
+const lastSigned = new Map<string, number>();
+
+/**
+ * The proof the engine wants to change two-factor: this device's own signature, made with its keys opened for the moment. It is
+ * signed with the current second, or one past the last time this page signed for the action if that is later (a retry within the
+ * same second, or a clock that is behind); `again` forces a later time than the last attempt.
+ */
+async function manageProof(services: AuthServices, session: StoredSession, action: "enrol" | "confirm" | "disable", code = ""): Promise<{ device_signature: string; signed_at: bigint }> {
+  const saved = await services.keys.loadKeys();
+  if (!saved) throw new ApiFailure("device_not_trusted", 403, "This device has no keys, so it can’t change two-factor.");
+  const wrap = await services.wrapSecret();
+  let keys: DeviceKeys;
+  try {
+    keys = services.crypto().deviceKeys.import(saved, wrap);
+  } finally {
+    wrap.fill(0);
+  }
+  try {
+    const slot = `${session.deviceId}:${action}`;
+    const signedAt = Math.max(Math.floor(services.now() / 1000), (lastSigned.get(slot) ?? 0) + 1);
+    lastSigned.set(slot, signedAt);
+    return { device_signature: encodeBytes(keys.signTotpManage(session.accountId, session.deviceId, action, code, signedAt)), signed_at: BigInt(signedAt) };
+  } finally {
+    keys.free();
+  }
+}
+
+/** A `device_proof_required` is answered once by signing again with a later time (the last one may have been used already), not as a failure. */
+async function withProof<T>(send: () => Promise<T>): Promise<T> {
+  try {
+    return await send();
+  } catch (e) {
+    if (e instanceof ApiFailure && e.code === "device_proof_required") return send();
+    throw e;
+  }
+}
+
+/** Starts two-factor: a new secret, shown once, pending until a code from it is confirmed. */
+export async function enrolTotp(services: AuthServices, session: StoredSession) {
+  return withProof(async () => services.api.totpEnrol(await manageProof(services, session, "enrol")));
+}
+
+/** Turns two-factor on with a current code; answers the recovery codes, shown once. */
+export async function confirmTotp(services: AuthServices, session: StoredSession, code: string) {
+  return withProof(async () => services.api.totpConfirm({ code, ...(await manageProof(services, session, "confirm", code)) }));
+}
+
+/** Turns two-factor off: this device's signature alone. */
+export async function disableTotp(services: AuthServices, session: StoredSession): Promise<void> {
+  await withProof(async () => services.api.totpDisable(await manageProof(services, session, "disable")));
 }

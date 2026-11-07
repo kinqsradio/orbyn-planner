@@ -1,13 +1,13 @@
 import { useSyncState } from "../../sync/SyncProvider";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { ApiFailure } from "../../api/auth";
 import { authCryptoAvailable, SIGN_IN_UNAVAILABLE } from "../../api/authCrypto";
 import { cryptoLoad } from "../../api/realCrypto";
 import { CryptoProblem } from "./CryptoProblem";
 import { SyncSettings } from "../settings/SyncSettings";
 import { Icon } from "../../components/Icon";
-import { Portal } from "../../components/Portal";
-import { useDialog } from "../../components/useDialog";
+import { Modal } from "../../components/Modal";
+import { TwoFactorRow } from "./TwoFactor";
 import type { Device } from "../../generated/Device";
 import { useAuth } from "../../auth/AuthProvider";
 import { removeDevice, verifiedDevices } from "../../auth/flows";
@@ -24,19 +24,6 @@ function when(iso: string): string {
 /** "418207" as "418 207", the way it is read out. */
 export const groupCode = (code: string) => (code.length === 6 ? `${code.slice(0, 3)} ${code.slice(3)}` : code);
 
-export function Modal({ label, onClose, children }: { label: string; onClose: () => void; children: React.ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useDialog(ref, onClose);
-  return (
-    <Portal>
-      <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-        <div ref={ref} className="authcard" style={{ width: 440 }} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1}>
-          {children}
-        </div>
-      </div>
-    </Portal>
-  );
-}
 
 /** The digits and the device's key fingerprint, side by side with the choice: nothing is approved until "They match". */
 function ApproveDialog({ device, onClose, onDone }: { device: Device; onClose: () => void; onDone: () => void }) {
@@ -249,6 +236,7 @@ function SignedInAccount() {
       <div className="card" style={{ gap: 0, padding: "0 14px" }}>
         <div className="kv" style={{ height: 44, borderBottom: "1px solid var(--line)" }}><span>Name</span><b>{session?.name || "Not set"}</b></div>
         <div className="kv" style={{ height: 44 }}><span>Email</span><b>{session?.email}</b></div>
+        <TwoFactorRow />
       </div>
 
       <div className="bh"><b>Devices</b><span>{devices?.length ?? ""}</span></div>

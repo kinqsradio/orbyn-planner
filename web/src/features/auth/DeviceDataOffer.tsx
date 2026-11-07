@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { deviceDataAnswer, hasPlannerData, rememberDeviceDataAnswer } from "../../store/deviceData";
 import { closeDevicePlanner, plannerFor, removeDevicePlanner } from "../../store/planners";
 import type { PlannerState } from "../../store/types";
-import { Modal } from "./AccountSettings";
+import { Modal } from "../../components/Modal";
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 

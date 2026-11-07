@@ -26,8 +26,14 @@ import type { EmailVerify } from "../generated/EmailVerify";
 import type { RegisterFinish } from "../generated/RegisterFinish";
 import type { RegisterStart } from "../generated/RegisterStart";
 import type { RegisterStarted } from "../generated/RegisterStarted";
+import type { SecondFactorLogin } from "../generated/SecondFactorLogin";
 import type { SessionCreated } from "../generated/SessionCreated";
 import type { SignUpPending } from "../generated/SignUpPending";
+import type { TotpConfirm } from "../generated/TotpConfirm";
+import type { TotpConfirmed } from "../generated/TotpConfirmed";
+import type { TotpDisable } from "../generated/TotpDisable";
+import type { TotpEnrol } from "../generated/TotpEnrol";
+import type { TotpEnrolment } from "../generated/TotpEnrolment";
 import { engineUrl } from "./engine";
 
 /** What went wrong, in words a person can use. */
@@ -39,6 +45,11 @@ const MESSAGES: Record<string, string> = {
   email_unavailable: "That email can’t be used for a new account. If it’s yours, sign in instead.",
   login_failed: "That email and password don’t match.",
   invalid_email_code: "That code didn’t work.",
+  second_factor_required: "Enter the code from your authenticator app to finish signing in.",
+  second_factor_failed: "That code didn’t work.",
+  device_proof_required: "This device couldn’t prove the request. Try again, and check that this device’s clock is right.",
+  totp_already_enabled: "Two-factor is already on for this account.",
+  totp_not_enabled: "Two-factor isn’t on for this account.",
   device_not_trusted: "This device hasn’t been approved yet. Approve it from a device you already trust.",
   last_trusted_device: "This is your last trusted device. Approve another device first, then remove this one.",
   approval_expired: "That approval ran out of time or was closed. Start again from a trusted device. If this keeps happening, check that this device’s clock is right.",
@@ -119,8 +130,9 @@ export function createAuthApi(options: AuthApiOptions) {
       // Not our JSON (a proxy's page, say): fall back to the status.
     }
     const code = typeof error.code === "string" ? error.code : response.status === 401 ? "unauthorized" : response.status >= 500 ? "internal" : "invalid_request";
-    // A 401 on a signed-in call ends the session, whatever the code.
-    if (authed && response.status === 401) options.onUnauthorized();
+    // A 401 on a signed-in call ends the session, except the two answers that are about a request, not the session: a wrong code
+    // and a missing device signature.
+    if (authed && response.status === 401 && code !== "second_factor_failed" && code !== "device_proof_required") options.onUnauthorized();
     const retry = Number(response.headers.get("retry-after"));
     throw new ApiFailure(code, response.status, plainMessage(code), error.message ?? "", error, Number.isFinite(retry) && retry > 0 ? retry : null);
   }
@@ -136,6 +148,14 @@ export function createAuthApi(options: AuthApiOptions) {
     /** `trusted_device` is the optional proof from a device already trusted on the account. */
     loginStart: (body: LoginStart) => call<LoginStarted>("POST", "/v1/sessions/login/start", body),
     loginFinish: (body: LoginFinish) => call<SessionCreated>("POST", "/v1/sessions/login/finish", body),
+    /** The second step of a sign-in the engine answered `second_factor_required`: exactly one of a code and a recovery code. */
+    loginSecondFactor: (body: SecondFactorLogin) => call<SessionCreated>("POST", "/v1/sessions/login/second-factor", body),
+    /** Two-factor, from a trusted device that signs the request: a new secret, pending until confirmed. Shown once. */
+    totpEnrol: (body: TotpEnrol) => call<TotpEnrolment>("POST", "/v1/accounts/totp", body, true),
+    /** A current code from the pending secret turns two-factor on; answers ten recovery codes, shown once. */
+    totpConfirm: (body: TotpConfirm) => call<TotpConfirmed>("POST", "/v1/accounts/totp/confirm", body, true),
+    /** Turns two-factor off: the trusted device's signature alone, no code. */
+    totpDisable: (body: TotpDisable) => call<void>("POST", "/v1/accounts/totp/disable", body, true),
     /** Ends this device's session. */
     signOut: () => call<void>("DELETE", "/v1/sessions/current", undefined, true),
     /** Ends every session; a trusted device only. */

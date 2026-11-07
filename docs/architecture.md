@@ -44,7 +44,7 @@ Accounts are optional in v1. Signed out, the person sees the landing page, and "
 
 ## Desktop
 
-`desktop/` is a Tauri 2 shell with its own Cargo workspace; nothing else builds it. It opens one window on the web build (the dev server in development) and adds the standard menus and remembered window state. It exposes two commands to the page: `open_link`, which opens an http(s) address in the system browser (through tauri-plugin-opener), and `save_export`, which saves an export (see Export) through the system's save dialog (tauri-plugin-dialog). The plugins' own commands are in no capability, so the page has no more power than in a browser: it can't choose a path or write anywhere without the person picking it.
+`desktop/` is a Tauri 2 shell with its own Cargo workspace; nothing else builds it. It opens one window on the web build (the dev server in development) and adds the standard menus and remembered window state. It exposes two commands to the page: `open_link`, which opens an http(s) address in the system browser (through tauri-plugin-opener), and `save_export`, which saves a file the person asked for (an export, see Export, or their recovery codes as `.txt`) through the system's save dialog (tauri-plugin-dialog). The plugins' own commands are in no capability, so the page has no more power than in a browser: it can't choose a path or write anywhere without the person picking it.
 
 - **Navigation.** The window may show only the app's own pages (`tauri://localhost`, `http(s)://tauri.localhost`) and, in a debug build, the dev server on port 5173. Links to anywhere else, the engine included, are refused, and a request for a new window is denied.
 - **Content security policy.** Built from `desktop/config.json` (`engineUrl`) by `desktop/scripts/engine.mjs`: scripts only from the app, `connect-src` the app and the engine origin, no frames or objects.
@@ -132,4 +132,13 @@ A tag is a record of type `tag` (`name`, `colour`, `deletedAt`) in the account's
 - **Where**: tag chips beside a task's title and in its panel (type a new tag, or pick one; × removes it), a Tag filter on Tasks, and Settings · Tags (make, rename, recolour, delete, restore). The design has no tags screen; these use its chip, pill and row patterns. `#name` in quick add is the list in the design (its List column), so it is not a tag.
 - **Engine**: no change. The planner stages raw fields through `stage` (not the planner crate's `Item`), and the engine and server accept the `settings` zone and `tag:` fields (the e2e covers both).
 - **Export**: JSON has `tags` (and deleted ones in `trash.tags`), each task lists its tag ids, and the .ics gives a task's tags as `CATEGORIES` beside its list.
+
+## Two-factor
+
+Settings · Account has a Two-factor row; its state is the engine's (`totp_enabled` on `GET /v1/devices/current`), read each time the row opens. The design has no two-factor screen; these use its account row and dialog patterns.
+
+- **Turning on** (`src/features/auth/TwoFactor.tsx`): the trusted device signs the request (`signTotpManage` from the wasm module, `orbyn/totp-manage/v1` over account, device, action and time; confirm also covers the code), so a bare token gets `device_proof_required`. The engine answers a secret and an `otpauth://` link; the QR code is drawn on the device from that link ([uqr](https://github.com/unjs/uqr), MIT) and the secret is shown as text. A code from the app confirms, and the ten recovery codes are shown once, with Copy and Download .txt (a browser download, or the desktop save dialog); Done waits for "I've saved these codes".
+- **Turning off** needs only this device's signature, no code.
+- **Signing in** (`src/auth/flows.ts`, `SecondFactorNeeded`): when the password was right but the engine answers `second_factor_required`, the sign-in stays open with its keys in memory (nothing stored) and the screen asks for the six-digit code, with "Use a recovery code" to switch. A wrong code is "That code didn’t work." and the sign-in stays open (the engine closes it after five); anything else sends the person back to the password step. A browser that already holds trusted keys is not asked.
+- A 401 `second_factor_failed` or `device_proof_required` on a signed-in call is about the request, not the session, so it doesn't sign the person out.
 
