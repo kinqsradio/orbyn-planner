@@ -1,11 +1,11 @@
 {
-  "engine": "03449bcf921c9dcbbb3c3bf5f3c913989eb0bab3",
+  "engine": "897459e5a85e9651ba3e4ef896ee1096066e1eeb",
   "rust": "1.99.1",
   "wasmBindgen": "0.2.130",
   "files": {
     "orbyn_wasm.js": "c6391fc3e3898c277615bc32d7ded270b35e78be44d69d69ecf45e6a91a3fc15",
     "orbyn_wasm.d.ts": "deb9009a1d83d351b7a3b0c45dda37bb7c25f3689bd3e122d4bfa30c3d58e06b",
-    "orbyn_wasm_bg.wasm": "adae25d8e9cd6d05053f04796451b60a4f8735252aadf9ac703d14fd87e086e8",
+    "orbyn_wasm_bg.wasm": "76b7708fc00805cfed1460a6510c98d8644a73ca1c3ebec76667380877e2bfa8",
     "orbyn_wasm_bg.wasm.d.ts": "5a3b393bf533006638e9e4b9df120dc1c7f43d4c1720c808d39fc36ee18c8a23"
   }
 }
