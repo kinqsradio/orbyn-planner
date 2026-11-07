@@ -240,8 +240,10 @@ export function TodayPage() {
   const empty = g.overdue.length === 0 && itemCount === 0;
   const dateLabel = `${dayName.slice(0, 3)} ${now.getDate()} ${MONTHS[now.getMonth()]!.slice(0, 3)}`;
 
+  // Only while the device is offline do rows say their change has not left it (as the designs draw it).
+  const unsynced = new Set(status.kind === "offline" ? waiting.map((w) => w.id) : []);
   const rows = (list: Entry[], of: number) =>
-    list.map((e, i) => (e.kind === "task" ? <TodayRow key={e.task.id} task={e.task} at={place(i, of)} /> : <EventRow key={`${e.occ.event.id}-${e.occ.date}`} occ={e.occ} day={key} phone={phone} at={place(i, of)} />));
+    list.map((e, i) => (e.kind === "task" ? <TodayRow key={e.task.id} task={e.task} unsynced={unsynced.has(e.task.id)} at={place(i, of)} /> : <EventRow key={`${e.occ.event.id}-${e.occ.date}`} occ={e.occ} day={key} phone={phone} at={place(i, of)} />));
 
   const weekList = (
     <ul aria-label="The week at a glance">
@@ -288,7 +290,7 @@ export function TodayPage() {
 
   return (
     <>
-      <PageHeader title={title} sub={`${dayName} ${now.getDate()} ${MONTHS[now.getMonth()]} · ${summary}`}>
+      <PageHeader title={title} sub={`${dayName} ${now.getDate()} ${MONTHS[now.getMonth()]} · ${status.kind === "offline" ? "offline" : summary}`}>
         <SyncLine status={status} onRetry={retry} waiting={waiting} />
         <button type="button" className="btn" onClick={() => ui.openNewTask()}>
           <Icon name="plus" small />
@@ -342,7 +344,7 @@ export function TodayPage() {
                   </div>
                   <ul>
                     {g.overdue.slice(0, lateRows).map((t, i) => (
-                      <TodayRow key={t.id} task={t} late={lateDays(t.due!)} quietLate={phone} at={place(i, g.overdue.length)} />
+                      <TodayRow key={t.id} task={t} unsynced={unsynced.has(t.id)} late={lateDays(t.due!)} quietLate={phone} at={place(i, g.overdue.length)} />
                     ))}
                   </ul>
                 </>

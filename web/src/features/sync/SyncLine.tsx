@@ -9,7 +9,8 @@ export type SyncStatus =
   /** The engine answers. Real sync, and so "Synced", arrives with the sync phase. */
   | { kind: "connected" }
   | { kind: "syncing" }
-  | { kind: "offline"; waiting: number }
+  /** `lastSynced`: when this device last reached the server, if it ever did. */
+  | { kind: "offline"; waiting: number; lastSynced?: string | null }
   | { kind: "error" }
   /** Changes did not reach this device's storage. Red: a failure. */
   | { kind: "unsaved"; reason: string }
@@ -49,7 +50,9 @@ function OfflinePill({ status, waiting }: { status: Extract<SyncStatus, { kind: 
         <div className="card popover" role="region" aria-label="Waiting to sync">
           <b>Waiting to sync</b>
           <span className="t3">
-            This device is offline. Your changes are saved here and reach your other devices as soon as you’re back online.
+            {status.waiting === 1
+              ? "This device is offline. Your change is saved here and reaches your other devices as soon as you’re back online."
+              : "This device is offline. Your changes are saved here and reach your other devices as soon as you’re back online."}
           </span>
           {waiting.slice(0, 5).map((w) => (
             <div className="kv" key={w.id} style={{ borderTop: "var(--bw) solid var(--line)", height: "var(--sp-38)" }}>
@@ -57,6 +60,12 @@ function OfflinePill({ status, waiting }: { status: Extract<SyncStatus, { kind: 
               <b>Edited {formatTime(new Date(w.at))}</b>
             </div>
           ))}
+          {status.lastSynced && (
+            <div className="kv" style={{ borderTop: "var(--bw) solid var(--line)", height: "var(--sp-38)" }}>
+              <span>Last synced</span>
+              <b>{formatTime(new Date(status.lastSynced))}</b>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -71,10 +80,10 @@ export function SyncLine({ status, onRetry, waiting = [] }: { status: SyncStatus
       return <p className="pillx" role="status">Connected</p>;
     case "syncing":
       return (
-        <p className="pillx" role="status">
-          <span className="spin" aria-hidden="true" />
+        <span className="st info" role="status">
+          <span className="sd" />
           Syncing
-        </p>
+        </span>
       );
     case "offline":
       return <OfflinePill status={status} waiting={waiting} />;
@@ -89,12 +98,15 @@ export function SyncLine({ status, onRetry, waiting = [] }: { status: SyncStatus
       return <p className="pillx" role="status">Not saved on this device</p>;
     case "error":
       return (
-        <p className="pillx red" role="status">
-          Couldn’t sync ·{" "}
-          <button type="button" onClick={onRetry}>
+        <>
+          <span className="st err" role="status">
+            <span className="sd" />
+            Couldn’t sync
+          </span>
+          <button type="button" className="ghost" onClick={onRetry}>
             Retry
           </button>
-        </p>
+        </>
       );
   }
 }
@@ -181,7 +193,7 @@ export function useSyncStatus(pending = 0, sync: SyncState | null = null, syncNo
 
   let status: SyncStatus;
   if (syncing && sync) {
-    if (sync.phase === "offline" || !online) status = { kind: "offline", waiting: pending };
+    if (sync.phase === "offline" || !online) status = { kind: "offline", waiting: pending, lastSynced: sync.lastSyncedAt };
     else if (sync.phase === "error") status = { kind: "error" };
     else if (sync.phase === "syncing" || sync.lastSyncedAt === null) status = { kind: "syncing" };
     else status = { kind: "synced", devices: sync.devices };
