@@ -9,7 +9,7 @@ const cases: [SyncStatus, string][] = [
   [{ kind: "syncing" }, "Syncing"],
   [{ kind: "offline", waiting: 3 }, "Offline · 3 changes waiting"],
   [{ kind: "offline", waiting: 1 }, "Offline · 1 change waiting"],
-  [{ kind: "error" }, "Couldn’t sync ·"],
+  [{ kind: "error" }, "Couldn’t sync"],
   [{ kind: "unsaved", reason: "This device is out of storage." }, "Couldn’t save on this device"],
   [{ kind: "memory" }, "Not saved on this device"],
 ];
@@ -26,6 +26,41 @@ describe("SyncLine", () => {
   it("says just Offline when nothing is waiting", () => {
     render(<SyncLine status={{ kind: "offline", waiting: 0 }} />);
     expect(screen.getByRole("status").textContent).toBe("Offline");
+  });
+
+  it("Syncing is the blue dot pill and Couldn’t sync the red one, with a ghost Retry beside it", () => {
+    const { unmount } = render(<SyncLine status={{ kind: "syncing" }} />);
+    expect(screen.getByRole("status")).toHaveClass("st", "info");
+    expect(screen.getByRole("status").querySelector(".sd")).not.toBeNull();
+    unmount();
+    render(<SyncLine status={{ kind: "error" }} onRetry={() => undefined} />);
+    expect(screen.getByRole("status")).toHaveClass("st", "err");
+    expect(screen.getByRole("button", { name: "Retry" })).toHaveClass("ghost");
+    expect(screen.getByRole("status")).not.toContainElement(screen.getByRole("button", { name: "Retry" }));
+  });
+
+  it("the offline list says change or changes by the count, and ends with when it last synced", async () => {
+    const one = [{ id: "t1", label: "Pick up dry cleaning", at: "2026-11-07T09:41:00" }];
+    const { unmount } = render(<SyncLine status={{ kind: "offline", waiting: 1, lastSynced: "2026-11-07T09:38:00" }} waiting={one} />);
+    await userEvent.click(screen.getByRole("button", { name: /Offline/ }));
+    const list = screen.getByRole("region", { name: "Waiting to sync" });
+    expect(list).toHaveTextContent("Your change is saved here and reaches your other devices as soon as you’re back online.");
+    expect(list).toHaveTextContent("Last synced09:38");
+    unmount();
+    render(<SyncLine status={{ kind: "offline", waiting: 2 }} waiting={[...one, { id: "t2", label: "x", at: "2026-11-07T09:42:00" }]} />);
+    await userEvent.click(screen.getByRole("button", { name: /Offline/ }));
+    expect(screen.getByRole("region", { name: "Waiting to sync" })).toHaveTextContent("Your changes are saved here and reach your other devices");
+    expect(screen.queryByText("Last synced")).toBeNull(); // never synced: nothing to say
+  });
+
+  it("on a phone the offline pill reads waiting to sync", () => {
+    vi.stubGlobal("matchMedia", (q: string) => ({ matches: true, media: q, addEventListener: () => undefined, removeEventListener: () => undefined }));
+    try {
+      render(<SyncLine status={{ kind: "offline", waiting: 2 }} />);
+      expect(screen.getByRole("status")).toHaveTextContent("Offline · 2 changes waiting to sync");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("calls onRetry", async () => {

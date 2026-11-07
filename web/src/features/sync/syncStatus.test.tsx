@@ -21,7 +21,7 @@ describe("the sync line follows real sync when it runs", () => {
     expect(status(base)).toEqual({ kind: "synced", devices: 2 });
     expect(status({ ...base, phase: "syncing" })).toEqual({ kind: "syncing" });
     expect(status({ ...base, lastSyncedAt: null })).toEqual({ kind: "syncing" }); // not synced yet
-    expect(status({ ...base, phase: "offline" }, 3)).toEqual({ kind: "offline", waiting: 3 });
+    expect(status({ ...base, phase: "offline" }, 3)).toEqual({ kind: "offline", waiting: 3, lastSynced: "2026-11-07T10:00:00Z" });
     expect(status({ ...base, phase: "error", error: "x" })).toEqual({ kind: "error" });
   });
 

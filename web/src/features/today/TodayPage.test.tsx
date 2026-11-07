@@ -257,6 +257,26 @@ describe("events across midnight", () => {
   });
 });
 
+describe("Today while the device is offline", () => {
+  it("the subtitle says offline, and a row whose change has not left the device says so", async () => {
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    try {
+      await openToday((s) => s.addTask({ title: "Pick up dry cleaning", due: "2026-11-07" }));
+      expect(screen.getByText("Saturday 7 November · offline")).toBeInTheDocument();
+      expect(document.querySelector(".ph .pillx")!.textContent).toMatch(/^Offline/);
+      expect(document.querySelector(".row .meta")!.textContent).toBe("Inbox · not synced yet");
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("online, rows say nothing about syncing and the subtitle counts the day", async () => {
+    await openToday((s) => s.addTask({ title: "Pick up dry cleaning", due: "2026-11-07" }));
+    expect(document.querySelector(".row .meta")!.textContent).toBe("Inbox");
+    expect(screen.getByText("Saturday 7 November · 1 task")).toBeInTheDocument();
+  });
+});
+
 describe("Today while it loads, and on a phone", () => {
   it("keeps its layout while loading and shows the skeleton only after 400 ms", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
