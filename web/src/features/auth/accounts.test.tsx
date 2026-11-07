@@ -299,18 +299,20 @@ describe("sign in", () => {
     it("asks first, sends nothing on Cancel, and keeps the keys", async () => {
       const keys = await withOtherAccount();
       const before = await keys.loadKeys();
-      const sent = engine.calls.length;
+      // The start-up check of a device that kept its keys (the status route) is not part of what this is about.
+      const count = () => engine.calls.filter((c) => c.path !== "/v1/accounts/status").length;
+      const sent = count();
       await mount(services(keys));
       await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
       await fillSignIn("alex@example.com", "another long password");
       const dialog = await screen.findByRole("alertdialog", { name: "Sign in to a different account" });
       expect(dialog).toHaveTextContent("s•••@e•••.com");
       expect(dialog).toHaveTextContent("removes them from this browser");
-      expect(engine.calls.length).toBe(sent);
+      expect(count()).toBe(sent);
       await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
       expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument();
-      expect(engine.calls.length).toBe(sent);
+      expect(count()).toBe(sent);
       expect(await keys.loadKeys()).toEqual(before);
     });
 
@@ -1774,6 +1776,20 @@ describe("an account that was deleted", () => {
     }
     expect(await screen.findByRole("group", { name: "This account was deleted" })).toBeInTheDocument();
     expect(screen.queryByText("Checking your account…")).toBeNull();
+  });
+
+  it("after a reload the device that kept its keys asks again, so a check that never answered is not lost", async () => {
+    const keys = createMemoryKeyStore();
+    const first = await mount(services(keys));
+    await fillSignUp();
+    await todayShown();
+    first.unmount();
+    await keys.clearSession(); // the 401 cleared the session; the keys stay
+    engine.deleteAccountNow(SAM.email, "2026-11-14T00:00:00Z");
+    expect(statusCalls()).toHaveLength(0);
+    await mount(services(keys)); // a new page load
+    expect(await screen.findByRole("group", { name: "This account was deleted" })).toBeInTheDocument();
+    expect(statusCalls()).toHaveLength(1);
   });
 
   it("a 404 is an ordinary signed-out state: the landing page, nothing removed, and the question was asked once", async () => {

@@ -106,6 +106,9 @@ export function plainMessage(code: string): string {
   return MESSAGES[code] ?? "Something went wrong. Try again.";
 }
 
+/** How long the status check after a 401 may take before it counts as unreachable. */
+export const STATUS_TIMEOUT_MS = 10_000;
+
 export interface AuthApiOptions {
   baseUrl?: string;
   fetch?: typeof fetch;
@@ -127,7 +130,7 @@ export function createAuthApi(options: AuthApiOptions) {
    * (a wrong code, a signature the engine wouldn't take), not about the session, so they don't end it. Only the three two-factor
    * calls say so; on any other call every 401 ends the session.
    */
-  async function call<T>(method: string, path: string, body?: unknown, authed = false, keepSession = false): Promise<T> {
+  async function call<T>(method: string, path: string, body?: unknown, authed = false, keepSession = false, signal?: AbortSignal): Promise<T> {
     const headers: Record<string, string> = {};
     if (body !== undefined) headers["content-type"] = "application/json";
     const token = options.token();
@@ -138,6 +141,7 @@ export function createAuthApi(options: AuthApiOptions) {
         method,
         headers,
         body: body === undefined ? undefined : JSON.stringify(body, (_k, v) => (typeof v === "bigint" ? Number(v) : v)),
+        signal,
       });
     } catch {
       throw new ApiFailure("network", 0, MESSAGES.network!);
@@ -192,7 +196,6 @@ export function createAuthApi(options: AuthApiOptions) {
     scheduleDeletion: (body: DeleteAccount) => call<DeletionScheduled>("POST", "/v1/accounts/delete", body, true, true),
     /** Cancels a scheduled deletion: a trusted device's signature, or a pending device's with a sign-in from the last ten minutes. */
     cancelDeletion: (body: CancelAccountDeletion) => call<void>("POST", "/v1/accounts/delete/cancel", body, true, true),
-    /** Cancels it with the token from the email's link. No session; it does nothing else. */
     /**
      * Whether an account was deleted, asked without a session (it went with the account): the answer once a tombstone exists, `null`
      * for everything else (404, which never says an account exists). Asked once after a 401; anything else, an unreachable engine
@@ -200,12 +203,14 @@ export function createAuthApi(options: AuthApiOptions) {
      */
     accountStatus: async (accountId: string): Promise<AccountStatus | null> => {
       try {
-        return await call<AccountStatus>("POST", "/v1/accounts/status", { account_id: accountId });
+        // A check that never answers must not hold the landing: after the timeout it is read as unreachable.
+        return await call<AccountStatus>("POST", "/v1/accounts/status", { account_id: accountId }, false, false, AbortSignal.timeout(STATUS_TIMEOUT_MS));
       } catch (e) {
         if (e instanceof ApiFailure && e.status === 404) return null;
         throw e;
       }
     },
+    /** Cancels it with the token from the email's link. No session; it does nothing else. */
     cancelDeletionByMail: (body: CancelDeletionByMail) => call<void>("POST", "/v1/accounts/delete/cancel-by-mail", body),
     /** Ends this device's session. */
     signOut: () => call<void>("DELETE", "/v1/sessions/current", undefined, true),

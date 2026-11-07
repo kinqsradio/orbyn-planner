@@ -7,7 +7,8 @@ import { forgetProtectionNotice } from "../../auth/protectionNotice";
 import { BusyButton } from "../../components/BusyButton";
 import { Icon } from "../../components/Icon";
 import { motionMs } from "../../styles/tokens";
-import { closePlanner, plannerFor, removeAccountPlanner } from "../../store/planners";
+import { forgetDeviceDataAnswer } from "../../store/deviceData";
+import { accountPlannerExists, closePlanner, plannerFor, removeAccountPlanner } from "../../store/planners";
 import { exportJson } from "../export/exportJson";
 import { saveFile } from "../export/save";
 
@@ -17,6 +18,17 @@ export function fileSize(bytes: number): string {
   if (bytes < 1000) return `${bytes} B`;
   if (bytes < 1_000_000) return unit(bytes / 1000, "kB");
   return unit(bytes / 1_000_000, "MB");
+}
+
+/**
+ * Forgets this device's keys, but only if they are still this account's: another tab may have signed in to a different account since,
+ * which replaced the device, and those keys are not ours to remove. Under the engine's lock, so the check and the removal are one step.
+ */
+async function forgetDeviceOf(services: AuthServices, accountId: string): Promise<void> {
+  await services.engine.exclusive(async () => {
+    const identity = await services.keys.loadIdentity();
+    if (identity && identity.accountId === accountId) await services.keys.clearDevice();
+  });
 }
 
 const EXPORT_FAILED = "Couldn’t export your data. Nothing was removed from this browser.";
@@ -37,6 +49,11 @@ export function DeletedAccountScreen({ account, services, onLeave }: { account: 
     if (working) return;
     setWorking("export");
     try {
+      // Another tab may have removed the copy already: opening it now would make an empty one.
+      if (!(await accountPlannerExists(account.accountId))) {
+        deletedAccount.update({ phase: "final", hadCopy: false });
+        return;
+      }
       const store = plannerFor(account.accountId);
       await store.ready;
       const stamp = new Date(now.getTime()).toISOString().slice(0, 10);
@@ -58,8 +75,9 @@ export function DeletedAccountScreen({ account, services, onLeave }: { account: 
     const slow = setTimeout(() => deletedAccount.update({ phase: "removing" }), motionMs("wait") * 2);
     try {
       await removeAccountPlanner(account.accountId);
-      await services.engine.forget();
+      await forgetDeviceOf(services, account.accountId);
       forgetProtectionNotice(account.accountId);
+      forgetDeviceDataAnswer(account.accountId);
       deletedAccount.update({ phase: "final" });
     } catch {
       deletedAccount.update({ phase: "remove-failed" });
@@ -73,7 +91,7 @@ export function DeletedAccountScreen({ account, services, onLeave }: { account: 
     // A browser that held the account in memory only lets go of what the tab still has.
     if (!account.hadCopy) {
       closePlanner(account.accountId);
-      void services.engine.forget().catch(() => undefined);
+      void forgetDeviceOf(services, account.accountId).catch(() => undefined);
     }
     onLeave(to);
   };
@@ -187,7 +205,7 @@ export function CheckingAccount() {
   return (
     <main className="public-page" id="content" tabIndex={-1}>
       <div className="authcard checking-card" role="status">
-        <span className="t2 line"><span className="spin still" aria-hidden="true" /><b className="keys-title">Checking your account…</b></span>
+        <span className="t2 line"><span className="spin still" aria-hidden="true" /><b className="checking-title">Checking your account…</b></span>
         <span className="t3 small">This takes a moment.</span>
       </div>
     </main>

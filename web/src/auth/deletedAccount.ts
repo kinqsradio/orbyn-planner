@@ -65,7 +65,8 @@ export async function askWhetherDeleted(api: Pick<AuthApi, "accountStatus">, ses
   setChecking(true);
   try {
     const status = await api.accountStatus(session.accountId);
-    if (!status) return;
+    // Anything but a date the engine would send is read as not deleted.
+    if (!status || typeof status.deleted_at !== "string" || Number.isNaN(new Date(status.deleted_at).getTime())) return;
     deletedAccount.set({
       accountId: session.accountId,
       email: session.email,

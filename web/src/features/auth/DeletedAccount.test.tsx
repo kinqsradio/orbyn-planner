@@ -10,22 +10,32 @@ import { CheckingAccount, DeletedAccountScreen, fileSize } from "./DeletedAccoun
 const removePlanner = vi.fn();
 const closePlanner = vi.fn();
 const save = vi.fn();
-const forget = vi.fn();
+const clearDevice = vi.fn();
+const loadIdentity = vi.fn();
+const forgetNotice = vi.fn();
+const forgetAnswer = vi.fn();
+const exists = vi.fn();
 vi.mock("../../store/planners", () => ({
+  accountPlannerExists: () => exists(),
   plannerFor: () => ({ ready: Promise.resolve(), getState: () => ({ tasks: [], lists: [], projects: [], calendars: [], events: [], tags: [], outbox: [] }) }),
   removeAccountPlanner: (...a: unknown[]) => removePlanner(...a),
   closePlanner: (...a: unknown[]) => closePlanner(...a),
 }));
+vi.mock("../../auth/protectionNotice", () => ({ forgetProtectionNotice: (...a: unknown[]) => forgetNotice(...a) }));
+vi.mock("../../store/deviceData", () => ({ forgetDeviceDataAnswer: (...a: unknown[]) => forgetAnswer(...a) }));
 vi.mock("../export/save", () => ({ saveFile: (...a: unknown[]) => save(...a) }));
 vi.mock("../export/exportJson", () => ({ exportJson: () => "x".repeat(2400) }));
 
-const services = { engine: { forget: () => forget() } } as unknown as AuthServices;
+const services = {
+  engine: { exclusive: <T,>(fn: () => Promise<T>) => fn() },
+  keys: { loadIdentity: () => loadIdentity(), clearDevice: () => clearDevice() },
+} as unknown as AuthServices;
 const base: DeletedAccount = { accountId: "acct-1", email: "sam@example.com", deletedAt: "2026-11-14T00:00:00Z", phase: "choose", hadCopy: true, file: null };
 const onLeave = vi.fn();
 
-function Harness() {
+function Harness({ using = services }: { using?: AuthServices }) {
   const account = useSyncExternalStore(deletedAccount.subscribe, deletedAccount.get);
-  return account ? <DeletedAccountScreen account={account} services={services} onLeave={onLeave} /> : <p>gone</p>;
+  return account ? <DeletedAccountScreen account={account} services={using} onLeave={onLeave} /> : <p>gone</p>;
 }
 const show = (over: Partial<DeletedAccount> = {}) => {
   deletedAccount.set({ ...base, ...over });
@@ -36,7 +46,11 @@ beforeEach(() => {
   removePlanner.mockReset().mockResolvedValue(undefined);
   closePlanner.mockReset();
   save.mockReset().mockResolvedValue(true);
-  forget.mockReset().mockResolvedValue(undefined);
+  clearDevice.mockReset().mockResolvedValue(undefined);
+  loadIdentity.mockReset().mockResolvedValue({ accountId: "acct-1", deviceId: "d1", email: "sam@example.com" });
+  forgetNotice.mockReset();
+  forgetAnswer.mockReset();
+  exists.mockReset().mockResolvedValue(true);
   onLeave.mockReset();
 });
 afterEach(() => {
@@ -54,7 +68,7 @@ describe("the account was deleted: choose, export, remove", () => {
     expect(within(card).getAllByRole("button").map((b) => b.textContent)).toEqual(["Export what’s on this browser", "Remove it now"]);
     expect(card).toHaveTextContent("Removing it deletes this browser’s copy for good.");
     expect(removePlanner).not.toHaveBeenCalled();
-    expect(forget).not.toHaveBeenCalled();
+    expect(clearDevice).not.toHaveBeenCalled();
   });
 
   it("the date is the UTC day, so a late evening elsewhere does not move it", () => {
@@ -136,7 +150,9 @@ describe("the account was deleted: choose, export, remove", () => {
     expect(await within(card).findByText("Orbyn removed its copy from this browser.")).toBeInTheDocument();
     expect(card).toHaveTextContent("sam@example.com was deleted on Saturday 14 November, after its 7 days ended. Its data can’t be restored.");
     expect(removePlanner).toHaveBeenCalledWith("acct-1");
-    expect(forget).toHaveBeenCalledTimes(1);
+    expect(clearDevice).toHaveBeenCalledTimes(1);
+    expect(forgetNotice).toHaveBeenCalledWith("acct-1"); // everything this browser kept for the account goes with it
+    expect(forgetAnswer).toHaveBeenCalledWith("acct-1");
     expect(within(card).getAllByRole("button").map((b) => b.textContent)).toEqual(["Create a new account", "Sign in with another account"]);
   });
 
@@ -165,8 +181,25 @@ describe("the account was deleted: choose, export, remove", () => {
     expect(removePlanner).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps another account's keys: if the device was signed in to a different account meanwhile, Remove does not clear it", async () => {
+    loadIdentity.mockResolvedValue({ accountId: "acct-B", deviceId: "d2", email: "alex@example.com" });
+    show();
+    await userEvent.click(screen.getByRole("button", { name: "Remove it now" }));
+    expect(await screen.findByText("Orbyn removed its copy from this browser.")).toBeInTheDocument();
+    expect(removePlanner).toHaveBeenCalledWith("acct-1"); // this account's planner goes
+    expect(clearDevice).not.toHaveBeenCalled(); // B's keys stay
+  });
+
+  it("if another tab already removed the copy, Export does not make an empty one: it ends on the nothing-to-remove screen", async () => {
+    exists.mockResolvedValue(false);
+    show();
+    await userEvent.click(screen.getByRole("button", { name: "Export what’s on this browser" }));
+    expect(await screen.findByText("This browser had no copy to remove.")).toBeInTheDocument();
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it("a failed key removal counts as a failed removal", async () => {
-    forget.mockRejectedValueOnce(new Error("keys"));
+    clearDevice.mockRejectedValueOnce(new Error("keys"));
     show();
     await userEvent.click(screen.getByRole("button", { name: "Remove it now" }));
     expect(await screen.findByText(/Couldn’t remove this browser’s copy/)).toBeInTheDocument();
@@ -182,6 +215,31 @@ describe("the account was deleted: choose, export, remove", () => {
     expect(onLeave).toHaveBeenCalledWith("signup");
     await userEvent.click(within(card).getByRole("button", { name: "Sign in with another account" }));
     expect(onLeave).toHaveBeenLastCalledWith("signin");
+  });
+});
+
+describe("Remove with the real key store", () => {
+  it("clears this account's device keys, and leaves another account's alone", async () => {
+    const { createMemoryKeyStore } = await import("../../api/keyStore");
+    const { createAuthServices } = await import("../../auth/services");
+    const run = async (identityOnDevice: string) => {
+      const keys = createMemoryKeyStore();
+      await keys.saveKeys(new Uint8Array([1, 2, 3]));
+      await keys.saveIdentity({ accountId: identityOnDevice, deviceId: "d", email: "x@example.com" });
+      const real = createAuthServices({ keys, wrapSecret: async () => new Uint8Array(32) });
+      deletedAccount.set({ ...base });
+      const view = render(<Harness using={real} />);
+      await userEvent.click(screen.getByRole("button", { name: "Remove it now" }));
+      await screen.findByText("Orbyn removed its copy from this browser.");
+      view.unmount();
+      return keys;
+    };
+    const own = await run("acct-1");
+    expect(await own.loadKeys()).toBeNull(); // the deleted account's own keys are gone
+    expect(await own.loadIdentity()).toBeNull();
+    const other = await run("acct-B");
+    expect(await other.loadKeys()).toEqual(new Uint8Array([1, 2, 3])); // B's device survives
+    expect(await other.loadIdentity()).toMatchObject({ accountId: "acct-B" });
   });
 });
 
@@ -205,6 +263,21 @@ describe("asking whether the account was deleted", () => {
     await askWhetherDeleted({ accountStatus: vi.fn().mockRejectedValue(new ApiFailure("too_many_attempts", 429, "Too many.")) }, session, false);
     await askWhetherDeleted({ accountStatus: vi.fn().mockRejectedValue(new TypeError("offline")) }, session, false);
     expect(deletedAccount.get()).toBeNull();
+  });
+
+  it("anything that is not a date is read as not deleted", async () => {
+    await askWhetherDeleted({ accountStatus: vi.fn().mockResolvedValue({ deleted_at: "someday" }) }, session, false);
+    await askWhetherDeleted({ accountStatus: vi.fn().mockResolvedValue({ deleted_at: 5 }) }, session, false);
+    expect(deletedAccount.get()).toBeNull();
+  });
+
+  it("after an unreachable check the next 401 asks again", async () => {
+    const api = { accountStatus: vi.fn().mockRejectedValueOnce(new TypeError("offline")).mockResolvedValueOnce({ deleted_at: "2026-11-14T00:00:00Z" }) };
+    await askWhetherDeleted(api, session, false);
+    expect(deletedAccount.get()).toBeNull();
+    await askWhetherDeleted(api, session, false);
+    expect(api.accountStatus).toHaveBeenCalledTimes(2);
+    expect(deletedAccount.get()).toMatchObject({ phase: "choose" });
   });
 
   it("two 401s at once ask once", async () => {

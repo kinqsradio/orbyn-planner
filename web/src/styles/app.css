@@ -543,6 +543,7 @@ button.pillx { border: 0; }
 
 /* A deleted account: choose, exported, failed, removing and last screens (Account Designs: "The account was deleted"). */
 .checking-card { width: var(--sp-420); max-width: 100%; align-items: flex-start; gap: var(--sp-12); }
+.checking-title { font-weight: var(--fw-medium); color: var(--t1); }
 .checking-card .line { display: flex; gap: var(--sp-10); align-items: center; }
 .spin.still { animation: none; width: var(--sp-16); height: var(--sp-16); }
 .deleted-card { width: var(--sp-440); max-width: 100%; text-align: left; align-items: stretch; }

@@ -1,3 +1,4 @@
+import { askWhetherDeleted } from "./deletedAccount";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { StoredSession } from "../api/keyStore";
 import { setSessionToken } from "../api/session";
@@ -70,7 +71,17 @@ export function AuthProvider({ services, children }: { services: AuthServices | 
   useEffect(() => {
     if (!services) return;
     let live = true;
-    void services.ready.then(() => services.tokens.load(services.now())).then(() => live && setLoaded(true));
+    void services.ready
+      .then(() => services.tokens.load(services.now()))
+      .then(async () => {
+        // A device that kept its keys but has no session (a 401 ended it, then the page was closed before the check answered) asks
+        // once whether its account was deleted. Started before the landing shows, so nothing flashes.
+        if (!services.tokens.getSession()) {
+          const identity = await services.keys.loadIdentity().catch(() => null);
+          if (live && identity?.email) void askWhetherDeleted(services.api, { accountId: identity.accountId, email: identity.email }, services.keys.inMemory);
+        }
+        if (live) setLoaded(true);
+      });
     return () => {
       live = false;
     };
