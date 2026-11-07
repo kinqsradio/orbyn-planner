@@ -5,7 +5,7 @@ import { NotAvailable, Planned } from "../../components/Planned";
 import { Toggle } from "../../components/Toggle";
 import { permissionState, type PermissionState } from "../reminders/useReminders";
 
-const SETTING = { minHeight: "var(--sp-44)", borderBottom: "var(--bw) solid var(--line)" } as const;
+const SETTING = { height: "auto", minHeight: "var(--sp-44)", padding: "var(--sp-6) 0", borderBottom: "var(--bw) solid var(--line)" } as const;
 
 /** A label with its quieter second line, at the left of a row. */
 function Label({ title, note, hint }: { title: string; note?: string; hint?: string }) {
@@ -82,7 +82,7 @@ export function NotificationsSettings() {
   const field = (id: string, label: string, value: string, set: (v: string) => void) => (
     <>
       <label htmlFor={id} className="t3">{label}</label>
-      <input id={id} className="inp" type="time" value={value} onChange={(e) => e.target.value && set(e.target.value)} />
+      <input id={id} className="field" style={{ width: "auto" }} type="time" value={value} onChange={(e) => e.target.value && set(e.target.value)} />
     </>
   );
 
@@ -127,7 +127,7 @@ export function NotificationsSettings() {
             {field("quiet-to", "Until", prefs.quiet.to, (to) => setPrefs({ quiet: { ...prefs.quiet, to } }))}
           </b>
         </div>
-        <div className="kv" style={{ minHeight: "var(--sp-44)" }}>
+        <div className="kv" style={{ height: "auto", minHeight: "var(--sp-44)", padding: "var(--sp-6) 0" }}>
           <Label title="Allow reminders during quiet hours" note="Reminders still fire during quiet hours." />
           <Toggle label="Allow reminders during quiet hours" on={!prefs.quiet.enabled} checked={!prefs.quiet.enabled} onChange={(allow) => setPrefs({ quiet: { ...prefs.quiet, enabled: !allow } })} />
         </div>
