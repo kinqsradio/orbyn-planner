@@ -193,6 +193,7 @@ export function TodayPage() {
       <>
         <PageHeader title={title} sub={skeleton ? undefined : undefined}>
           {skeleton && <span role="status" className="t3"><span className="spin" aria-hidden="true" />Loading today</span>}
+          <SyncLine status={status} onRetry={retry} waiting={waiting} />
           <button type="button" className="btn" disabled><Icon name="plus" small />New task</button>
         </PageHeader>
         <div className="grid4 today-stats" style={{ padding: "var(--sp-4) var(--sp-28) 0" }}>
@@ -227,10 +228,12 @@ export function TodayPage() {
 
       <div className="cols">
         <div className="blk">
-          <div className="bh">
-            <b>Today</b>
-            <span>{dateLabel}</span>
-          </div>
+          {!phone && (
+            <div className="bh">
+              <b>Today</b>
+              <span>{dateLabel}</span>
+            </div>
+          )}
           {empty ? (
             <div className="empty">
               <h2>{phone ? "A clear day" : "Nothing planned today"}</h2>
@@ -273,7 +276,7 @@ export function TodayPage() {
             <div className="week-fold">
               <button type="button" className="kv link-btn" aria-expanded={weekOpen} onClick={() => setWeekOpen(!weekOpen)}>
                 <span>This week</span>
-                <b>{countWords(comingUp, "item", "items")}</b>
+                <b>{countWords(comingUp, "item", "items")} <Icon name={weekOpen ? "down" : "right"} small /></b>
               </button>
               {weekOpen && weekList}
             </div>

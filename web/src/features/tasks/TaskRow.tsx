@@ -104,7 +104,7 @@ export function TodayRow({ task, late, compact = false }: { task: Task; late?: n
       {!compact && <span className={soon ? "time amber" : "time"}>{time}</span>}
       <Check task={task} />
       <button type="button" className="what link-btn" onClick={open}>{task.title}</button>
-      <span className="meta">{compact ? (parsed?.hasTime ? formatTime(parsed.date) : "") : meta}</span>
+      <span className={late !== undefined && !task.done ? "meta amber" : "meta"}>{compact ? (parsed?.hasTime ? formatTime(parsed.date) : "") : meta}</span>
     </li>
   );
 }

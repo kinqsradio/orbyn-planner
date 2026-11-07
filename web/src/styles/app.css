@@ -116,6 +116,7 @@ button { cursor: pointer; }
 .row .time.amber { color: var(--amber-text); }
 .row .what { color: var(--t1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row .meta { font-size: var(--fs-12); color: var(--t3); }
+.row .meta.amber { color: var(--amber-text); font-weight: var(--fw-medium); }
 .sw { width: var(--sp-8); height: var(--sp-8); border-radius: var(--r-3); display: inline-block; }
 
 .empty { flex: 1; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: var(--sp-10); padding: 0 var(--sp-28) var(--sp-40); }
@@ -160,6 +161,9 @@ button { cursor: pointer; }
   .ph .acts .btn { display: none; }
   .pillx.offline { height: auto; padding: var(--sp-8) var(--sp-12); border-radius: var(--r-12); font-size: var(--fs-12-5); }
   .today-stats, .cols .aside { display: none; }
+  .row.done { opacity: .55; }
+  .week-fold > .kv { width: 100%; height: var(--sp-48); border: 0; border-bottom: var(--bw) solid var(--line); background: none; padding: 0; color: var(--t1); font: inherit; cursor: pointer; }
+  .week-fold > .kv b { display: inline-flex; align-items: center; gap: var(--sp-6); color: var(--t3); }
   .cols { grid-template-columns: 1fr; padding: 0 var(--sp-16); }
   .row { grid-template-columns: var(--sp-44) var(--sp-16) minmax(0, 1fr) auto; min-height: var(--sp-48); }
   .empty { padding: 0 var(--sp-20) var(--sp-40); }
