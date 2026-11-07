@@ -12,7 +12,7 @@ export interface Prefs {
 }
 
 export interface QuietHours {
-  /** Reminders are skipped between `from` and `to`. On unless the person allowed reminders during quiet hours (an older explicit choice of off is kept). */
+  /** Reminders are skipped between `from` and `to`. On by default; off when reminders are allowed during quiet hours, and existing saved settings that say no quiet hours keep that. */
   enabled: boolean;
   from: string;
   to: string;
@@ -32,6 +32,7 @@ function read(): Prefs {
       weekDays: raw.weekDays === 5 ? 5 : 7,
       reminders: raw.reminders === true,
       quiet: {
+        // Only a saved `false` turns skipping off: earlier versions saved it as the default whenever any setting changed, and those keep no quiet hours.
         enabled: raw.quiet?.enabled !== false,
         from: isTime(raw.quiet?.from) ? raw.quiet.from : DEFAULT_QUIET.from,
         to: isTime(raw.quiet?.to) ? raw.quiet.to : DEFAULT_QUIET.to,

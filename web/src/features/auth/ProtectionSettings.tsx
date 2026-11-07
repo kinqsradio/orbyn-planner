@@ -157,16 +157,24 @@ function DetailsDialog({ report, kind, confirmed, onClose, onReviewDevices }: { 
   );
 }
 
+/** Standard is the level in use and the only one that can be chosen, so it is the selected radio; any other level keeps the shield. */
+function ProtectionMark({ standard }: { standard: boolean }) {
+  return standard ? <StandardRadio /> : <Icon name="shield" small />;
+}
+
+/** The two protection levels are a radio group: Standard is checked and the one tab stop; Advanced is Planned, so disabled. Arrow keys have nowhere to go. */
+const stayPut = (e: React.KeyboardEvent) => {
+  if (["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(e.key)) e.preventDefault();
+};
+function StandardRadio() {
+  return <span className="radio on" role="radio" aria-checked="true" aria-label="Standard protection" tabIndex={0} onKeyDown={stayPut} />;
+}
+
 /**
  * Settings · Privacy · Protection: the level as this device verified it from the server's signed chain, never the server's word.
  * Verified, Confirming and Can't confirm are drawn in Orbyn Account Designs. After a rollback or a fork there is no head to sign
  * after, so nothing offers to confirm: the way on is a trusted device. Advanced is shown as Planned.
  */
-/** Standard is the level in use and the only one that can be chosen, so it is the selected radio; any other level keeps the shield. */
-function ProtectionMark({ standard }: { standard: boolean }) {
-  return standard ? <span className="radio on" aria-hidden="true" /> : <Icon name="shield" small />;
-}
-
 export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () => void } = {}) {
   const auth = useAuth();
   const [report, setReport] = useState<ProtectionReport | null>(null);
@@ -247,7 +255,7 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
           </div>
         </div>
       )}
-      <div aria-label="Protection" className="pv-cards">
+      <div aria-label="Protection" role="radiogroup" className="pv-cards">
       <div className={`card pv-card${error ? " pv-err" : kind === "verified" || kind === "confirming" || kind === "unlisted" || kind === "unset" || !report ? "" : " pv-bad"}`}>
         {error ? (
           <>
@@ -324,8 +332,8 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
       </div>
       <div className="srow" style={{ opacity: "var(--op-planned)" }}>
         <div className="lab2">
-          <b className="pv-choice"><span className="radio" aria-hidden="true" />Advanced protection</b>
-          <small>Advanced is <Planned />. When it ships: switching from Standard deletes Orbyn’s copy of your keys at once; server backups made before the switch may keep a copy until the keys are rotated, which is Planned. An account that starts on Advanced never had one.</small>
+          <b className="pv-choice"><span className="radio" role="radio" aria-checked="false" aria-disabled="true" aria-label="Advanced protection" tabIndex={-1} />Advanced protection</b>
+          <small className="planned-text">Advanced is <Planned />. When it ships: switching from Standard deletes Orbyn’s copy of your keys at once; server backups made before the switch may keep a copy until the keys are rotated, which is Planned. An account that starts on Advanced never had one.</small>
         </div>
       </div>
       </div>

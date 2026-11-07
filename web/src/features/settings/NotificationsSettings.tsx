@@ -1,14 +1,14 @@
 import { useState } from "react";
 import { usePrefs } from "../../app/prefs";
 import { Icon } from "../../components/Icon";
-import { Planned } from "../../components/Planned";
+import { NotAvailable, Planned } from "../../components/Planned";
 import { Toggle } from "../../components/Toggle";
 import { permissionState, type PermissionState } from "../reminders/useReminders";
 
 const SETTING = { minHeight: "var(--sp-44)", borderBottom: "var(--bw) solid var(--line)" } as const;
 
 /** A label with its quieter second line, at the left of a row. */
-function Label({ title, note }: { title: string; note?: string }) {
+function Label({ title, note, hint }: { title: string; note?: string; hint?: string }) {
   return (
     <span>
       {title}
@@ -18,6 +18,12 @@ function Label({ title, note }: { title: string; note?: string }) {
           <span className="t4 fine">{note}</span>
         </>
       )}
+      {hint && (
+        <>
+          <br />
+          <span className="t4 fine">{hint}</span>
+        </>
+      )}
     </span>
   );
 }
@@ -25,35 +31,16 @@ function Label({ title, note }: { title: string; note?: string }) {
 const PlannedRow = ({ label, last = false }: { label: string; last?: boolean }) => (
   <div className="kv" style={{ ...SETTING, borderBottom: last ? undefined : SETTING.borderBottom, opacity: "var(--op-planned)" }}>
     <span>{label}</span>
-    <b><Planned /> <span className="t4 fine">Not available yet.</span></b>
+    <b><Planned /> <NotAvailable /></b>
   </div>
 );
 
-/**
- * Notifications that are still loading: the labels stay and the values load. Settings are kept on this device and read at once, so
- * nothing shows this yet; it is here for when they come from the account.
- */
-export function NotificationsLoading() {
-  return (
-    <>
-      <p className="t3" role="status"><span className="spin" aria-hidden="true" /> Loading notifications</p>
-      <div className="card" style={{ gap: 0, padding: "0 var(--sp-14)" }}>
-        <div className="kv" style={SETTING}><span>Remind me about tasks</span><span className="skel" style={{ width: "var(--sp-30)" }} /></div>
-        <PlannedRow label="When someone changes a shared list" />
-        <PlannedRow label="Daily summary email" />
-        <div className="kv" style={SETTING}><span>Quiet hours</span><span className="skel" style={{ width: "var(--sp-120)" }} /></div>
-        <div className="kv" style={{ minHeight: "var(--sp-44)" }}><span>Allow reminders during quiet hours</span><span className="skel" style={{ width: "var(--sp-30)" }} /></div>
-      </div>
-    </>
-  );
-}
-
-/** A quiet-hours edit that did not save: what did not change, and the edit stays visible beside "Not saved". */
+/** A quiet-hours edit that did not save: what did not change, with the times that are still saved (nothing reports a failed save yet, so nothing renders this). */
 export function QuietHoursNotSaved({ saved, onDiscard, onRetry }: { saved: { from: string; to: string }; onDiscard: () => void; onRetry: () => void }) {
   return (
     <div className="banner err" role="alert">
       <Icon name="alert" small />
-      Couldn’t save quiet hours. They’re still {saved.from} to {saved.to} on every device.
+      Couldn’t save quiet hours. They’re still {saved.from} to {saved.to} on this device.
       <span className="end">
         <button type="button" className="ghost sm" onClick={onDiscard}>Discard</button>
         <button type="button" className="btn sm" onClick={onRetry}>Try again</button>
@@ -66,7 +53,7 @@ export function QuietHoursNotSaved({ saved, onDiscard, onRetry }: { saved: { fro
  * Settings · Notifications: reminders on this device and quiet hours. Permission is asked here, on the click that turns reminders on.
  * Server push, email, shared lists and the daily summary are Planned, so they only say so.
  */
-export function NotificationsSettings({ unsaved }: { /** A quiet-hours edit that failed to save (nothing reports that yet). */ unsaved?: { saved: { from: string; to: string }; onDiscard: () => void; onRetry: () => void } } = {}) {
+export function NotificationsSettings() {
   const { prefs, setPrefs } = usePrefs();
   const [permission, setPermission] = useState<PermissionState>(permissionState);
   const [asking, setAsking] = useState(false);
@@ -107,11 +94,10 @@ export function NotificationsSettings({ unsaved }: { /** A quiet-hours edit that
           Notifications are blocked in your browser. Allow them in the site settings to get reminders.
         </div>
       )}
-      {unsaved && <QuietHoursNotSaved {...unsaved} />}
       <div className="bh"><b>Reminders</b><span></span></div>
       <div className="card" style={{ gap: 0, padding: "0 var(--sp-14)" }}>
         <div className="kv" style={SETTING}>
-          <Label title="Remind me about tasks" note={note} />
+          <Label title="Remind me about tasks" note={note} hint={permission === "unsupported" ? "Try another browser to get reminders." : undefined} />
           <b className="ctl">
             {asking ? (
               <span className="t4"><span className="spin" aria-hidden="true" /> Waiting for your browser</span>
@@ -122,7 +108,7 @@ export function NotificationsSettings({ unsaved }: { /** A quiet-hours edit that
             ) : blocked ? (
               <span className="st warn"><span className="sd" />Blocked in this browser</span>
             ) : null}
-            <Toggle label="Remind me about tasks" on={on || asking || blocked} checked={on || asking} disabled={permission === "unsupported" || blocked} onChange={(v) => void toggle(v)} />
+            <Toggle label="Remind me about tasks" on={on || asking || blocked} checked={on || asking} disabled={permission === "unsupported" || blocked || asking} onChange={(v) => void toggle(v)} />
           </b>
         </div>
         <PlannedRow label="Server push and email reminders" />
@@ -139,7 +125,6 @@ export function NotificationsSettings({ unsaved }: { /** A quiet-hours edit that
           <b className="ctl">
             {field("quiet-from", "From", prefs.quiet.from, (from) => setPrefs({ quiet: { ...prefs.quiet, from } }))}
             {field("quiet-to", "Until", prefs.quiet.to, (to) => setPrefs({ quiet: { ...prefs.quiet, to } }))}
-            {unsaved && <span className="pillx red">Not saved</span>}
           </b>
         </div>
         <div className="kv" style={{ minHeight: "var(--sp-44)" }}>

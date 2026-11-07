@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { PasskeyButton, Planned } from "../../components/Planned";
+import { NotAvailable, PasskeyButton, Planned } from "../../components/Planned";
 import { ApiFailure } from "../../api/auth";
 import { SignInUnavailable } from "../../api/authCrypto";
 import { BusyButton } from "../../components/BusyButton";
@@ -119,9 +119,9 @@ function CheckEmail({ pending, onBack, onDone }: { pending: PendingSignUp; onBac
 
   const seconds = `${Math.floor(wait / 60)}:${String(wait % 60).padStart(2, "0")}`;
   return (
-    <form className="authcard" onSubmit={(e) => void verify(e)} aria-label="Check your email" noValidate>
-      <h1 className="auth-title">Check your email</h1>
-      <p className="t2">We sent a 6-digit code to <b style={{ fontWeight: "var(--fw-medium)" }}>{pending.email}</b>. It works for 30 minutes.</p>
+    <form className="authcard" onSubmit={(e) => void verify(e)} aria-label="Check your inbox" noValidate>
+      <h1 className="auth-title">Check your inbox</h1>
+      <p className="t3">We sent a 6-digit code to {pending.email}. It works for 30 minutes.</p>
       <div className="cboxes">
         {Array.from({ length: 6 }, (_, i) => (
           <span key={i} className={`cbox${wrong ? " err" : ""}${focused && !wrong && i === Math.min(digits.length, 5) ? " on" : ""}`} aria-hidden="true">{digits[i] ?? ""}</span>
@@ -156,10 +156,10 @@ function CheckEmail({ pending, onBack, onDone }: { pending: PendingSignUp; onBac
       ) : wait > 0 ? (
         <span className="t3 small">Send a new code in {seconds}</span>
       ) : (
-        <button type="button" className="link-btn small" onClick={() => void resend()}>Send a new code</button>
+        <button type="button" className="ghost" onClick={() => void resend()}>Resend the code</button>
       )}
       <span className="t4 small">
-        Wrong address? <button type="button" className="link-btn link" onClick={onBack}>Change email</button>
+        Wrong address? <button type="button" className="link-btn link" onClick={onBack}>Change it</button>
       </span>
     </form>
   );
@@ -237,7 +237,7 @@ function SignUp({ go }: { go: (s: AuthScreen) => void }) {
         <label htmlFor="su-password">Password</label>
         <input id="su-password" className="field" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
       </div>
-      <p className="t4 small">Your password never leaves this device. Orbyn checks it without ever seeing it.</p>
+      <p className="t4 small">Your password never leaves this device. Orbyn checks it without ever seeing it. We email a code to confirm your address.</p>
       <CryptoProblem />
       {error && <p className="err" role="alert">{error}</p>}
       <PasskeyButton label="Continue with a passkey" />
@@ -399,9 +399,9 @@ function SignIn({ go }: { go: (s: AuthScreen) => void }) {
 }
 
 function CantSignIn({ go }: { go: (s: AuthScreen) => void }) {
-  const options: { icon: "key" | "check" | "bell" | "shield"; label: string; planned: boolean }[] = [
+  const options: { icon: "key" | "check" | "bell" | "shield"; label: string; planned: boolean; note?: string }[] = [
     { icon: "key", label: "Use a passkey", planned: true },
-    { icon: "check", label: "Approve from a trusted device", planned: false },
+    { icon: "check", label: "Approve from a trusted device", planned: false, note: "Sign in with your password here first, then approve this device from one you already trust." },
     { icon: "bell", label: "Recover with your email and phone", planned: true },
     { icon: "shield", label: "Use a recovery key or contact", planned: true },
   ];
@@ -409,22 +409,31 @@ function CantSignIn({ go }: { go: (s: AuthScreen) => void }) {
     <div className="authcard" role="group" aria-label="Can’t sign in?" style={{ width: "var(--sp-420)" }}>
       <button type="button" className="ghost sm" style={{ alignSelf: "flex-start" }} onClick={() => go("signin")}><Icon name="left" small />Back to sign in</button>
       <h1 className="auth-title">Can’t sign in?</h1>
+      <span className="t3" style={{ fontSize: "var(--fs-12-5)" }}>You need your password to sign in today. Recovering without it is Planned.</span>
       <ul className="auth-options">
         {options.map((o) => (
-          <li key={o.label} className="nav" style={{ height: "var(--sp-44)", background: "var(--raise)", opacity: o.planned ? 0.6 : 1 }}>
+          <li key={o.label} className="nav" style={{ minHeight: "var(--sp-44)", height: "auto", background: "var(--raise)", opacity: o.planned ? "var(--op-planned)" : 1 }}>
             <Icon name={o.icon} small />
-            {o.label}
-            {o.planned && (
-              <>
-                {" "}
-                <Planned /> <span className="t3 small">Not available yet.</span>
-              </>
-            )}
+            <span>
+              {o.label}
+              {o.planned && (
+                <>
+                  {" "}
+                  <Planned /> <NotAvailable />
+                </>
+              )}
+              {o.note && (
+                <>
+                  <br />
+                  <span className="t3 small">{o.note}</span>
+                </>
+              )}
+            </span>
           </li>
         ))}
       </ul>
       <span className="t3" style={{ fontSize: "var(--fs-12-5)" }}>
-        Account recovery with your email and phone, with a short wait to keep your account safe, is Planned, as are recovery keys and recovery contacts. Approving from a trusted device works today.
+        Account recovery with your email and phone, recovery keys and recovery contacts are Planned. Until then, signing in needs your password.
       </span>
     </div>
   );

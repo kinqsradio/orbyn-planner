@@ -72,6 +72,8 @@
   --lh-body: 1.45;
   /* A row for something Planned: shown, but dimmed. */
   --op-planned: .7;
+  /* The text colour of everything that says Planned or Not available yet; the designer is defining its value for each theme. */
+  --planned-text: var(--t3);
   --ls-title: -.015em; --ls-heading: -.02em; --ls-code: .12em;
 }
 

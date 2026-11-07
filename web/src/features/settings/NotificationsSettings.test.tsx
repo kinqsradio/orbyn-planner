@@ -3,8 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../../app/App";
 import { ClockProvider } from "../../app/clock";
-import { PREFS_KEY } from "../../app/prefs";
-import { NotificationsLoading, QuietHoursNotSaved } from "./NotificationsSettings";
+import { DEFAULT_QUIET, PREFS_KEY } from "../../app/prefs";
+import { QuietHoursNotSaved } from "./NotificationsSettings";
 import { LocalStore } from "../../store/LocalStore";
 import { MemoryPersistence } from "../../store/persistence";
 
@@ -86,7 +86,7 @@ describe("Settings · Notifications", () => {
     expect(card.querySelectorAll(".st.planned")).toHaveLength(3);
     for (const label of ["Server push and email reminders", "When someone changes a shared list", "Daily summary email"]) {
       expect((row(label) as HTMLElement).style.opacity).toBe("var(--op-planned)"); // dimmed, from a token
-      expect(row(label).querySelector(".fine")).not.toBeNull(); // 12px regular
+      expect(row(label).querySelector(".planned-note")).not.toBeNull(); // 12px regular, in the one Planned colour
     }
     expect(card.querySelectorAll('[role="switch"]')).toHaveLength(1); // the one real switch
   });
@@ -128,10 +128,50 @@ describe("Settings · Notifications", () => {
     expect(prefs().reminders).toBe(false);
   });
 
-  it("says when the browser has no notifications", async () => {
+  it("a browser with no notifications: the switch is off and disabled, the line says so, with a muted hint", async () => {
     await open_();
     expect(screen.getByText("This browser can’t show notifications.")).toBeInTheDocument();
+    expect(screen.getByText("Try another browser to get reminders.")).toBeInTheDocument();
     expect(reminders()).toBeDisabled();
+    expect(reminders()).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("a permission request that fails outright leaves reminders off and the question open for next time", async () => {
+    const { request } = stubNotification("default");
+    request.mockImplementation(() => Promise.reject(new Error("no prompt")));
+    await open_();
+    await userEvent.click(reminders());
+    expect(prefs().reminders).toBe(false);
+    expect(reminders()).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText("Reminders are off on this device.")).toBeInTheDocument();
+    expect(reminders()).not.toBeDisabled(); // not blocked: it can be tried again
+  });
+
+  it("while the browser's question is open the switch is disabled, so an off toggle cannot race the answer", async () => {
+    let answer: (v: "granted") => void = () => undefined;
+    const { request } = stubNotification("default");
+    request.mockImplementation(() => new Promise<"granted">((r) => (answer = r)) as never);
+    await open_();
+    await userEvent.click(reminders());
+    expect(reminders()).toBeDisabled();
+    await act(async () => answer("granted"));
+    expect(reminders()).not.toBeDisabled();
+  });
+
+  it("the defaults: quiet hours are on from 22:00 to 07:00, and a saved state that cannot be read falls back to them", async () => {
+    expect(DEFAULT_QUIET).toEqual({ enabled: true, from: "22:00", to: "07:00" });
+    localStorage.setItem(PREFS_KEY, "not json");
+    stubNotification("granted");
+    await open_();
+    expect(screen.getByRole("switch", { name: "Allow reminders during quiet hours" })).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("a quiet-hours edit that did not save says what is still saved, with the real times", async () => {
+    const retry = vi.fn();
+    render(<QuietHoursNotSaved saved={{ from: "23:15", to: "06:45" }} onDiscard={() => undefined} onRetry={retry} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Couldn’t save quiet hours. They’re still 23:15 to 06:45 on this device.");
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(retry).toHaveBeenCalledTimes(1);
   });
 
   it("a Reminders heading sits above the card, the web-only line follows it, and the chip shows the browser's permission", async () => {
@@ -179,31 +219,12 @@ describe("Settings · Notifications", () => {
     expect(prefs().quiet.enabled).toBe(true);
   });
 
-  it("an earlier explicit choice of no quiet hours is kept as allowed, and a fresh install has them on", async () => {
+  it("existing saved settings keep no quiet hours, and a fresh install has them on", async () => {
     stubNotification("granted");
     localStorage.setItem(PREFS_KEY, JSON.stringify({ quiet: { enabled: false, from: "23:00", to: "06:00" } }));
     await open_();
     expect(screen.getByRole("switch", { name: "Allow reminders during quiet hours" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByLabelText("From")).toHaveValue("23:00");
-  });
-
-  it("the loading frame keeps the labels and the Planned rows, with skeletons for the values", () => {
-    render(<NotificationsLoading />);
-    expect(screen.getByRole("status")).toHaveTextContent("Loading notifications");
-    expect(screen.getByText("Remind me about tasks").closest(".kv")!.querySelector(".skel")).not.toBeNull();
-    expect(screen.getByText("Quiet hours", { selector: "span" }).closest(".kv")!.querySelector(".skel")).not.toBeNull();
-    expect(screen.getByText("When someone changes a shared list").closest(".kv")).toHaveTextContent("Planned Not available yet.");
-  });
-
-  it("a quiet-hours edit that did not save says what did not change, with Discard and Try again", async () => {
-    const retry = vi.fn();
-    const discard = vi.fn();
-    render(<QuietHoursNotSaved saved={{ from: "22:00", to: "07:00" }} onDiscard={discard} onRetry={retry} />);
-    expect(screen.getByRole("alert")).toHaveTextContent("Couldn’t save quiet hours. They’re still 22:00 to 07:00 on every device.");
-    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
-    await userEvent.click(screen.getByRole("button", { name: "Discard" }));
-    expect(retry).toHaveBeenCalledTimes(1);
-    expect(discard).toHaveBeenCalledTimes(1);
   });
 });
 

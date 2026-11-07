@@ -464,7 +464,7 @@ button.pillx { border: 0; }
 .st.info { background: var(--blue-bg); color: var(--blue); }
 .st.warn { background: var(--amber-bg); color: var(--amber-text); box-shadow: var(--ring-amber); }
 .st.err { background: var(--red-bg); color: var(--red); }
-.st.planned { background: transparent; color: var(--t3); box-shadow: inset 0 0 0 var(--bw) var(--line2); }
+.st.planned { background: transparent; color: var(--planned-text); box-shadow: inset 0 0 0 var(--bw) var(--line2); }
 .banner { display: flex; align-items: center; gap: var(--sp-12); padding: var(--sp-10) var(--sp-14); border-radius: var(--r-14); background: var(--raise); color: var(--t1); font-size: var(--fs-12-5); }
 .banner.warn { background: var(--amber-bg); box-shadow: var(--ring-amber); }
 .banner.info { background: var(--blue-bg); }
@@ -578,6 +578,8 @@ button.pillx { border: 0; }
 }
 
 /* A passkey button the designs draw but that does nothing yet: dimmed, with the Planned label. */
-.passkey-planned { opacity: .6; display: inline-flex; gap: var(--sp-6); align-items: center; justify-content: center; flex-wrap: wrap; height: auto; min-height: var(--sp-32); cursor: default; }
+.passkey-planned { opacity: var(--op-planned); display: inline-flex; gap: var(--sp-6); align-items: center; justify-content: center; flex-wrap: wrap; height: auto; min-height: var(--sp-32); cursor: default; }
 
 .pv-choice { display: inline-flex; align-items: center; gap: var(--sp-8); font-weight: var(--fw-medium); }
+.planned-note { color: var(--planned-text); font-size: var(--fs-12); font-weight: var(--fw-regular); }
+.planned-text { color: var(--planned-text); }
