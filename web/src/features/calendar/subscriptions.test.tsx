@@ -101,6 +101,7 @@ describe("refreshCalendar", () => {
 describe("hourly refresh while open", () => {
   it("reads a new subscription at once and then every hour", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-11-07T10:00:00Z")); // the same moment as the store's clock, so the test does not depend on today's date
     const fetchFn = ok();
     vi.stubGlobal("fetch", fetchFn);
     const { store, setNow } = await subscribed(fetchFn);
@@ -122,5 +123,34 @@ describe("hourly refresh while open", () => {
       await vi.advanceTimersByTimeAsync(REFRESH_MS + 10);
     });
     expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("the clock passed to the refresh", () => {
+  it("is not a dependency: a new function on every render does not read the same stale feed again and again", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-11-07T20:00:00Z")); // ten hours after the store's clock, so the feed always looks stale to it
+    let calls = 0;
+    let stop = false;
+    const fetchFn = vi.fn(async () => {
+      calls += 1;
+      if (calls > 25) stop = true; // a runaway ends here, and the assertion below fails
+      return new Response(FEED);
+    }) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchFn);
+    const { store } = await subscribed(fetchFn);
+    function Probe() {
+      useSubscriptionRefresh(() => (stop ? 0 : Date.now())); // a new function each render, as an inline arrow is
+      return null;
+    }
+    render(
+      <StoreProvider store={store}>
+        <Probe />
+      </StoreProvider>,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 });
