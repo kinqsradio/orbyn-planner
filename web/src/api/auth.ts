@@ -21,10 +21,13 @@ import type { DeviceList } from "../generated/DeviceList";
 import type { LoginFinish } from "../generated/LoginFinish";
 import type { LoginStart } from "../generated/LoginStart";
 import type { LoginStarted } from "../generated/LoginStarted";
+import type { EmailResend } from "../generated/EmailResend";
+import type { EmailVerify } from "../generated/EmailVerify";
 import type { RegisterFinish } from "../generated/RegisterFinish";
 import type { RegisterStart } from "../generated/RegisterStart";
 import type { RegisterStarted } from "../generated/RegisterStarted";
 import type { SessionCreated } from "../generated/SessionCreated";
+import type { SignUpPending } from "../generated/SignUpPending";
 import { engineUrl } from "./engine";
 
 /** What went wrong, in words a person can use. */
@@ -35,6 +38,7 @@ const MESSAGES: Record<string, string> = {
   zone_deleted: "That list or calendar was deleted on another device.",
   email_unavailable: "That email can’t be used for a new account. If it’s yours, sign in instead.",
   login_failed: "That email and password don’t match.",
+  invalid_email_code: "That code didn’t work.",
   device_not_trusted: "This device hasn’t been approved yet. Approve it from a device you already trust.",
   last_trusted_device: "This is your last trusted device. Approve another device first, then remove this one.",
   approval_expired: "That approval ran out of time or was closed. Start again from a trusted device. If this keeps happening, check that this device’s clock is right.",
@@ -123,7 +127,12 @@ export function createAuthApi(options: AuthApiOptions) {
 
   return {
     registerStart: (body: RegisterStart) => call<RegisterStarted>("POST", "/v1/accounts/register/start", body),
-    registerFinish: (body: RegisterFinish) => call<SessionCreated>("POST", "/v1/accounts/register/finish", body),
+    /** No account and no session yet: a sign-up waits for the code sent to the address. */
+    registerFinish: (body: RegisterFinish) => call<SignUpPending>("POST", "/v1/accounts/register/finish", body),
+    /** The six-digit code from the email: creates the account with the signing-up device trusted, and answers its session. */
+    emailVerify: (body: EmailVerify) => call<SessionCreated>("POST", "/v1/accounts/email/verify", body),
+    /** A new code for a pending sign-up: three an hour, and the answer is the same whatever the id. */
+    emailResend: (body: EmailResend) => call<void>("POST", "/v1/accounts/email/resend", body),
     /** `trusted_device` is the optional proof from a device already trusted on the account. */
     loginStart: (body: LoginStart) => call<LoginStarted>("POST", "/v1/sessions/login/start", body),
     loginFinish: (body: LoginFinish) => call<SessionCreated>("POST", "/v1/sessions/login/finish", body),

@@ -6,7 +6,8 @@
 import { describe, expect, it } from "vitest";
 import { realAuthCrypto } from "../api/testing/realModule";
 import { createMemoryKeyStore, type KeyStore } from "../api/keyStore";
-import { removeDevice, signIn, signOut, signUp } from "../auth/flows";
+import { removeDevice, signIn, signOut } from "../auth/flows";
+import { signUpVerified } from "./testing/mailbox";
 import { ApproverController, DeviceController } from "../auth/pairing";
 import { createAuthServices, type AuthServices } from "../auth/services";
 
@@ -45,7 +46,7 @@ describe.skipIf(!engineUrl)("a real engine, the real module", () => {
     const d = browser();
 
     // Device A signs up and is the first, trusted device.
-    const first = await signUp(a.services, { name: "Sam", email, password });
+    const first = await signUpVerified(a.services, { name: "Sam", email, password });
     expect(first.deviceState).toBe("trusted");
 
     // Device D signs in with the same password and is pending.
@@ -107,7 +108,7 @@ describe.skipIf(!engineUrl)("a real engine, the real module", () => {
     const mail = `e2e-cancel-${Date.now()}@example.com`;
     const a = browser();
     const d = browser();
-    const first = await signUp(a.services, { name: "Sam", email: mail, password });
+    const first = await signUpVerified(a.services, { name: "Sam", email: mail, password });
     const second = await signIn(d.services, { email: mail, password });
     const pending = (await a.services.api.devices()).devices.find((x) => x.id === second.deviceId)!;
     const approver = new ApproverController(a.services, first, pending);

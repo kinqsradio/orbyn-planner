@@ -1,8 +1,8 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { ApiFailure } from "../../api/auth";
 import { SignInUnavailable } from "../../api/authCrypto";
 import { Icon } from "../../components/Icon";
-import { KeysForAnotherAccount, signIn, signUp } from "../../auth/flows";
+import { KeysForAnotherAccount, signIn, signUp, type PendingSignUp } from "../../auth/flows";
 import { cryptoLoad } from "../../api/realCrypto";
 import { CryptoProblem, MODULE_LOAD_FAILED } from "./CryptoProblem";
 import { useAuth, type AuthScreen } from "../../auth/AuthProvider";
@@ -33,6 +33,87 @@ function Landing({ go }: { go: (s: AuthScreen) => void }) {
   );
 }
 
+/** A new code can be asked for this long after the last one was sent. */
+const RESEND_AFTER_MS = 60_000;
+/** The engine allows three new codes an hour; the page counts them, since it answers the same whether or not one was sent. */
+const RESENDS_PER_HOUR = 3;
+const HOUR_MS = 3_600_000;
+
+/** The code step of a sign-up: no account and no session exist until the code from the email is right. */
+function CheckEmail({ pending, onBack, onDone }: { pending: PendingSignUp; onBack: () => void; onDone: () => void }) {
+  const auth = useAuth()!;
+  const clock = auth.services.now;
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [lastSent, setLastSent] = useState(clock());
+  const [resends, setResends] = useState<number[]>([]);
+  const [, tick] = useState(0);
+
+  // Leaving this screen, or closing the page, lets the sign-up go: its keys were only ever in memory.
+  useEffect(() => () => pending.cancel(), [pending]);
+  // The countdown on "Send a new code".
+  useEffect(() => {
+    const id = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const recent = resends.filter((t) => clock() - t < HOUR_MS);
+  const wait = Math.max(0, Math.ceil((lastSent + RESEND_AFTER_MS - clock()) / 1000));
+  const limited = recent.length >= RESENDS_PER_HOUR;
+  const ready = code.replace(/\D/g, "").length === 6;
+
+  const verify = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await pending.verify(code);
+      onDone();
+    } catch (e) {
+      // A wrong, an expired and a made-up code are one answer; "Send a new code" is always there.
+      setError(describeError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resend = async () => {
+    setError(null);
+    try {
+      await pending.resend();
+      setResends([...recent, clock()]);
+      setLastSent(clock());
+      setCode("");
+    } catch (e) {
+      setError(describeError(e));
+    }
+  };
+
+  return (
+    <form className="authcard" onSubmit={(e) => void verify(e)} aria-label="Check your email" noValidate>
+      <h1 className="auth-title">Check your email</h1>
+      <p className="t3">We sent a 6-digit code to <b style={{ fontWeight: 500 }}>{pending.email}</b>. This code expires in 30 minutes.</p>
+      <div className="form" style={{ width: "auto" }}>
+        <label htmlFor="su-code">Code</label>
+        <input id="su-code" className="field" inputMode="numeric" autoComplete="one-time-code" maxLength={7} placeholder="123456" value={code} onChange={(e) => setCode(e.target.value)} autoFocus />
+      </div>
+      {error && <p className="err" role="alert">{error}</p>}
+      <button type="submit" className="btn" disabled={busy || !ready}>{busy ? "Checking…" : "Verify"}</button>
+      <span className="t3 small">
+        {limited ? (
+          <span role="status">Try again later.</span>
+        ) : (
+          <button type="button" className="link-btn" disabled={wait > 0} onClick={() => void resend()}>
+            Send a new code{wait > 0 ? ` (${wait}s)` : ""}
+          </button>
+        )}{" "}
+        · <button type="button" className="link-btn" onClick={onBack}>Use a different email</button>
+      </span>
+    </form>
+  );
+}
+
 function SignUp({ go }: { go: (s: AuthScreen) => void }) {
   const auth = useAuth()!;
   const [name, setName] = useState("");
@@ -40,20 +121,34 @@ function SignUp({ go }: { go: (s: AuthScreen) => void }) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Set once the engine has sent a code: the sign-up waits for it. */
+  const [pending, setPending] = useState<PendingSignUp | null>(null);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      await signUp(auth.services, { name, email, password });
-      auth.closeAuth();
+      setPending(await signUp(auth.services, { name, email, password }));
     } catch (e) {
       setError(describeError(e));
     } finally {
       setBusy(false);
     }
   };
+
+  if (pending) {
+    return (
+      <CheckEmail
+        pending={pending}
+        onBack={() => {
+          setPending(null);
+          setPassword("");
+        }}
+        onDone={auth.closeAuth}
+      />
+    );
+  }
 
   return (
     <form className="authcard" onSubmit={submit} aria-label="Create your account" noValidate>
@@ -66,7 +161,7 @@ function SignUp({ go }: { go: (s: AuthScreen) => void }) {
         <label htmlFor="su-password">Password</label>
         <input id="su-password" className="field" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
       </div>
-      <p className="t3 small">Your password never leaves this device. Only a sealed proof of it is sent.</p>
+      <p className="t3 small">Your password never leaves this device. Only a sealed proof of it is sent. We’ll email you a code to check the address.</p>
       <CryptoProblem />
       {error && <p className="err" role="alert">{error}</p>}
       <button type="submit" className="btn" disabled={busy || !email.trim() || password.length < 8}>

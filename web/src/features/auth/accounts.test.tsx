@@ -86,6 +86,16 @@ async function fillSignUp(user = SAM) {
   await userEvent.type(screen.getByLabelText("Email"), user.email);
   await userEvent.type(screen.getByLabelText("Password"), user.password);
   await userEvent.click(screen.getByRole("button", { name: "Create account" }));
+  // The code step comes when the engine has sent a code; a refusal before that shows its message instead.
+  await waitFor(() => expect(screen.queryByLabelText("Code") ?? screen.queryByRole("alert")).not.toBeNull());
+  if (screen.queryByLabelText("Code") && engine.latestEmailCode(user.email)) await verifyEmail(user.email);
+}
+
+/** The code step: the code the mock engine "emailed", typed in. */
+async function verifyEmail(address: string, code?: string) {
+  const field = await screen.findByLabelText("Code");
+  await userEvent.type(field, code ?? engine.latestEmailCode(address)!);
+  await userEvent.click(screen.getByRole("button", { name: "Verify" }));
 }
 
 async function fillSignIn(email = SAM.email, password = SAM.password) {
@@ -176,14 +186,19 @@ describe("sign up", () => {
     expect(screen.getByRole("button", { name: "Create account" })).toBeDisabled();
   });
 
-  it("an email that is taken says so", async () => {
+  it("an email that is taken gets the same code step, and nothing tells it apart", async () => {
     const first = await mount(services());
     await fillSignUp();
     await todayShown();
     first.unmount();
     await mount(services());
     await fillSignUp();
-    expect(await screen.findByRole("alert")).toHaveTextContent("That email can’t be used for a new account");
+    // Sign-up never says whether an address has an account: this one gets the same code step, and no code ever comes.
+    expect(screen.getByRole("form", { name: "Check your email" })).toBeInTheDocument();
+    expect(engine.latestEmailCode(SAM.email)).toBeUndefined();
+    await userEvent.type(screen.getByLabelText("Code"), "123456");
+    await userEvent.click(screen.getByRole("button", { name: "Verify" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("That code didn’t work.");
   });
 
   it("an invalid email is refused before anything is sent", async () => {
@@ -517,6 +532,7 @@ describe("adding a device", () => {
     await userEvent.type(screen.getByLabelText("Email"), SAM.email);
     await userEvent.type(screen.getByLabelText("Password"), SAM.password);
     await userEvent.click(screen.getByRole("button", { name: "Create account" }));
+    await verifyEmail(SAM.email);
     await openAccount();
     await userEvent.click(await screen.findByRole("button", { name: "Add a device" }));
     expect(within(screen.getByRole("dialog", { name: "Add a device" })).getByText(/sign in with your email and password/)).toBeInTheDocument();
@@ -761,6 +777,7 @@ describe("signing out", () => {
     await userEvent.type(screen.getByLabelText("Email"), SAM.email);
     await userEvent.type(screen.getByLabelText("Password"), SAM.password);
     await userEvent.click(screen.getByRole("button", { name: "Create account" }));
+    await verifyEmail(SAM.email);
     await screen.findByRole("list", { name: "Devices" });
     engine.expireAllSessions();
     await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
@@ -778,6 +795,73 @@ describe("signing out", () => {
     expect(engine.calls.filter((c) => c.path.startsWith("/v1/accounts") || c.path.includes("/login/")).every((c) => c.authorization === null)).toBe(true);
     expect(localStorage.getItem("token")).toBeNull();
     expect(JSON.stringify({ ...localStorage })).not.toMatch(/token-/);
+  });
+});
+
+describe("email verification at sign-up", () => {
+  async function toCodeStep(keys = createMemoryKeyStore()) {
+    const auth = services(keys);
+    await mount(auth);
+    await userEvent.click(await screen.findByRole("button", { name: "Get started" }));
+    await userEvent.type(screen.getByLabelText("Name"), SAM.name);
+    await userEvent.type(screen.getByLabelText("Email"), SAM.email);
+    await userEvent.type(screen.getByLabelText("Password"), SAM.password);
+    await userEvent.click(screen.getByRole("button", { name: "Create account" }));
+    await screen.findByRole("form", { name: "Check your email" });
+    return { auth, keys };
+  }
+
+  it("asks for the code, keeps nothing until it is right, says when it didn’t work, and only then signs in and stores the keys", async () => {
+    const { auth, keys } = await toCodeStep();
+    const form = screen.getByRole("form", { name: "Check your email" });
+    expect(within(form).getByText(/sam@example\.com/)).toBeInTheDocument();
+    expect(within(form).getByText(/This code expires in 30 minutes\./)).toBeInTheDocument();
+    // No account and no session: nothing is stored.
+    expect(auth.tokens.getSession()).toBeNull();
+    expect(await keys.loadKeys()).toBeNull();
+    expect(await keys.loadIdentity()).toBeNull();
+
+    await userEvent.type(screen.getByLabelText("Code"), "000000");
+    await userEvent.click(screen.getByRole("button", { name: "Verify" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("That code didn’t work.");
+    expect(await keys.loadKeys()).toBeNull();
+    expect(screen.getByRole("button", { name: /Send a new code/ })).toBeInTheDocument(); // always offered, for an expired code too
+
+    await userEvent.clear(screen.getByLabelText("Code"));
+    await userEvent.type(screen.getByLabelText("Code"), engine.latestEmailCode(SAM.email)!);
+    await userEvent.click(screen.getByRole("button", { name: "Verify" }));
+    await todayShown();
+    expect(auth.tokens.getSession()?.deviceState).toBe("trusted");
+    expect(await keys.loadKeys()).not.toBeNull();
+  });
+
+  it("a new code can be asked for a minute after the last one, three times an hour, and the old code stops working", async () => {
+    await toCodeStep();
+    const resend = () => screen.getByRole("button", { name: /Send a new code/ });
+    expect(resend()).toBeDisabled();
+    expect(resend()).toHaveTextContent(/\(\d+s\)/);
+    const first = engine.latestEmailCode(SAM.email)!;
+    for (let i = 1; i <= 3; i++) {
+      nowMs += 61_000;
+      await waitFor(() => expect(resend()).toBeEnabled(), { timeout: 3000 });
+      await userEvent.click(resend());
+      await waitFor(() => expect(engine.latestEmailCode(SAM.email)).not.toBe(first));
+      if (i < 3) await waitFor(() => expect(resend()).toBeDisabled());
+    }
+    expect(await screen.findByText("Try again later.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Send a new code/ })).toBeNull();
+    await userEvent.type(screen.getByLabelText("Code"), first);
+    await userEvent.click(screen.getByRole("button", { name: "Verify" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("That code didn’t work.");
+  });
+
+  it("Use a different email starts over, and the abandoned sign-up leaves nothing behind", async () => {
+    const { keys } = await toCodeStep();
+    await userEvent.click(screen.getByRole("button", { name: "Use a different email" }));
+    expect(screen.getByRole("form", { name: "Create your account" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Email")).toHaveValue(SAM.email); // kept, to correct
+    expect(await keys.loadKeys()).toBeNull();
+    expect(await keys.loadSnapshot()).toBeNull();
   });
 });
 

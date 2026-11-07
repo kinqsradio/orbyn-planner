@@ -38,10 +38,28 @@ function emailOrFail(crypto: AuthCrypto, email: string): string {
   return normal;
 }
 
-/** Creates the account and signs this device in as its first, trusted device. */
-export async function signUp(services: AuthServices, input: { name: string; email: string; password: string }): Promise<StoredSession> {
+/**
+ * A sign-up that waits for the code sent to the address. There is no account and no session yet, and nothing is stored: the device's
+ * keys are only in memory until the code is right (then they are stored and the session is kept), and are let go if the sign-up is
+ * cancelled or the page closes, so an abandoned sign-up leaves nothing behind. The engine keeps the sign-up 30 minutes after the
+ * last code it sent.
+ */
+export interface PendingSignUp {
+  readonly signupId: string;
+  readonly email: string;
+  /** The six-digit code from the email. A wrong one throws `invalid_email_code` and leaves the sign-up open (the engine closes it after five). */
+  verify(code: string): Promise<StoredSession>;
+  /** Asks for a new code (the engine allows three an hour and answers the same whatever happens). */
+  resend(): Promise<void>;
+  /** Lets go of the keys: the sign-up is simply gone. */
+  cancel(): void;
+}
+
+/** Starts a sign-up: the password steps and the device's first signature, then the engine sends a code to the address. */
+export async function signUp(services: AuthServices, input: { name: string; email: string; password: string }): Promise<PendingSignUp> {
   const crypto = services.crypto(); // refuses before anything is sent when sign-in is not in this build
   let keys: DeviceKeys | null = null;
+  let held = false;
   try {
     const email = emailOrFail(crypto, input.email);
     const password = utf8(input.password);
@@ -54,27 +72,61 @@ export async function signUp(services: AuthServices, input: { name: string; emai
       pending.free?.();
     }
     keys = crypto.deviceKeys.create();
-    const created = await services.api.registerFinish({
+    const waiting = await services.api.registerFinish({
       email,
       registration_upload: encodeBytes(upload),
       device: describeDevice(keys),
       device_signature: encodeBytes(keys.signRegistration(email, upload)),
     });
-    const wrap = await services.wrapSecret();
-    try {
-      await services.keys.saveKeys(keys.export(wrap));
-    } finally {
-      wrap.fill(0);
-    }
-    await services.keys.saveIdentity({ accountId: created.account_id, deviceId: created.device_id, email });
-    const session = toStored(created, email, input.name.trim());
-    await services.tokens.set(session);
-    return session;
+    held = true;
+    const mine = keys;
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      mine.free();
+    };
+    return {
+      signupId: waiting.signup_id,
+      email,
+      verify: async (code) => {
+        if (released) throw new ApiFailure("invalid_email_code", 400, "That code didn’t work.");
+        const created = await services.api.emailVerify({ signup_id: waiting.signup_id, code: code.replace(/\D/g, "") });
+        // Only now is there an account and a session, so only now are the keys kept.
+        try {
+          const wrap = await services.wrapSecret();
+          try {
+            await services.keys.saveKeys(mine.export(wrap));
+          } finally {
+            wrap.fill(0);
+          }
+          await services.keys.saveIdentity({ accountId: created.account_id, deviceId: created.device_id, email });
+          const session = toStored(created, email, input.name.trim());
+          await services.tokens.set(session);
+          await signStandardProtection(services, session);
+          return session;
+        } finally {
+          release();
+        }
+      },
+      resend: () => services.api.emailResend({ signup_id: waiting.signup_id }),
+      cancel: release,
+    };
   } catch (error) {
     return asFailure(error);
   } finally {
-    keys?.free();
+    if (!held) keys?.free();
   }
+}
+
+/**
+ * CALL SITE, NOT YET LIVE: right after a successful verification the first device must sign the account's protection setting as
+ * Standard (sequence 1). The engine endpoint for that is not in the contract yet (Worker 2's next PR); until it is, this does nothing.
+ * When it lands, sign the setting with this device's keys here (they are still open) and send it, before the planner opens.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function signStandardProtection(_services: AuthServices, _session: StoredSession): Promise<void> {
+  // TODO(protection-setting): sign and send "Standard, seq 1" once the engine's contract exists.
 }
 
 /** This browser holds the keys of another account. Signing in to this one would remove them, so the person must agree first. */
