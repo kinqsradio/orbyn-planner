@@ -2,12 +2,18 @@
 // UTC-4 in summer) so the conversions have known answers.
 (globalThis as unknown as { process: { env: Record<string, string> } }).process.env.TZ = "America/New_York";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { LocalStore } from "../store/LocalStore";
 import { expandEvents } from "../store/occurrences";
 import { MemoryPersistence } from "../store/persistence";
 import { parseIcs } from "./ics";
 import { resolveZone, wallToLocal, zonedInstant } from "./zones";
+
+const zoneWork = vi.hoisted(() => ({ wallToLocal: 0 }));
+vi.mock("./zones", async (original) => {
+  const real = await original<typeof import("./zones")>();
+  return { ...real, wallToLocal: (...args: Parameters<typeof real.wallToLocal>) => (zoneWork.wallToLocal++, real.wallToLocal(...args)) };
+});
 
 const feed = (...props: string[]) => ["BEGIN:VCALENDAR", "BEGIN:VEVENT", ...props, "SUMMARY:x", "END:VEVENT", "END:VCALENDAR"].join("\r\n");
 const parse = (...props: string[]) => parseIcs(feed(...props))[0]!;
@@ -157,16 +163,19 @@ describe("source-zone clock changes and speed", () => {
     expect(o!.end).toBe("2026-03-28T22:15");
   });
 
-  it("500 daily London events over a 42-day grid are quick once expanded", () => {
-    const events = Array.from({ length: 500 }, (_, i) => {
+  it("a grid of daily London events expands every occurrence with a bounded amount of zone work, and a second look at the same days does none", () => {
+    const events = Array.from({ length: 100 }, (_, i) => {
       const e = parse("DTSTART;TZID=Europe/London:20261101T090000", "DTEND;TZID=Europe/London:20261101T100000", "RRULE:FREQ=DAILY");
       return { ...e, id: String(i), deletedAt: null, repeat: e.series, allDay: false } as never;
     });
-    expandEvents(events, "2026-11-01", "2026-12-12");
-    const t = performance.now();
-    expect(expandEvents(events, "2026-11-01", "2026-12-12")).toHaveLength(500 * 42);
-    // A loose bound: it catches a runaway expansion, not a slow machine under load.
-    expect(performance.now() - t).toBeLessThan(2000);
+    // Counted by work done (zone conversions), not by the clock: a runaway expansion shows here whatever the machine's load.
+    const before = zoneWork.wallToLocal;
+    expect(expandEvents(events, "2026-11-01", "2026-12-12")).toHaveLength(100 * 42);
+    const first = zoneWork.wallToLocal - before;
+    expect(first).toBeLessThanOrEqual(100 * (42 + 4) * 2); // a start and an end per occurrence, plus the two days either side
+    expect(first).toBeGreaterThan(0);
+    expect(expandEvents(events, "2026-11-01", "2026-12-12")).toHaveLength(100 * 42);
+    expect(zoneWork.wallToLocal - before).toBe(first); // the same days again come from the cache
   });
 });
 
