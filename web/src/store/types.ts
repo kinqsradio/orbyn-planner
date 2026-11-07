@@ -238,6 +238,14 @@ export interface NewProject {
 }
 
 export type ProjectPatch = Partial<Pick<Project, "name" | "colour" | "goal" | "archived">>;
+/** Thrown when a tag is made or renamed to a name another live tag already has (compared without regard to case). */
+export class DuplicateTagName extends Error {
+  constructor() {
+    super("A tag with that name already exists.");
+    this.name = "DuplicateTagName";
+  }
+}
+
 export type TagPatch = Partial<Pick<Tag, "name" | "colour">>;
 export type ListPatch = Partial<Pick<TaskList, "name" | "colour">>;
 

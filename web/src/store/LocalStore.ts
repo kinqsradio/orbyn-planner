@@ -6,6 +6,7 @@ import { inOrder, keyBetween } from "./order";
 import { newSeries, validate } from "./repeat";
 import { completeRepeating } from "./taskRepeat";
 import {
+  DuplicateTagName,
   RESTORE_DAYS,
   type CalendarEvent,
   type CalendarPatch,
@@ -73,6 +74,8 @@ export class LocalStore implements PlannerStore {
   private writable = true;
   private provisional = 0;
   private pending = new Map<string, number>();
+  /** Purged tag ids: a task that still carries one has it cleared the next time it is edited (no rewrite of the rest). */
+  private purgedTags = new Set<string>();
   private channel: BroadcastChannel | null = null;
   private readonly tab = Math.random().toString(36).slice(2);
   private readonly now: () => Date;
@@ -191,7 +194,7 @@ export class LocalStore implements PlannerStore {
   }
 
   private async load(): Promise<void> {
-    let snapshot = { tasks: [] as Task[], lists: [] as TaskList[], events: [] as CalendarEvent[], calendars: [] as PlannerCalendar[], projects: [] as Project[], tags: [] as Tag[], outbox: [] as OutboxEntry[] };
+    let snapshot = { tasks: [] as Task[], lists: [] as TaskList[], events: [] as CalendarEvent[], calendars: [] as PlannerCalendar[], projects: [] as Project[], tags: [] as Tag[], purgedTags: [] as string[], outbox: [] as OutboxEntry[] };
     let persistence = this.state.persistence;
     try {
       snapshot = await this.persistence.load();
@@ -201,7 +204,9 @@ export class LocalStore implements PlannerStore {
       this.writable = false;
       persistence = { status: "failed", reason: describe(error, "open") };
     }
-    this.state = { ready: true, ...snapshot, events: snapshot.events.map((e) => viewOf("event", e as unknown as AnyRecord) as unknown as CalendarEvent), tasks: snapshot.tasks.map((t) => viewOf("task", t as unknown as AnyRecord) as unknown as Task), projects: snapshot.projects.map((x) => viewOf("project", x as unknown as AnyRecord) as unknown as Project), tags: snapshot.tags, persistence };
+    const { purgedTags, ...content } = snapshot;
+    this.purgedTags = new Set(purgedTags);
+    this.state = { ready: true, ...content, events: snapshot.events.map((e) => viewOf("event", e as unknown as AnyRecord) as unknown as CalendarEvent), tasks: snapshot.tasks.map((t) => viewOf("task", t as unknown as AnyRecord) as unknown as Task), projects: snapshot.projects.map((x) => viewOf("project", x as unknown as AnyRecord) as unknown as Project), tags: snapshot.tags, persistence };
     if (!this.state.lists.some((l) => l.isInbox)) {
       const inbox: TaskList = { id: INBOX_ID, name: "Inbox", colour: "c1", isInbox: true };
       this.commit([{ type: "list", id: inbox.id, op: "create", record: inbox }]);
@@ -246,6 +251,7 @@ export class LocalStore implements PlannerStore {
         if (this.current(p.type, p.id)) continue;
         this.replaceRecord(p.type, p.id, p.record);
       } else if (p.op === "purge") {
+        if (p.type === "tag") this.purgedTags.add(p.id);
         this.replaceRecord(p.type, p.id, null);
       } else {
         const record = this.current(p.type, p.id);
@@ -322,7 +328,11 @@ export class LocalStore implements PlannerStore {
 
   private change(id: string, op: "update" | "delete", fields: Record<string, unknown>): void {
     this.assertReady();
-    this.task(id);
+    const task = this.task(id);
+    // Tags purged for good: the fields that still name them go with this edit, and only this task's (no rewrite of the rest).
+    for (const tagId of task.tags) {
+      if (this.purgedTags.has(tagId) && !this.state.tags.some((t) => t.id === tagId) && !(`${TAG_PREFIX}${tagId}` in fields)) fields = { ...fields, [`${TAG_PREFIX}${tagId}`]: false };
+    }
     this.commit([{ type: "task", id, op, fields: { ...fields, updatedAt: this.now().toISOString() } }]);
   }
 
@@ -435,8 +445,15 @@ export class LocalStore implements PlannerStore {
     return found;
   }
 
+  /** Whether another live tag already has this name, ignoring case. */
+  private nameTaken(name: string, except?: string): boolean {
+    const wanted = name.trim().toLowerCase();
+    return this.state.tags.some((t) => t.deletedAt === null && t.id !== except && t.name.trim().toLowerCase() === wanted);
+  }
+
   addTag(name: string, colour: ListColour): Tag {
     this.assertReady();
+    if (this.nameTaken(name)) throw new DuplicateTagName();
     const tag: Tag = { id: this.newId(), name: name.trim(), colour, deletedAt: null };
     this.commit([{ type: "tag", id: tag.id, op: "create", record: tag }]);
     return tag;
@@ -446,7 +463,10 @@ export class LocalStore implements PlannerStore {
     this.assertReady();
     const current = this.tag(id);
     const fields: Record<string, unknown> = { ...patch };
-    if (patch.name !== undefined) fields.name = patch.name.trim() || current.name;
+    if (patch.name !== undefined) {
+      fields.name = patch.name.trim() || current.name;
+      if (this.nameTaken(fields.name as string, id)) throw new DuplicateTagName();
+    }
     this.commit([{ type: "tag", id, op: "update", fields }]);
   }
 

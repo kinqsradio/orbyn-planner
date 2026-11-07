@@ -11,14 +11,30 @@ export function shownTags(task: Pick<Task, "tags">, tags: readonly Tag[]): Tag[]
   });
 }
 
+/**
+ * What each live tag is called on screen. Two synced tags can end up with the same name (two devices made one at once); both
+ * show, and every one after the first is marked "(2)", "(3)", … The order is by id, the same on every device. Nothing is merged.
+ */
+export function tagLabels(tags: readonly Tag[]): Map<string, string> {
+  const seen = new Map<string, number>();
+  const out = new Map<string, string>();
+  for (const t of [...tags].filter((x) => x.deletedAt === null).sort((a, b) => (a.id < b.id ? -1 : 1))) {
+    const key = t.name.trim().toLowerCase();
+    const n = (seen.get(key) ?? 0) + 1;
+    seen.set(key, n);
+    out.set(t.id, n === 1 ? t.name : `${t.name} (${n})`);
+  }
+  return out;
+}
+
 /** A tag as a small chip: the person's colour and name. */
-export function TagChip({ tag, onRemove }: { tag: Tag; onRemove?: () => void }) {
+export function TagChip({ tag, label = tag.name, onRemove }: { tag: Tag; label?: string; onRemove?: () => void }) {
   return (
     <span className="tagchip">
       <Swatch colour={tag.colour} />
-      {tag.name}
+      {label}
       {onRemove && (
-        <button type="button" className="chip-x" aria-label={`Remove tag ${tag.name}`} onClick={onRemove}>
+        <button type="button" className="chip-x" aria-label={`Remove tag ${label}`} onClick={onRemove}>
           ×
         </button>
       )}

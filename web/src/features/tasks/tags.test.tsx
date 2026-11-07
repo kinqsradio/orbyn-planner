@@ -63,6 +63,9 @@ describe("tags in the planner", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Tags" }));
     await userEvent.type(screen.getByRole("textbox", { name: "New tag name" }), "Later{Enter}");
     expect(screen.getByRole("textbox", { name: "Name of tag Later" })).toBeInTheDocument();
+    await userEvent.type(screen.getByRole("textbox", { name: "New tag name" }), "later{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("A tag with that name already exists.");
+    expect(store.getState().tags.filter((t) => t.name.toLowerCase() === "later")).toHaveLength(1);
     const name = screen.getByRole("textbox", { name: "Name of tag Errands" });
     await userEvent.clear(name);
     await userEvent.type(name, "Shopping{Enter}");

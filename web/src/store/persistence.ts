@@ -8,6 +8,8 @@ export interface Snapshot {
   calendars: PlannerCalendar[];
   projects: Project[];
   tags: Tag[];
+  /** Ids of tags that were purged (deleted for good): tasks that still carry one clear it the next time they are edited. */
+  purgedTags: string[];
   outbox: OutboxEntry[];
 }
 
@@ -60,6 +62,7 @@ const storeOf = (type: RecordType) => STORE_OF[type];
 export class MemoryPersistence implements Persistence {
   private records = new Map<string, AnyRecord>();
   private outbox = new Map<string, OutboxEntry>();
+  private purgedTags = new Set<string>();
   private nextSeq = 1;
 
   /** `volatile` marks a store that stands in for missing IndexedDB, so the app can say nothing is saved. */
@@ -80,6 +83,7 @@ export class MemoryPersistence implements Persistence {
       calendars: all.filter(([k]) => k.startsWith("calendar:")).map(([, v]) => v as PlannerCalendar),
       projects: all.filter(([k]) => k.startsWith("project:")).map(([, v]) => v as Project),
       tags: all.filter(([k]) => k.startsWith("tag:")).map(([, v]) => v as Tag),
+      purgedTags: [...this.purgedTags],
       outbox: [...this.outbox.values()].sort((a, b) => a.seq - b.seq),
     };
   }
@@ -98,6 +102,7 @@ export class MemoryPersistence implements Persistence {
         this.records.set(key, record);
       } else if (p.op === "purge") {
         this.records.delete(key);
+        if (p.type === "tag") this.purgedTags.add(p.id);
         record = null;
       } else {
         if (!record) continue;
@@ -141,10 +146,10 @@ export class MemoryPersistence implements Persistence {
 
 /** The planner kept on this device alone; each account has a database of its own (see `planners.ts`). */
 export const DEVICE_DB = "orbyn-planner";
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 type Rec = AnyRecord & Record<string, unknown>;
-const ALL_STORES = ["tasks", "lists", "events", "calendars", "projects", "tags", "outbox"];
+const ALL_STORES = ["tasks", "lists", "events", "calendars", "projects", "tags", "purgedTags", "outbox"];
 
 /** One IndexedDB object store per record type, and an outbox keyed by an auto-incrementing number. */
 export class IdbPersistence implements Persistence {
@@ -174,6 +179,8 @@ export class IdbPersistence implements Persistence {
         for (const name of ["tasks", "lists", "events", "calendars", "projects", "tags"]) {
           if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: "id" });
         }
+        // Ids of purged tags, the key being the id.
+        if (!db.objectStoreNames.contains("purgedTags")) db.createObjectStore("purgedTags");
         // Version 1 keyed the outbox by a number made in memory, which two tabs would reuse.
         if (event.oldVersion > 0 && event.oldVersion < 2 && db.objectStoreNames.contains("outbox")) db.deleteObjectStore("outbox");
         if (!db.objectStoreNames.contains("outbox")) {
@@ -203,13 +210,14 @@ export class IdbPersistence implements Persistence {
     const db = await this.open();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(ALL_STORES, "readonly");
-      const out: Snapshot = { tasks: [], lists: [], events: [], calendars: [], projects: [], tags: [], outbox: [] };
+      const out: Snapshot = { tasks: [], lists: [], events: [], calendars: [], projects: [], tags: [], purgedTags: [], outbox: [] };
       tx.objectStore("tasks").getAll().onsuccess = (e) => (out.tasks = (e.target as IDBRequest<Task[]>).result);
       tx.objectStore("lists").getAll().onsuccess = (e) => (out.lists = (e.target as IDBRequest<TaskList[]>).result);
       tx.objectStore("events").getAll().onsuccess = (e) => (out.events = (e.target as IDBRequest<CalendarEvent[]>).result);
       tx.objectStore("calendars").getAll().onsuccess = (e) => (out.calendars = (e.target as IDBRequest<PlannerCalendar[]>).result);
       tx.objectStore("projects").getAll().onsuccess = (e) => (out.projects = (e.target as IDBRequest<Project[]>).result);
       tx.objectStore("tags").getAll().onsuccess = (e) => (out.tags = (e.target as IDBRequest<Tag[]>).result);
+      tx.objectStore("purgedTags").getAllKeys().onsuccess = (e) => (out.purgedTags = (e.target as IDBRequest<IDBValidKey[]>).result.map(String));
       tx.objectStore("outbox").getAll().onsuccess = (e) => (out.outbox = (e.target as IDBRequest<OutboxEntry[]>).result.sort((a, b) => a.seq - b.seq));
       tx.oncomplete = () => resolve(out);
       tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("The read was aborted"));
@@ -272,7 +280,10 @@ export class IdbPersistence implements Persistence {
             store.put(p.record).onsuccess = () => foldOutbox(p.record);
           };
         } else if (p.op === "purge") {
-          store.delete(p.id).onsuccess = () => foldOutbox(null);
+          store.delete(p.id).onsuccess = () => {
+            if (p.type === "tag") tx.objectStore("purgedTags").put(true, p.id);
+            foldOutbox(null);
+          };
         } else {
           store.get(p.id).onsuccess = (e) => {
             const current = (e.target as IDBRequest<Rec | undefined>).result;
