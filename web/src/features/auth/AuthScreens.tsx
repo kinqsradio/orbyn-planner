@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ApiFailure } from "../../api/auth";
 import { SignInUnavailable } from "../../api/authCrypto";
 import { BusyButton } from "../../components/BusyButton";
+import { appsAvailable, downloadUrl } from "../../api/site";
 import { Icon } from "../../components/Icon";
 import { KeysForAnotherAccount, SecondFactorNeeded, signIn, signUp, type PendingSignUp } from "../../auth/flows";
 import { cryptoLoad } from "../../api/realCrypto";
@@ -171,6 +172,11 @@ function NoMemory() {
       <span className="t2">Orbyn has to keep your encryption keys, and this browser won’t store them or hold them in memory. Nothing was created.</span>
       <span className="t3 pv-text">This often means WebAssembly is turned off or blocked. Try another browser, or turn off any setting that blocks it.</span>
       <div className="pv-stack">
+        <a className="btn lg" href={downloadUrl()} target="_blank" rel="noopener noreferrer">
+          {appsAvailable() && <Icon name="down" small />}
+          {appsAvailable() ? "Install the Orbyn app" : "See the Orbyn apps"}
+        </a>
+        {!appsAvailable() && <span className="t4 small pv-helper">The apps aren’t out yet. This page lists what’s being built.</span>}
         <button
           type="button"
           className="ghost lg"

@@ -120,15 +120,14 @@ function ConfirmDialog({ report, changedNow, onClose, onNotNow, onDone, onConfli
 }
 
 /** For the person or Orbyn support: the reason, the newest setting and who signed it, and what this browser last confirmed. Nothing in it is secret. */
-function DetailsDialog({ report, kind, confirmed, onClose }: { report: ProtectionReport; kind: Kind; confirmed: ConfirmedSetting | null; onClose: () => void }) {
+function DetailsDialog({ report, kind, confirmed, onClose, onReviewDevices }: { report: ProtectionReport; kind: Kind; confirmed: ConfirmedSetting | null; onClose: () => void; onReviewDevices?: () => void }) {
   const reason = kind in REASON_LINES ? REASON_LINES[kind as keyof typeof REASON_LINES].reason : null;
   const rows: Array<[string, string]> = [];
   if (reason) rows.push(["Reason", reason]);
   if (report.head) {
     rows.push(["Newest setting on the server", `${levelName(report.head.level)} · change ${report.head.seq}`]);
     const at = new Date(secsOf(report.head) * 1000);
-    // A signer the account doesn't list has no name to show: the reason says so.
-    if (report.signer?.name) rows.push(["Signed by", `${report.signer.name} · ${at.getDate()} ${MONTHS[at.getMonth()]!.slice(0, 3)} ${formatTime(at)}`]);
+    rows.push(["Signed by", `${report.signer?.name ?? "A device this account doesn’t list"} · ${at.getDate()} ${MONTHS[at.getMonth()]!.slice(0, 3)} ${formatTime(at)}`]);
   }
   if (confirmed) rows.push(["Last confirmed on this browser", `${levelName(confirmed.level)} · change ${confirmed.seq} · ${day(confirmed.at)}`]);
   const copy = () => void navigator.clipboard?.writeText(rows.map(([k, v]) => `${k}: ${v}`).join("\n")).catch(() => undefined);
@@ -142,9 +141,14 @@ function DetailsDialog({ report, kind, confirmed, onClose }: { report: Protectio
             <div className="kv" key={k}><span>{k}</span><b>{v}</b></div>
           ))}
         </div>
+        {kind === "unlisted" && <span className="t3 small">The device has no name because this account doesn’t list it. If you don’t recognise it, review your devices.</span>}
         <div className="dialog-actions">
           <button type="button" className="ghost" onClick={copy}><Icon name="copy" small />Copy details</button>
-          <button type="button" className="btn" data-autofocus onClick={onClose}>Done</button>
+          {kind === "unlisted" ? (
+            <button type="button" className="btn" data-autofocus onClick={() => { onClose(); onReviewDevices?.(); }}>Review devices</button>
+          ) : (
+            <button type="button" className="btn" data-autofocus onClick={onClose}>Done</button>
+          )}
         </div>
       </div>
     </Modal>
@@ -312,7 +316,7 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
         <span className="st planned"><span className="sd" />Planned</span>
       </div>
       </div>
-      {details && report && kind && <DetailsDialog report={report} kind={kind} confirmed={confirmed} onClose={() => setDetails(false)} />}
+      {details && report && kind && <DetailsDialog report={report} kind={kind} confirmed={confirmed} onClose={() => setDetails(false)} onReviewDevices={onReviewDevices} />}
       {askToConfirm && report && (
         <ConfirmDialog
           report={report}

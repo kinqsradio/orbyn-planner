@@ -583,7 +583,7 @@ describe("keys the browser will not store", () => {
     await fillSignUp();
     const card = await screen.findByRole("alert", { name: "Account created, keys not saved" });
     expect(card).toHaveTextContent("Your keys exist only in this tab right now. Keep it open until they’re saved.");
-    expect(card).toHaveTextContent("Approving a device you already use, or the Orbyn app on this computer, gives it the keys while this tab is still open. It uses the same matching digits as Add a device.");
+    expect(card).toHaveTextContent("Approving a device you already use gives it the keys while this tab is still open. It uses the same matching digits as Add a device.");
     expect(a.keys.inMemory).toBe(true);
     expect(await keysA.loadKeys()).toBeNull(); // nothing reached storage
     expect(await keysA.loadSession()).toBeNull();
@@ -702,11 +702,14 @@ describe("keys the browser will not store", () => {
     }
     await mount(a);
     await userEvent.click(await screen.findByRole("button", { name: "Approve another device from this tab" }));
-    const dialog = await screen.findByRole("dialog", { name: "Approve another device" });
-    const list = await within(dialog).findByRole("list", { name: "Devices" });
-    await waitFor(() => expect(within(list).getAllByRole("listitem")).toHaveLength(2));
-    expect(engine.calls.some((c) => c.method === "POST" && c.path === "/v1/devices/approvals")).toBe(false); // none was picked for them
-    await userEvent.click(within(list).getAllByRole("button", { name: /^Approve / })[1]!);
+    const dialog = await screen.findByRole("dialog");
+    const group = await within(dialog).findByRole("radiogroup", { name: "Devices" });
+    await waitFor(() => expect(within(group).getAllByRole("radio")).toHaveLength(2));
+    expect(dialog).toHaveTextContent("More than one device is waiting. Choose the one you’re holding.");
+    expect(within(group).getAllByRole("radio").filter((r) => (r as HTMLInputElement).checked)).toHaveLength(1); // the newest is selected until the person picks
+    expect(engine.calls.some((c) => c.method === "POST" && c.path === "/v1/devices/approvals")).toBe(false); // none was started yet
+    await userEvent.click(within(group).getAllByRole("radio")[0]!);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Continue" }));
     expect(await within(dialog).findByText("Kind")).toBeInTheDocument();
     expect(within(dialog).getByText("When")).toBeInTheDocument();
   });
@@ -1099,6 +1102,9 @@ describe("email verification at sign-up", () => {
     const card = await screen.findByRole("alert", { name: "This browser can’t create an Orbyn account" });
     expect(card).toHaveTextContent("Orbyn has to keep your encryption keys, and this browser won’t store them or hold them in memory. Nothing was created.");
     expect(within(card).getByRole("button", { name: "Copy this page’s address" })).toBeInTheDocument();
+    // The app link goes to the site's download page, not a store or an installer.
+    expect(within(card).getByRole("link", { name: "See the Orbyn apps" })).toHaveAttribute("href", "https://orbyn.dev/download");
+    expect(card).toHaveTextContent("The apps aren’t out yet. This page lists what’s being built.");
     expect(within(card).queryByRole("button", { name: /again|retry/i })).toBeNull(); // retrying can't help
     expect(engine.calls.filter((c) => c.path.startsWith("/v1/accounts"))).toHaveLength(0); // nothing reached the engine
   });

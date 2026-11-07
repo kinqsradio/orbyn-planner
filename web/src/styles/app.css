@@ -500,3 +500,11 @@ button.pillx { border: 0; }
 .dot { width: var(--sp-7); height: var(--sp-7); border-radius: var(--r-round); background: var(--t4); display: inline-block; }
 .dot.amber { background: var(--amber); }
 .notif-list { display: flex; flex-direction: column; gap: var(--sp-12); }
+.pv-helper { text-align: center; }
+.choice { display: flex; gap: var(--sp-12); align-items: flex-start; padding: var(--sp-12) var(--sp-14); border-radius: var(--r-10); border: var(--bw) solid var(--line2); background: var(--main); cursor: pointer; }
+.choice.on { border-color: var(--t1); box-shadow: inset 0 0 0 var(--bw) var(--t1); }
+.choice b { font-weight: var(--fw-medium); color: var(--t1); }
+.choice small { display: block; color: var(--t3); font-size: var(--fs-12); margin-top: var(--sp-2); }
+.radio { width: var(--sp-15); height: var(--sp-15); border-radius: var(--r-round); border: var(--bw-1-5) solid var(--line2); display: inline-block; position: relative; flex: none; }
+.radio.on { border-color: var(--t1); }
+.radio.on::after { content: ""; position: absolute; inset: var(--sp-3); border-radius: var(--r-round); background: var(--t1); }

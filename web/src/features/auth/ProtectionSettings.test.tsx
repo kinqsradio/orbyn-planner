@@ -217,6 +217,11 @@ describe("a signer the account doesn't list", () => {
     const c = await card();
     expect(await within(c).findByText("The latest change is signed by a device this account doesn’t list. This browser keeps the setting it last confirmed.")).toBeInTheDocument();
     await userEvent.click(within(c).getByRole("button", { name: "Details" }));
-    expect(screen.getByRole("dialog", { name: "Protection details" })).toHaveTextContent("ReasonSigned by a device this account doesn’t list");
+    const details = screen.getByRole("dialog", { name: "Protection details" });
+    expect(details).toHaveTextContent("ReasonSigned by a device this account doesn’t list");
+    expect(details).toHaveTextContent("Signed byA device this account doesn’t list · ");
+    expect(details).toHaveTextContent("The device has no name because this account doesn’t list it. If you don’t recognise it, review your devices.");
+    await userEvent.click(within(details).getByRole("button", { name: "Review devices" })); // the primary
+    expect(review).toHaveBeenCalledOnce();
   });
 });

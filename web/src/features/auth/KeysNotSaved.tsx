@@ -84,12 +84,20 @@ function ApprovalSteps({ device, onClose, onApproved }: { device: Device; onClos
   );
 }
 
+const KINDS: Record<Device["platform"], string> = { web: "Browser", ios: "Phone", android: "Phone", macos: "Computer", windows: "Computer", linux: "Computer" };
+/** "Waiting 4 minutes": how long ago the device signed in. */
+const waited = (iso: string, now: number) => {
+  const minutes = Math.max(1, Math.round((now - new Date(iso).getTime()) / 60_000));
+  return `Waiting ${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+};
+
 /** Approve another device from this tab: waits for a new device to sign in, then walks through the digits and the key fingerprint. */
 function ApproveFromTab({ onClose, onApproved }: { onClose: () => void; onApproved: (device: Device) => void }) {
   const { services } = useAuth()!;
   /** Every device waiting for approval; the person chooses, nothing is picked for them. */
   const [waiting, setWaiting] = useState<Device[]>([]);
   const [device, setDevice] = useState<Device | null>(null);
+  const [choice, setChoice] = useState<string | null>(null);
   // Exactly one device waiting is the one; with several the person chooses. Once one is shown, another arriving does not replace it.
   if (!device && waiting.length === 1) setDevice(waiting[0]!);
   useEffect(() => {
@@ -106,9 +114,13 @@ function ApproveFromTab({ onClose, onApproved }: { onClose: () => void; onApprov
       clearInterval(timer);
     };
   }, [services]);
+  const choosing = !device && waiting.length > 1;
+  // The newest is selected until the person picks another.
+  const newest = [...waiting].sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+  const selected = choice ?? newest?.id ?? null;
   return (
-    <Modal label="Approve another device" onClose={onClose}>
-      <b className="card-title">Approve another device</b>
+    <Modal label={choosing ? "Which device is it?" : "Approve another device"} onClose={onClose}>
+      <b className="card-title">{choosing ? "Which device is it?" : "Approve another device"}</b>
       {device ? (
         <>
           <div className="kv"><span>Device</span><b>{device.name}</b></div>
@@ -118,17 +130,24 @@ function ApproveFromTab({ onClose, onApproved }: { onClose: () => void; onApprov
         </>
       ) : waiting.length > 0 ? (
         <>
-          <span className="t2">Which device is it?</span>
-          <ul className="card" style={{ gap: 0, padding: "0 var(--sp-14)" }} aria-label="Devices">
+          <span className="t3">More than one device is waiting. Choose the one you’re holding.</span>
+          <div role="radiogroup" aria-label="Devices" style={{ display: "flex", flexDirection: "column", gap: "var(--sp-8)" }}>
             {waiting.map((d) => (
-              <li key={d.id} className="kv" style={{ minHeight: "var(--sp-44)" }}>
-                <span>{d.name} · {PLATFORMS[d.platform]} · {when(d.created_at)}</span>
-                <button type="button" className="ghost" aria-label={`Approve ${d.name}`} onClick={() => setDevice(d)}>Approve</button>
-              </li>
+              <label key={d.id} className={d.id === selected ? "choice on" : "choice"}>
+                <input type="radio" name="device" className="sr-only" checked={d.id === selected} onChange={() => setChoice(d.id)} aria-label={d.name} />
+                <span className={d.id === selected ? "radio on" : "radio"} aria-hidden="true" />
+                <div>
+                  <b>{d.name}</b>
+                  <small>{KINDS[d.platform]} · {waited(d.created_at, services.now())}</small>
+                </div>
+              </label>
             ))}
-          </ul>
+          </div>
           <div className="pv-waitrow">
-            <span className="pv-end"><button type="button" className="ghost" data-autofocus onClick={onClose}>Cancel</button></span>
+            <span className="pv-end">
+              <button type="button" className="ghost" data-autofocus onClick={onClose}>Cancel</button>
+              <button type="button" className="btn" onClick={() => setDevice(waiting.find((d) => d.id === selected) ?? null)}>Continue</button>
+            </span>
           </div>
         </>
       ) : (
@@ -224,7 +243,7 @@ export function KeysNotSaved() {
           {!failed && approve}
         </div>
         {failed && <small className="err" role="alert">Still couldn’t save. This browser may not allow it. Approve another device from this tab instead.</small>}
-        <span className="t4 small">Approving a device you already use, or the Orbyn app on this computer, gives it the keys while this tab is still open. It uses the same matching digits as Add a device.</span>
+        <span className="t4 small">Approving a device you already use gives it the keys while this tab is still open. It uses the same matching digits as Add a device.</span>
       </div>
       {approving && <ApproveFromTab onClose={() => setApproving(false)} onApproved={(d) => { setApproving(false); setApprovedOn(d.name); }} />}
     </div>
