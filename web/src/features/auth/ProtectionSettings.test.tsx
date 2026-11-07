@@ -132,7 +132,8 @@ describe("the other cards", () => {
     cleanup();
     read.mockResolvedValue(report({}));
     render(<ProtectionSettings />);
-    expect(await card()).toHaveTextContent("Your planner is encrypted on your devices. Right now only your trusted devices hold your keys, and Orbyn holds no copy of them.");
+    expect(await card()).toHaveTextContent("Confirmed by your devices. Last change 3 Nov on MacBook Air."); // the date from the verified head, the name from the device list
+    expect(await card()).toHaveTextContent("Your planner is encrypted on your devices. Right now only your trusted devices hold your keys, and Orbyn holds no copy of them. Standard’s recovery copy, account recovery and server push and email reminders are Planned, and so is Advanced protection.");
   });
 });
 

@@ -1329,10 +1329,10 @@ describe("email verification at sign-up", () => {
     const form = screen.getByRole("form", { name: "Check your inbox" });
     expect(within(form).getByText(/sam@example\.com/)).toBeInTheDocument();
     expect(within(form).getByText(/It works for 30 minutes\./)).toBeInTheDocument();
-    // Planner Designs v29, verify: the title, the sentence, a ghost Resend the code and "Wrong address? Change it".
+    // Planner Designs v29, verify: the title, the sentence, a ghost Resend the code and "Wrong address? Change email".
     expect(within(form).getByRole("heading", { name: "Check your inbox" })).toBeInTheDocument();
     expect(within(form).getByText("We sent a 6-digit code to sam@example.com. It works for 30 minutes.")).toBeInTheDocument();
-    expect(form).toHaveTextContent("Wrong address? Change it");
+    expect(form).toHaveTextContent("Wrong address? Change email");
     // No account and no session: nothing is stored.
     expect(auth.tokens.getSession()).toBeNull();
     expect(await keys.loadKeys()).toBeNull();
@@ -1377,7 +1377,7 @@ describe("email verification at sign-up", () => {
     }
     // After the third the limit shows, in amber, with no wait: the code boxes stay usable.
     expect(await screen.findByText("You’ve asked for several codes. Try again later, or check your spam folder.")).toBeInTheDocument();
-    expect(screen.queryByText(/not available right now/)).toBeNull(); // throttled: the banner says so, and there is nothing to press
+    expect(screen.getByText("Send a new code · not available right now")).toBeInTheDocument(); // throttled: a muted line, with nothing to press
     expect(screen.queryByRole("button", { name: "Send a new code" })).toBeNull();
     await userEvent.type(screen.getByLabelText("Code"), first);
     await userEvent.click(screen.getByRole("button", { name: "Verify" }));
@@ -1391,6 +1391,7 @@ describe("email verification at sign-up", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Send a new code" }, { timeout: 3000 }));
     const banner = (await screen.findByText("You’ve asked for several codes. Try again later, or check your spam folder.")).closest(".banner")!;
     expect(banner).toHaveClass("warn"); // the throttled state is a warn banner
+    expect(screen.getByText("Send a new code · not available right now").tagName).toBe("SPAN"); // muted text, not a control
     expect(screen.queryByRole("button", { name: "Send a new code" })).toBeNull(); // with no resend action
     expect(screen.getByLabelText("Code")).toBeEnabled();
   });
@@ -1435,7 +1436,7 @@ describe("email verification at sign-up", () => {
 
   it("Change email starts over, and the abandoned sign-up leaves nothing behind", async () => {
     const { keys } = await toCodeStep();
-    await userEvent.click(screen.getByRole("button", { name: "Change it" }));
+    await userEvent.click(screen.getByRole("button", { name: "Change email" }));
     expect(screen.getByRole("form", { name: "Create your account" })).toBeInTheDocument();
     expect(screen.getByLabelText("Email")).toHaveValue(SAM.email); // kept, to correct
     expect(screen.getByLabelText("Password")).toHaveValue(""); // the password was not kept in the page while the code was awaited
@@ -1536,9 +1537,8 @@ describe("the protection level", () => {
     const card = await screen.findByLabelText("Protection");
     expect(await within(card).findByText("Standard protection")).toBeInTheDocument();
     expect(screen.getByText("Data protection", { selector: "b" })).toBeInTheDocument();
-    expect(card).not.toHaveTextContent(/recovery copy/i); // no claim about a recovery copy on the Standard card
-    expect(screen.queryByText("Access your planner on the web")).toBeNull(); // the Web card is only an Advanced preview
-    expect(card).toHaveTextContent("Web access under Advanced: off by default; each sign-in is approved on a trusted device and lasts one hour.");
+    expect(screen.queryByText("Access your planner on the web")).toBeNull(); // under Standard the web works after sign-in: no Web card
+    expect(card).not.toHaveTextContent("Web access under Advanced"); // that line belongs to the Advanced frame, not this one
     expect(screen.getByText("Export your data")).toBeInTheDocument();
     expect(screen.getByText("Planner as open files")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Delete account…" })).toHaveClass("red");

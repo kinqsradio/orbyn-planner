@@ -286,7 +286,7 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
             <span className="t2 pv-text">
               Confirmed by your devices.
               {report.head && ` Last change ${day(secsOf(report.head))}${report.signer?.name ? ` on ${report.signer.name}` : ""}.`}
-              {report.level === "standard" && <><br /><span className="t3">Your planner is encrypted on your devices. Right now only your trusted devices hold your keys, and Orbyn holds no copy of them. </span></>}
+              {report.level === "standard" && <><br /><span className="t3">Your planner is encrypted on your devices. Right now only your trusted devices hold your keys, and Orbyn holds no copy of them. Standard’s recovery copy, account recovery and server push and email reminders are <Planned />, and so is Advanced protection.</span></>}
             </span>
           </>
         ) : kind === "confirming" ? (
@@ -333,7 +333,7 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
       <div className="srow">
         <div className="lab2">
           <b className="pv-choice"><span className="radio" role="radio" aria-checked="false" aria-disabled="true" aria-label="Advanced protection" tabIndex={-1} />Advanced protection</b>
-          <small className="planned-text">Advanced is <Planned />. When it ships: switching from Standard deletes Orbyn’s copy of your keys at once; server backups made before the switch may keep a copy until the keys are rotated, which is Planned. An account that starts on Advanced never had one.<br /><Planned /> Web access under Advanced: off by default; each sign-in is approved on a trusted device and lasts one hour.</small>
+          <small className="planned-text">Advanced is <Planned />. When it ships: switching from Standard deletes Orbyn’s copy of your keys at once; server backups made before the switch may keep a copy until the keys are rotated, which is Planned. An account that starts on Advanced never had one.</small>
         </div>
       </div>
       </div>
