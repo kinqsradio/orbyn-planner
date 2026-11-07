@@ -4,11 +4,13 @@ import { usePrefs } from "../../app/prefs";
 import { useUi } from "../../app/ui";
 import { PageHeader } from "../../components/EmptyState";
 import { Icon } from "../../components/Icon";
+import { PHONE_QUERY, useMediaQuery } from "../../components/useMediaQuery";
 import { MONTHS, WEEKDAYS, addDays, dateKey, dateOf, isoWeek, weekStartOf } from "../../lib/dates";
 import { usePlanner } from "../../store/context";
 import { expandEvents } from "../../store/occurrences";
 import { AgendaView } from "./AgendaView";
 import { MonthView } from "./MonthView";
+import { PhoneCalendar } from "./PhoneCalendar";
 import { TimeGrid } from "./TimeGrid";
 
 export type View = "month" | "week" | "day" | "agenda";
@@ -45,6 +47,14 @@ function shift(view: View, anchor: string, direction: 1 | -1): string {
 }
 
 export function CalendarPage() {
+  const phone = useMediaQuery(PHONE_QUERY);
+  const now = useNow();
+  // On a phone the Calendar is the day strip and the day's list; the grids are for larger screens.
+  if (phone) return <PhoneCalendar today={dateKey(now)} />;
+  return <CalendarGrid />;
+}
+
+function CalendarGrid() {
   const { events, calendars } = usePlanner();
   const now = useNow();
   const ui = useUi();

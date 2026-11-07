@@ -586,3 +586,12 @@ button.pillx { border: 0; }
 .btn[aria-disabled="true"] { opacity: .6; cursor: not-allowed; }
 .warn-icon { color: var(--amber-text); display: inline-flex; flex: none; margin-top: var(--sp-1); }
 .export-choices { display: flex; flex-direction: column; gap: var(--sp-8); }
+
+/* The Calendar on a phone: a strip of five days and the chosen day's list (Planner Designs p-phone-week, p-cal-day-empty-phone). */
+.pm-day { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--sp-6); }
+.pm-day button { display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); padding: var(--sp-8) 0; border: 0; border-radius: var(--r-12); background: var(--raise); color: var(--t3); font: inherit; font-size: var(--fs-11-5); min-height: var(--sp-44); }
+.pm-day button b { font-weight: var(--fw-medium); font-size: var(--fs-16); color: var(--t1); }
+.pm-day button.on { background: var(--btn); color: var(--btnt); }
+.pm-day button.on b { color: var(--btnt); }
+.pm-day i { width: var(--sp-5); height: var(--sp-5); border-radius: var(--r-round); background: var(--t4); display: block; }
+.pm-empty { margin: var(--sp-14) 0 0; }

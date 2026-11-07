@@ -20,7 +20,7 @@ export function useTaskActions(task: Task) {
   };
 }
 
-function Check({ task }: { task: Task }) {
+export function Check({ task }: { task: Task }) {
   const { toggle } = useTaskActions(task);
   return (
     <input
