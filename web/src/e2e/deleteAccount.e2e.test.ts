@@ -51,14 +51,15 @@ describe.skipIf(!engineUrl)("a scheduled account deletion against a real engine"
 
     // Schedule again and cancel from the original, trusted device.
     await scheduleDeletion(a.services, session, { recoveryCode: recovery_codes[2]! });
+    const secondToken = await cancelTokenSentTo(email, [firstToken]);
     await cancelDeletion(a.services, session);
     expect((await b.services.api.currentDevice()).deletion_scheduled_at ?? null).toBeNull();
 
     // Schedule a third time: a new email with a new token. Asking again keeps the time and the link, which then cancels with no
     // session at all, once.
     const third = await scheduleDeletion(a.services, session, { recoveryCode: recovery_codes[3]! });
-    const token = await cancelTokenSentTo(email, [firstToken]);
-    expect(token).not.toBe(firstToken);
+    const token = await cancelTokenSentTo(email, [firstToken, secondToken]);
+    expect(new Set([firstToken, secondToken, token]).size).toBe(3);
     expect(await scheduleDeletion(a.services, session, { recoveryCode: recovery_codes[4]! })).toBe(third);
     const nobody = await browser();
     const wrong = await cancelDeletionByMail(nobody.services, "A".repeat(43)).catch((e: unknown) => e);
