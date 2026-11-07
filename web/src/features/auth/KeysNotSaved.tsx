@@ -6,7 +6,7 @@ import { Icon } from "../../components/Icon";
 import { Modal } from "../../components/Modal";
 import { motionMs } from "../../styles/tokens";
 import { useApprover } from "./useApprover";
-import { APPROVAL_FAILED, DIGITS_MISMATCH } from "../../auth/pairing";
+import { DIGITS_MISMATCH } from "../../auth/pairing";
 import { groupCode } from "./AccountSettings";
 
 /** The steps with this device's side of the approval: digits to match, the key fingerprint, and what it is waiting for. */
@@ -52,7 +52,7 @@ function ApprovalSteps({ device, onClose, onApproved }: { device: Device; onClos
         : ended === "cancelled"
           ? "Your other device cancelled. Nothing was shared."
           : ended === "failed"
-            ? APPROVAL_FAILED
+            ? closed!.message // the designs' line for a network or server error, the engine's own words for a coded refusal
             : null;
   return (
     <>

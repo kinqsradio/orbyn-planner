@@ -260,8 +260,7 @@ export class ApproverController extends Controller<ApproverState> {
     if (this.ended || this.disposed) return;
     this.ended = true;
     let reason: CloseReason = "failed";
-    // A network or server error: this device says so in the words of the designs, whatever the engine's message.
-    let message: string = APPROVAL_FAILED;
+    let message: string = REASONS.failed;
     if (error instanceof ApiFailure && error.code === "poll_timeout") {
       reason = "expired";
       message = REASONS.expired;
@@ -277,6 +276,11 @@ export class ApproverController extends Controller<ApproverState> {
       // The module's one code for any disagreement; at this end it means the keys the server showed are not the ones this device started with.
       reason = "mismatch";
       message = DIGITS_MISMATCH;
+    } else if (error instanceof ApiFailure && (error.code === "network" || error.status >= 500)) {
+      // A network or server error: the designs' line, whatever the engine's message. A coded refusal keeps the engine's own words.
+      message = APPROVAL_FAILED;
+    } else if (error instanceof ApiFailure) {
+      message = error.message;
     }
     if (this.id) await this.services.api.cancelApproval(this.id).catch(() => undefined);
     this.set({ phase: "closed", reason, message }, true);
