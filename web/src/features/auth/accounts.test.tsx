@@ -158,7 +158,13 @@ describe("the public pages", () => {
       "Recover with your email and phone Planned Not available yet.",
       "Use a recovery key or contact Planned Not available yet.",
     ]);
-    expect(items[1]).not.toHaveAttribute("aria-disabled"); // approving works today
+    // The Planned options are marked by their label and note, with nothing to press; approving works today.
+    for (const li of [items[0]!, items[2]!, items[3]!]) {
+      expect(li).not.toHaveAttribute("aria-disabled"); // a list item is not a control
+      expect(li.querySelector("button, a")).toBeNull();
+      expect(li.querySelector(".st.planned")).not.toBeNull();
+    }
+    expect(items[1]).not.toHaveAttribute("aria-disabled");
     expect(group).toHaveTextContent("Account recovery with your email and phone, with a short wait to keep your account safe, is Planned, as are recovery keys and recovery contacts. Approving from a trusted device works today.");
     await userEvent.click(within(group).getByRole("button", { name: "Back to sign in" }));
     expect(screen.getByRole("form", { name: "Sign in" })).toBeInTheDocument();
@@ -169,11 +175,15 @@ describe("the public pages", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Get started" }));
     const up = screen.getByRole("button", { name: /^Continue with a passkey/ });
     expect(up).toBeDisabled();
+    expect(up).toHaveAttribute("aria-disabled", "true");
     expect(up).toHaveTextContent("Continue with a passkey Planned Not available yet.");
     expect(screen.getByRole("button", { name: "Continue with a password" })).toBeInTheDocument();
+    expect(screen.getByText("Your password never leaves this device. Orbyn checks it without ever seeing it.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Use without an account" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
     const inn = screen.getByRole("button", { name: /^Sign in with a passkey/ });
     expect(inn).toBeDisabled();
+    expect(inn).toHaveAttribute("aria-disabled", "true");
     expect(inn).toHaveTextContent("Sign in with a passkey Planned Not available yet.");
     expect(screen.getByText(/New here\?/)).toHaveTextContent("New here? Create an account · Forgot your password?");
     expect(engine.calls).toEqual([]); // nothing was sent
@@ -275,6 +285,15 @@ describe("sign in", () => {
     expect(screen.queryByRole("checkbox")).toBeNull();
     expect(screen.queryByText(/cancel.*deletion|deletion.*cancel/i)).toBeNull();
     expect(screen.queryByRole("button", { name: /cancel deletion/i })).toBeNull();
+  });
+
+  it("opened from inside the planner, sign-in's quiet link reads Back to the planner", async () => {
+    await mount(services(), "/settings");
+    await userEvent.click(await screen.findByRole("button", { name: "Use without an account" }));
+    await openAccount();
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(screen.getByRole("button", { name: "Back to the planner" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Use without an account" })).toBeNull();
   });
 
   it("Settings › Account has a Passkeys row marked Planned, with Not available yet.", async () => {
@@ -1508,6 +1527,7 @@ describe("the protection level", () => {
     const card = await screen.findByLabelText("Protection");
     expect(await within(card).findByText("Standard protection")).toBeInTheDocument();
     expect(card).toHaveTextContent("Verified");
+    expect(card.querySelector(".radio.on")).not.toBeNull(); // Standard is the selected choice
     expect(card).toHaveTextContent("Confirmed by your devices. Last change 7 Nov on");
     expect(card).toHaveTextContent("Advanced protectionAdvanced is Planned. When it ships: switching from Standard deletes Orbyn’s copy of your keys at once; server backups made before the switch may keep a copy until the keys are rotated, which is Planned. An account that starts on Advanced never had one."); // shown, and not available yet
     expect(engine.accounts.get("sam@example.com")!.protection).toHaveLength(1); // signed once, at sign-up

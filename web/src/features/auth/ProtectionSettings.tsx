@@ -162,6 +162,11 @@ function DetailsDialog({ report, kind, confirmed, onClose, onReviewDevices }: { 
  * Verified, Confirming and Can't confirm are drawn in Orbyn Account Designs. After a rollback or a fork there is no head to sign
  * after, so nothing offers to confirm: the way on is a trusted device. Advanced is shown as Planned.
  */
+/** Standard is the level in use and the only one that can be chosen, so it is the selected radio; any other level keeps the shield. */
+function ProtectionMark({ standard }: { standard: boolean }) {
+  return standard ? <span className="radio on" aria-hidden="true" /> : <Icon name="shield" small />;
+}
+
 export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () => void } = {}) {
   const auth = useAuth();
   const [report, setReport] = useState<ProtectionReport | null>(null);
@@ -266,7 +271,7 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
         ) : kind === "verified" ? (
           <>
             <div className="pv-head">
-              <Icon name="shield" small />
+              <ProtectionMark standard={report.level === "standard"} />
               <b style={{ fontWeight: "var(--fw-medium)" }}>{level} protection</b>
               <span className="st ok"><span className="sd" />Verified</span>
             </div>
@@ -279,7 +284,7 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
         ) : kind === "confirming" ? (
           <>
             <div className="pv-head">
-              <Icon name="shield" small />
+              <ProtectionMark standard={report.level === "standard"} />
               <b style={{ fontWeight: "var(--fw-medium)" }}>{level} protection</b>
               <span className="st info"><span className="sd" />Confirming</span>
             </div>
@@ -317,9 +322,9 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
           </>
         )}
       </div>
-      <div className="srow" style={{ opacity: 0.6 }}>
+      <div className="srow" style={{ opacity: "var(--op-planned)" }}>
         <div className="lab2">
-          <b>Advanced protection</b>
+          <b className="pv-choice"><span className="radio" aria-hidden="true" />Advanced protection</b>
           <small>Advanced is <Planned />. When it ships: switching from Standard deletes Orbyn’s copy of your keys at once; server backups made before the switch may keep a copy until the keys are rotated, which is Planned. An account that starts on Advanced never had one.</small>
         </div>
       </div>

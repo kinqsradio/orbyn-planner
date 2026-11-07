@@ -137,6 +137,13 @@ button { cursor: pointer; }
   background: var(--raise); color: var(--t2); font-size: var(--fs-12);
 }
 .pill.on, .pill[aria-checked="true"] { background: var(--btn); color: var(--btnt); }
+.fine { font-size: var(--fs-12); font-weight: var(--fw-regular); }
+.tgl { width: var(--sp-30); height: var(--sp-18); border-radius: var(--r-pill); background: var(--line2); position: relative; display: inline-block; flex: none; border: 0; padding: 0; }
+.tgl::after { content: ""; position: absolute; left: var(--sp-2); top: var(--sp-2); width: var(--sp-14); height: var(--sp-14); border-radius: var(--r-round); background: var(--main); }
+.tgl.on { background: var(--t1); }
+.tgl.on::after { left: var(--sp-14); }
+.tgl:disabled { opacity: .6; cursor: default; }
+.tgl:focus-visible { outline: var(--bw-2) solid var(--t1); outline-offset: var(--sp-2); }
 .pills { display: flex; gap: var(--sp-6); flex-wrap: wrap; }
 
 .split { display: grid; grid-template-columns: var(--sp-260) minmax(0, 1fr); min-height: 0; flex: 1; }
@@ -572,3 +579,5 @@ button.pillx { border: 0; }
 
 /* A passkey button the designs draw but that does nothing yet: dimmed, with the Planned label. */
 .passkey-planned { opacity: .6; display: inline-flex; gap: var(--sp-6); align-items: center; justify-content: center; flex-wrap: wrap; height: auto; min-height: var(--sp-32); cursor: default; }
+
+.pv-choice { display: inline-flex; align-items: center; gap: var(--sp-8); font-weight: var(--fw-medium); }
