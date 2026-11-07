@@ -280,6 +280,7 @@ export function TodayPage() {
           )}
         </div>
 
+        {!phone && (
         <div className="blk aside">
           <div className="bh"><b>This week</b><span></span></div>
           {weekList}
@@ -295,6 +296,7 @@ export function TodayPage() {
             </>
           )}
         </div>
+        )}
       </div>
     </>
   );

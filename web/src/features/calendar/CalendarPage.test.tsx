@@ -397,7 +397,8 @@ describe("Today with events", () => {
       },
     });
     const rows = Array.from(document.querySelectorAll(".row .what")).map((el) => el.textContent);
-    expect(rows).toEqual(["Team planning", "Send the brief", "Book club", "Family day", "Pick up dry cleaning"]);
+    // All-day events sit in their own group at the top; then the timed ones and the tasks in time order.
+    expect(rows).toEqual(["Family day", "Team planning", "Send the brief", "Book club", "Pick up dry cleaning"]);
     expect(screen.getByText("Event · Room 3")).toBeInTheDocument();
     expect(screen.getByText(/3 events, 2 tasks/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Book club" }));

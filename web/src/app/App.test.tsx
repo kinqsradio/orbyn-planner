@@ -9,9 +9,9 @@ beforeEach(() => {
 });
 
 describe("navigation", () => {
-  it("shows the Today empty state first", () => {
+  it("shows the Today empty state first", async () => {
     render(<App />);
-    expect(screen.getByRole("heading", { name: "Nothing planned today" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Nothing planned today" })).toBeInTheDocument(); // after the store has loaded
     expect(screen.getByRole("button", { name: "New task" })).toBeEnabled();
     expect(screen.getByText("Done today")).toBeInTheDocument();
   });
