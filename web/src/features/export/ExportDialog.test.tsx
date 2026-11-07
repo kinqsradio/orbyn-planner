@@ -34,9 +34,9 @@ describe("the export dialog", () => {
     const ics = within(dialog).getByRole("radio", { name: /Calendar \(\.ics\)/ });
     expect(json).toBeChecked();
     expect(ics).not.toBeChecked();
-    expect(dialog).toHaveTextContent("All your tasks, lists, projects and calendars, as one file.");
+    expect(within(dialog).getByRole("radio", { name: /JSON/ }).closest("label")).toHaveTextContent("Everything in your planner, as one file, including events, tags and the trash. Settings stay on this device.");
     // The calendar file also holds tasks that have a due date, so its note says so rather than "events only".
-    expect(dialog).toHaveTextContent("Events, and tasks with a due date, for other calendar apps.");
+    expect(within(dialog).getByRole("radio", { name: /Calendar \(\.ics\)/ }).closest("label")).toHaveTextContent("Events, and tasks with a due date, for other calendar apps.");
     expect(within(dialog).getByRole("button", { name: "Export" })).toHaveClass("btn");
     await waitFor(() => expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus());
   });

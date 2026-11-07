@@ -14,7 +14,7 @@ type Kind = "json" | "ics";
 type Step = { name: "choose" } | { name: "busy" } | { name: "done"; file: string; size: number } | { name: "failed" };
 
 const CHOICES: { kind: Kind; title: string; note: string }[] = [
-  { kind: "json", title: "JSON", note: "All your tasks, lists, projects and calendars, as one file." },
+  { kind: "json", title: "JSON", note: "Everything in your planner, as one file, including events, tags and the trash. Settings stay on this device." },
   // The calendar file holds the events and also the tasks that have a due date (as VTODO), so the note says so.
   { kind: "ics", title: "Calendar (.ics)", note: "Events, and tasks with a due date, for other calendar apps." },
 ];
