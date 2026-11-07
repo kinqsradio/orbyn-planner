@@ -201,7 +201,7 @@ function Panel({ task }: { task: Task }) {
             <TagChip key={t.id} tag={t} label={labels.get(t.id)} onRemove={() => store.setTaskTag(task.id, t.id, false)} />
           ))}
           {task.tags.length >= MAX_TAGS_PER_TASK ? (
-            <span className="t3 small" role="note">A task can have 100 tags at most.</span>
+            <span className="t3 small" role="note">{`A task can have ${MAX_TAGS_PER_TASK} tags at most.`}</span>
           ) : (
             <>
             {tags.some((t) => t.deletedAt === null && !task.tags.includes(t.id)) && (
