@@ -53,6 +53,17 @@ export class DeviceKeys {
      */
     static import(sealed: Uint8Array | number[], wrap_secret: Uint8Array | number[]): DeviceKeys;
     /**
+     * The `signature` that lets this device cancel a scheduled account deletion, under
+     * `orbyn/account-delete-cancel/v1`, over the account id, the device id and `signedAt`.
+     */
+    signAccountDeleteCancel(account_id: string, device_id: string, signed_at: number): Uint8Array;
+    /**
+     * The `signature` that lets this device schedule the deletion of the whole account, under
+     * `orbyn/account-delete/v1`, over the account id, the device id and `signedAt` (Unix seconds,
+     * within five minutes of the server's clock). Each signature is accepted once.
+     */
+    signAccountDelete(account_id: string, device_id: string, signed_at: number): Uint8Array;
+    /**
      * The `device_signature` of `LoginFinish`, for the `login_id` from
      * `LoginStarted`.
      */
@@ -393,6 +404,8 @@ export interface InitOutput {
     readonly devicekeys_export: (a: number, b: number, c: number, d: number) => void;
     readonly devicekeys_import: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly devicekeys_sign: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+    readonly devicekeys_signAccountDelete: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
+    readonly devicekeys_signAccountDeleteCancel: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly devicekeys_signLogin: (a: number, b: number, c: number, d: number) => void;
     readonly devicekeys_signRegistration: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly devicekeys_signTotpManage: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => void;

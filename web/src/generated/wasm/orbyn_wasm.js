@@ -247,6 +247,83 @@ export class DeviceKeys {
         }
     }
     /**
+     * The `signature` that lets this device cancel a scheduled account deletion, under
+     * `orbyn/account-delete-cancel/v1`, over the account id, the device id and `signedAt`.
+     * @param {string} account_id
+     * @param {string} device_id
+     * @param {number} signed_at
+     * @returns {Uint8Array}
+     */
+    signAccountDeleteCancel(account_id, device_id, signed_at) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16) >>> 0;
+            const val3 = +signed_at;
+            let ptr0, len0, ptr1, len1;
+            try {
+                ptr0 = passStringToWasm0(account_id, wasm.__wbindgen_export5, wasm.__wbindgen_export6);
+                len0 = WASM_VECTOR_LEN;
+                ptr1 = passStringToWasm0(device_id, wasm.__wbindgen_export5, wasm.__wbindgen_export6);
+                len1 = WASM_VECTOR_LEN;
+            } catch (e) {
+                if (ptr1) { wasm.__wbindgen_export3(ptr1, len1 * 1, 1); }
+                if (ptr0) { wasm.__wbindgen_export3(ptr0, len0 * 1, 1); }
+                throw e;
+            }
+            wasm.devicekeys_signAccountDeleteCancel(retptr, this.__wbg_ptr, ptr0, len0, ptr1, len1, val3);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+            if (r3) {
+                throw takeFromExternrefTable0(r2);
+            }
+            var v4 = getArrayU8FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export3(r0, r1 * 1, 1);
+            return v4;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * The `signature` that lets this device schedule the deletion of the whole account, under
+     * `orbyn/account-delete/v1`, over the account id, the device id and `signedAt` (Unix seconds,
+     * within five minutes of the server's clock). Each signature is accepted once.
+     * @param {string} account_id
+     * @param {string} device_id
+     * @param {number} signed_at
+     * @returns {Uint8Array}
+     */
+    signAccountDelete(account_id, device_id, signed_at) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16) >>> 0;
+            const val3 = +signed_at;
+            let ptr0, len0, ptr1, len1;
+            try {
+                ptr0 = passStringToWasm0(account_id, wasm.__wbindgen_export5, wasm.__wbindgen_export6);
+                len0 = WASM_VECTOR_LEN;
+                ptr1 = passStringToWasm0(device_id, wasm.__wbindgen_export5, wasm.__wbindgen_export6);
+                len1 = WASM_VECTOR_LEN;
+            } catch (e) {
+                if (ptr1) { wasm.__wbindgen_export3(ptr1, len1 * 1, 1); }
+                if (ptr0) { wasm.__wbindgen_export3(ptr0, len0 * 1, 1); }
+                throw e;
+            }
+            wasm.devicekeys_signAccountDelete(retptr, this.__wbg_ptr, ptr0, len0, ptr1, len1, val3);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+            if (r3) {
+                throw takeFromExternrefTable0(r2);
+            }
+            var v4 = getArrayU8FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export3(r0, r1 * 1, 1);
+            return v4;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
      * The `device_signature` of `LoginFinish`, for the `login_id` from
      * `LoginStarted`.
      * @param {string} login_id
