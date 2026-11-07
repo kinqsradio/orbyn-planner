@@ -18,6 +18,13 @@ describe("text uses t1 to t3; t4 is for icons, borders and dividers", () => {
     }
   });
 
+  it("a done row is struck through in its own text colour, not a paler line", () => {
+    const css = fs.readFileSync(path.join(SRC, "styles/app.css"), "utf8");
+    const rule = css.slice(css.indexOf(".tr.done .tt"), css.indexOf("}", css.indexOf(".tr.done .tt")));
+    expect(rule).toContain("text-decoration: line-through");
+    expect(rule).not.toContain("text-decoration-color");
+  });
+
   it("no rule sets the text colour to --t4", () => {
     const css = fs.readFileSync(path.join(SRC, "styles/app.css"), "utf8");
     expect(css).not.toMatch(/(^|[^-a-z])color:\s*var\(--t4\)/m);
