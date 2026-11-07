@@ -15,7 +15,7 @@ body {
 h1, h2, h3, h4, h5, p, ul { margin: 0; }
 ul { padding: 0; list-style: none; }
 a { color: inherit; text-decoration: none; }
-button, input, select { font: inherit; color: inherit; }
+button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
 :focus-visible { outline: var(--bw-2) solid var(--t1); outline-offset: var(--sp-2); }
 
@@ -249,7 +249,7 @@ button.pill { border: 0; }
   border: var(--bw) solid var(--line2); border-radius: var(--r-10); background: var(--main); color: var(--t1);
 }
 .field::placeholder { color: var(--t3); }
-textarea.field { height: auto; padding: var(--sp-8) var(--sp-12); resize: vertical; line-height: 1.45; }
+textarea.field { height: auto; padding: var(--sp-8) var(--sp-12); resize: vertical; font: inherit; line-height: var(--lh-body); }
 .field.bare { border: 0; background: var(--raise); gap: var(--sp-8); color: var(--t3); }
 .field.bare input { flex: 1; min-width: 0; height: 100%; border: 0; background: transparent; outline: none; color: var(--t1); }
 .field.bare:focus-within { outline: var(--bw-2) solid var(--t1); outline-offset: var(--sp-2); }

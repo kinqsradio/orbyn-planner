@@ -25,6 +25,11 @@ describe("text uses t1 to t3; t4 is for icons, borders and dividers", () => {
     expect(rule).not.toContain("text-decoration-color");
   });
 
+  it("a notes textarea uses the page font, not the browser's monospace", () => {
+    const css = fs.readFileSync(path.join(SRC, "styles/app.css"), "utf8");
+    expect(css).toMatch(/textarea\.field\s*\{[^}]*font:\s*inherit/);
+  });
+
   it("no rule sets the text colour to --t4", () => {
     const css = fs.readFileSync(path.join(SRC, "styles/app.css"), "utf8");
     expect(css).not.toMatch(/(^|[^-a-z])color:\s*var\(--t4\)/m);
