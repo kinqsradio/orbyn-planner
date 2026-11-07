@@ -66,7 +66,10 @@ export function createAuthServices(options: AuthServiceOptions = {}): AuthServic
   const engine = createEngineHost({ keys, crypto, wrapSecret, now, lock: options.lock, wrapKeyPresent: options.wrapSecret ? async () => true : undefined });
   const channelName = "orbyn-planner-auth";
   const signedOut = {
+    // A tab that holds its account in memory only neither says it signed out nor acts on another tab saying so: the two share
+    // nothing, and its sign-out clears only its own memory.
     post: () => {
+      if (keys.inMemory) return;
       try {
         const channel = new BroadcastChannel(channelName);
         channel.postMessage("signed-out");
@@ -78,7 +81,7 @@ export function createAuthServices(options: AuthServiceOptions = {}): AuthServic
     listen: (listener: () => void) => {
       if (typeof BroadcastChannel === "undefined") return () => undefined;
       const channel = new BroadcastChannel(channelName);
-      channel.onmessage = (e: MessageEvent) => e.data === "signed-out" && listener();
+      channel.onmessage = (e: MessageEvent) => e.data === "signed-out" && !keys.inMemory && listener();
       return () => channel.close();
     },
   };
