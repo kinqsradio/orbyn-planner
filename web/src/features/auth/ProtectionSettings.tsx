@@ -284,8 +284,8 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
             </div>
             <span className="t2 pv-text">
               Confirmed by your devices.
-              {/* "on this device" only when the signed record says this device signed it; no name from the server is ever shown. */}
-              {report.head && ` Last change ${day(secsOf(report.head))}${report.signer?.thisDevice ? " on this device" : ""}.`}
+              {/* "on this device" only when the signed record says this device signed the head and that head is the level verified now; no name from the server is ever shown. */}
+              {report.head && ` Last change ${day(secsOf(report.head))}${report.signer?.thisDevice && report.seq === report.head.seq ? " on this device" : ""}.`}
               {report.level === "standard" && <><br /><span className="t3">Your planner is encrypted on your devices. Right now only your trusted devices hold your keys, and Orbyn holds no copy of them. Standard’s recovery copy, account recovery and server push and email reminders are <Planned />, and so is Advanced protection.</span></>}
             </span>
           </>

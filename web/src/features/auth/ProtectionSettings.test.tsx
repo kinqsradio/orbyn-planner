@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiFailure } from "../../api/auth";
@@ -122,6 +122,14 @@ describe("who signed the last change", () => {
     expect(await text({ id: "d1", listed: true, thisDevice: true })).toContain("Confirmed by your devices. Last change 3 Nov on this device.");
   });
 
+  it("this device signed the head, but the level verified now is another seq: no on this device", async () => {
+    read.mockResolvedValue(report({ seq: 1, head: link(2, secs("2026-11-03T09:00:00Z")), signer: { id: "d1", listed: true, thisDevice: true } }));
+    render(<ProtectionSettings />);
+    const text = (await card()).textContent!;
+    expect(text).toContain("Last change 3 Nov.");
+    expect(text).not.toContain("on this device");
+  });
+
   it("another device, or one the account doesn't list: Last change 3 Nov. with no device", async () => {
     expect(await text({ id: "d2", listed: true, thisDevice: false })).toContain("Confirmed by your devices. Last change 3 Nov.Your planner");
     cleanup();
@@ -148,8 +156,8 @@ describe("the protection choices", () => {
     const standard = within(group).getByRole("radio", { name: "Standard protection" });
     const advanced = within(group).getByRole("radio", { name: "Advanced protection" });
     standard.focus();
-    for (const key of ["{ArrowDown}", "{ArrowUp}", "{ArrowRight}", "{ArrowLeft}"]) {
-      await userEvent.keyboard(key);
+    for (const key of ["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft"]) {
+      expect(fireEvent.keyDown(standard, { key })).toBe(false); // the key press was prevented: the page does not scroll or move the choice
       expect(standard).toHaveAttribute("aria-checked", "true");
       expect(advanced).toHaveAttribute("aria-checked", "false");
       expect(standard).toHaveFocus();
