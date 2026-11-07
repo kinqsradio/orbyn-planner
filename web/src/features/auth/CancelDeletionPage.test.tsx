@@ -61,6 +61,18 @@ describe("the cancel link from the deletion email", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("once the token was used, the copy kept in this module is gone too: a new render of the page finds no token", async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+    const first = render(<CancelDeletionPage />);
+    await press();
+    await screen.findByRole("heading", { name: "Deletion cancelled" });
+    first.unmount();
+    render(<CancelDeletionPage />); // no forgetTokenForTests(): the module's copy is all that is left
+    expect(screen.getByRole("heading", { name: "This link doesn’t work any more" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel deletion" })).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("every refused token is one message, which says nothing about the account", async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ code: "invalid_cancel_token" }), { status: 400 }));
     render(<CancelDeletionPage />);
@@ -118,7 +130,7 @@ describe("the cancel link from the deletion email", () => {
       if (seen.has(file)) return;
       seen.add(file);
       const text = fs.readFileSync(file, "utf8");
-      for (const m of text.matchAll(/(?:from|import\()\s*"(\.[^"]+)"/g)) {
+      for (const m of text.matchAll(/(?:from|import\(|^import)\s*"(\.[^"]+)"/gm)) {
         const base = new URL(m[1]!, `file://${file}`).pathname;
         const target = ["", ".ts", ".tsx", "/index.ts", "/index.tsx"].map((x) => base + x).find((x) => { try { return fs.readFileSync(x, "utf8") !== undefined && !x.endsWith("/"); } catch { return false; } });
         if (target && /\.(ts|tsx)$/.test(target)) walk(target);

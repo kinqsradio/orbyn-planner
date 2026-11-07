@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiFailure } from "../../api/auth";
 import { useAuth } from "../../auth/AuthProvider";
-import { PAUSED_PROTECTION_HINT, useDeletionPaused } from "../../auth/deletionNotice";
+import { PAUSED_HINT, useDeletionPaused } from "../../auth/deletionNotice";
 import { pendingChange, readConfirmed, readSkipped, recordReport, writeSeen, writeSkipped, type ConfirmedSetting } from "../../auth/protectionNotice";
 import { confirmProtection, readProtection, type ProtectionReport } from "../../auth/flows";
 import type { ProtectionLevel } from "../../generated/ProtectionLevel";
@@ -293,7 +293,7 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
             </div>
             <span className="t2 pv-text">No device has set a protection level for this account yet. Until one does, your data uses Standard protection.</span>
             <div className="pv-line">
-              <button type="button" className="btn sm" disabled={paused} title={paused ? PAUSED_PROTECTION_HINT : undefined} onClick={() => setChoosing(true)}>Choose</button>
+              <button type="button" className="btn sm" disabled={paused} title={paused ? PAUSED_HINT : undefined} onClick={() => setChoosing(true)}>Choose</button>
               {paused && <span className="t3 small">Paused while your account is scheduled for deletion.</span>}
             </div>
           </>

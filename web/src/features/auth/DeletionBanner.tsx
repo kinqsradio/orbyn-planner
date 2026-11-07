@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { cancelDeletion } from "../../auth/flows";
 import { useAuth } from "../../auth/AuthProvider";
 import type { AuthServices } from "../../auth/services";
-import { deletionCountdown, deletionNotice, useDeletionScheduledAt } from "../../auth/deletionNotice";
+import { CANCEL_FAILED_TEXT, cancelFailure, deletionCountdown, deletionNotice, useDeletionScheduledAt } from "../../auth/deletionNotice";
 import { useNow } from "../../app/clock";
 import { useUi } from "../../app/ui";
 import { BusyButton } from "../../components/BusyButton";
@@ -37,20 +37,23 @@ export function useCancelDeletion() {
   const auth = useAuth();
   const ui = useUi();
   const [busy, setBusy] = useState(false);
+  const failed = useSyncExternalStore(cancelFailure.subscribe, cancelFailure.get);
   const cancel = async () => {
     if (!auth?.session || busy) return;
     setBusy(true);
+    cancelFailure.set(false);
     try {
       await cancelDeletion(auth.services, auth.session);
       deletionNotice.set(null);
       ui.showToast("Deletion cancelled. Your account stays as it is.");
     } catch {
-      // The designs give a failed cancel no state of its own; the banner and the row stay, and the button works again.
+      // Nothing changed, so it is still scheduled: the banner and the row say so and the button becomes Try again.
+      cancelFailure.set(true);
     } finally {
       setBusy(false);
     }
   };
-  return { cancel, busy };
+  return { cancel, busy, failed };
 }
 
 /** Asks the engine for the scheduled date now (a refusal said it is scheduled), instead of waiting for the next check. */
@@ -75,17 +78,23 @@ export function DeletionWatcher() {
 export function DeletionBanner() {
   const at = useDeletionScheduledAt();
   const now = useNow();
-  const { cancel, busy } = useCancelDeletion();
+  const { cancel, busy, failed } = useCancelDeletion();
   if (!at) return null;
   const when = deletionCountdown(at, now);
   return (
     <aside className="banner warn deletion-banner" role="status" aria-label="Account deletion">
       <span className="dot amber" aria-hidden="true" />
       <b className="banner-title">Deletion scheduled</b>
-      <span className="banner-text long">Your Orbyn account and everything in it will be deleted {when}.</span>
-      <span className="banner-text short">Your account will be deleted {when}.</span>
+      <span className="banner-text long">
+        Your Orbyn account and everything in it will be deleted {when}.
+        {failed && <><br /><span className="err" role="alert">{CANCEL_FAILED_TEXT}</span></>}
+      </span>
+      <span className="banner-text short">
+        Your account will be deleted {when}.
+        {failed && <><br /><span className="err">{CANCEL_FAILED_TEXT}</span></>}
+      </span>
       <div className="end">
-        <BusyButton className="btn sm" busy={busy} idle="Cancel deletion" working="Cancelling…" onClick={() => void cancel()} />
+        <BusyButton className="btn sm" busy={busy} idle={failed ? "Try again" : "Cancel deletion"} working="Cancelling…" onClick={() => void cancel()} />
       </div>
     </aside>
   );

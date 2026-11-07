@@ -528,6 +528,7 @@ button.pillx { border: 0; }
 .scope2 b { font-weight: var(--fw-regular); color: var(--t1); }
 .scope2 small { display: block; color: var(--t3); font-size: var(--fs-12); }
 .appi { width: var(--sp-22); height: var(--sp-22); border-radius: var(--r-6); display: inline-grid; place-items: center; background: var(--btn); color: var(--btnt); flex: none; }
+.field[aria-invalid="true"] { border-color: var(--red); }
 .fld-hint { color: var(--t3); font-size: var(--fs-11-5); }
 .mono-field { font-family: var(--mono); letter-spacing: .06em; }
 @media (max-width: 767px) {

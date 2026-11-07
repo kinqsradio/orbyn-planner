@@ -245,6 +245,14 @@ describe("sign in", () => {
     expect(screen.queryByRole("heading", { name: "Nothing planned yet" })).not.toBeInTheDocument();
   });
 
+  it("the sign-in screen has no way to cancel a deletion: that is the banner's and the email's job", async () => {
+    await mount(services());
+    await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.queryByText(/cancel.*deletion|deletion.*cancel/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /cancel deletion/i })).toBeNull();
+  });
+
   it("an unknown email looks exactly like a wrong password", async () => {
     await mount(services());
     await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
@@ -1631,7 +1639,7 @@ describe("deleting the account", () => {
     await userEvent.type(field, "0");
     expect(confirm).toBeEnabled();
     await userEvent.click(confirm);
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent("That code didn’t work.");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("That code isn’t right. Use the current code from your authenticator app.");
     expect(engine.accounts.get("sam@example.com")!.deletion).toBeUndefined(); // the dialog stays open and nothing was scheduled
 
     await userEvent.click(within(dialog).getByRole("button", { name: "Use a recovery code" }));
@@ -1703,7 +1711,7 @@ describe("while a deletion is scheduled", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Privacy" }));
     const choose = await within(await screen.findByLabelText("Protection")).findByRole("button", { name: "Choose" });
     expect(choose).toBeDisabled();
-    expect(choose).toHaveAttribute("title", "Cancel deletion to change protection");
+    expect(choose).toHaveAttribute("title", "Cancel deletion to change this");
   });
 
   it("a change the engine refuses with deletion_scheduled shows the paused state", async () => {

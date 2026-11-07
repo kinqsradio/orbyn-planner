@@ -16,6 +16,7 @@ export const deletionNotice = {
   set(value: string | null | undefined) {
     if (value === scheduledAt) return;
     scheduledAt = value;
+    if (!value) cancelFailedNow = false; // nothing scheduled, nothing to retry
     emit();
   },
   subscribe(listener: () => void) {
@@ -70,11 +71,22 @@ export const deleteIntent = {
   subscribe: (listener: () => void) => deletionNotice.subscribe(listener),
 };
 
+/** Whether the last Cancel deletion failed, so the banner and the Settings row both say so and offer Try again. */
+let cancelFailedNow = false;
+export const cancelFailure = {
+  get: () => cancelFailedNow,
+  set(value: boolean) {
+    if (value === cancelFailedNow) return;
+    cancelFailedNow = value;
+    emit();
+  },
+  subscribe: (listener: () => void) => deletionNotice.subscribe(listener),
+};
+
+export const CANCEL_FAILED_TEXT = "Couldn’t cancel deletion. Nothing changed, so it is still scheduled.";
+
 /** What a paused control says on hover or focus while an account is scheduled for deletion. */
 export const PAUSED_HINT = "Cancel deletion to change this";
-
-/** The same, on the protection controls. */
-export const PAUSED_PROTECTION_HINT = "Cancel deletion to change protection";
 
 /** True while a deletion is scheduled: adding or removing devices, changing protection or two-factor, and signing out everywhere are paused. */
 export function useDeletionPaused(): boolean {

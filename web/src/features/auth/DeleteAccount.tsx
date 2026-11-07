@@ -2,7 +2,7 @@ import { useEffect, useState, useSyncExternalStore, type FormEvent } from "react
 import { ApiFailure } from "../../api/auth";
 import { useNow } from "../../app/clock";
 import { useAuth } from "../../auth/AuthProvider";
-import { deleteIntent, deletionDay, deletionNotice, useDeletionScheduledAt } from "../../auth/deletionNotice";
+import { CANCEL_FAILED_TEXT, deleteIntent, deletionDay, deletionNotice, useDeletionScheduledAt } from "../../auth/deletionNotice";
 import { scheduleDeletion } from "../../auth/flows";
 import { BusyButton } from "../../components/BusyButton";
 import { Icon } from "../../components/Icon";
@@ -28,7 +28,7 @@ function PlannerScope() {
   const open = tasks.filter((t) => t.deletedAt === null).length;
   return (
     <div className="scope2">
-      <span className="appi ap-pl" aria-hidden="true"><Icon name="check" small /></span>
+      <span className="appi" aria-hidden="true"><Icon name="check" small /></span>
       <div>
         <b>Orbyn Planner</b>
         <small>{count(open, "task", "tasks")}, {count(lists.length, "list", "lists")}, {count(projects.length, "project", "projects")}, {count(calendars.length, "calendar", "calendars")}</small>
@@ -44,8 +44,8 @@ function DeleteDialog({ onClose }: { onClose: () => void }) {
   const now = useNow();
   /** Whether the account has two-factor on: the engine says. Null until it has. */
   const [totp, setTotp] = useState<boolean | null>(null);
-  /** Why the engine could not say whether two-factor is on: then no dialog is offered, since a code might be needed. */
-  const [totpError, setTotpError] = useState<string | null>(null);
+  /** Whether the engine could not say whether two-factor is on: then no form is offered, since a code might be needed. */
+  const [totpError, setTotpError] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [recovery, setRecovery] = useState(false);
   const [factor, setFactor] = useState("");
@@ -60,7 +60,7 @@ function DeleteDialog({ onClose }: { onClose: () => void }) {
     let live = true;
     void auth.services.api.currentDevice().then(
       (d) => live && setTotp(d.totp_enabled),
-      (e: unknown) => live && setTotpError(describeError(e)),
+      () => live && setTotpError(true),
     );
     return () => {
       live = false;
@@ -89,6 +89,9 @@ function DeleteDialog({ onClose }: { onClose: () => void }) {
         // Already scheduled (another device did it): the banner and the row take over.
         await refreshDeletionNotice(auth.services);
         onClose();
+      } else if (e instanceof ApiFailure && e.code === "second_factor_failed") {
+        // The dialog stays open with the code where it was typed, and Delete account stays available.
+        setError(recovery ? "That recovery code isn’t right, or it has been used already." : "That code isn’t right. Use the current code from your authenticator app.");
       } else setError(describeError(e));
     } finally {
       setBusy(false);
@@ -161,10 +164,10 @@ function DeleteDialog({ onClose }: { onClose: () => void }) {
     return (
       <Modal key="check-failed" label="Delete your Orbyn account" onClose={onClose}>
         <b className="card-title">Delete your Orbyn account?</b>
-        <span className="err" role="alert">{totpError}</span>
+        <p className="t3" role="alert">Orbyn couldn’t check whether two-factor is on for your account, so it can’t ask for the right code. Nothing was deleted.</p>
         <div className="dialog-actions">
           <button type="button" className="ghost" data-autofocus onClick={onClose}>Cancel</button>
-          <button type="button" className="btn" onClick={() => { setTotpError(null); setAttempt((n) => n + 1); }}>Try again</button>
+          <button type="button" className="btn" onClick={() => { setTotpError(false); setAttempt((n) => n + 1); }}>Try again</button>
         </div>
       </Modal>
     );
@@ -201,11 +204,10 @@ function DeleteDialog({ onClose }: { onClose: () => void }) {
               aria-invalid={error ? true : undefined}
               aria-describedby="del-hint"
             />
-            <span id="del-hint" className="fld-hint">{recovery ? "Each recovery code works once." : "From your authenticator app."}</span>
+            {error ? <span id="del-hint" className="err" role="alert">{error}</span> : <span id="del-hint" className="fld-hint">{recovery ? "Each recovery code works once." : "From your authenticator app."}</span>}
             <button type="button" className="link-btn link" onClick={() => { setRecovery(!recovery); setFactor(""); setError(null); }}>
               {recovery ? "Use your authenticator code instead" : "Use a recovery code"}
             </button>
-            {error && <span className="err" role="alert">{error}</span>}
           </div>
         )}
         {totp !== true && error && <span className="err" role="alert">{error}</span>}
@@ -226,7 +228,7 @@ export function DeleteAccountRow() {
   const auth = useAuth();
   const [open, setOpen] = useState(false);
   const scheduled = useDeletionScheduledAt();
-  const { cancel, busy } = useCancelDeletion();
+  const { cancel, busy, failed } = useCancelDeletion();
   // "Sign in again" from the dialog: once the person has signed in, the dialog is open again.
   const reopened = useSyncExternalStore(deleteIntent.subscribe, deleteIntent.count);
   const [seen, setSeen] = useState(reopened);
@@ -240,8 +242,8 @@ export function DeleteAccountRow() {
     return (
       <>
         <div className="srow">
-          <div className="lab2"><b>Deletion scheduled for {deletionDay(scheduled)}</b><small>Everything still works until then. Cancel any time.</small></div>
-          <BusyButton className="btn sm" busy={busy} idle="Cancel deletion" working="Cancelling…" onClick={() => void cancel()} />
+          <div className="lab2"><b>Deletion scheduled for {deletionDay(scheduled)}</b>{failed ? <small className="err" role="alert">{CANCEL_FAILED_TEXT}</small> : <small>Everything still works until then. Cancel any time.</small>}</div>
+          <BusyButton className="btn sm" busy={busy} idle={failed ? "Try again" : "Cancel deletion"} working="Cancelling…" onClick={() => void cancel()} />
         </div>
         {dialog}
       </>
