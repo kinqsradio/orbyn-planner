@@ -131,7 +131,9 @@ export class SyncController {
   private update(patch: Partial<SyncState>): void {
     this.state = { ...this.state, ...patch };
     for (const l of this.listeners) l();
-    if (this.state.leader) {
+    // While the account is held in this tab's memory only, nothing is shared with other tabs: its status (device names, who waits for
+    // keys) stays here.
+    if (this.state.leader && !this.services.keys.inMemory) {
       try {
         const { devices, lastSyncedAt, quarantined, phase, waitingForKeys, stranded, needsApproval, keysPending, dropped, trashedEdits, failed, skipped, error } = this.state;
         this.status?.postMessage({ devices, lastSyncedAt, quarantined, phase, waitingForKeys, stranded, needsApproval, keysPending, dropped, trashedEdits, failed, skipped, error });
@@ -148,7 +150,8 @@ export class SyncController {
     if (!this.stopped) return;
     this.stopped = false;
     this.update({ phase: "idle" });
-    if (typeof BroadcastChannel !== "undefined") {
+    const memory = this.services.keys.inMemory;
+    if (typeof BroadcastChannel !== "undefined" && !memory) {
       this.status = new BroadcastChannel(STATUS_CHANNEL);
       this.status.onmessage = (e: MessageEvent) => {
         // A follower shows what the leader tab last reported.
@@ -157,7 +160,9 @@ export class SyncController {
         for (const l of this.listeners) l();
       };
     }
-    const lock = this.options.lock ?? defaultLock;
+    // Held in memory only, nothing is shared with another tab, so this tab need not compete for the lock: another planner tab holding
+    // it would keep this one from ever leading or sending its keys.
+    const lock = this.options.lock ?? (memory ? (hold: () => Promise<void>) => hold() : defaultLock);
     void lock(
       () =>
         new Promise<void>((resolve) => {
