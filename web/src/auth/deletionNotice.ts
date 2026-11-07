@@ -42,11 +42,20 @@ export function deletionDay(rfc3339: string): string {
   return `${WEEKDAYS[at.getDay()]} ${at.getDate()} ${MONTHS[at.getMonth()]}`;
 }
 
-/** "in 6 days": whole days left, from now. */
-export function deletionIn(rfc3339: string, now: Date): string {
-  const days = Math.floor((new Date(rfc3339).getTime() - now.getTime()) / 86_400_000);
-  if (days < 1) return "today";
-  return `in ${days} ${days === 1 ? "day" : "days"}`;
+/**
+ * The banner's countdown, as the designs word it: "on Saturday 14 November, in 6 days", and on the last day "today at 09:00 UTC, in 5
+ * hours" (in the last hour, "in under an hour").
+ */
+export function deletionCountdown(rfc3339: string, now: Date): string {
+  const at = new Date(rfc3339);
+  const left = at.getTime() - now.getTime();
+  if (left < 86_400_000) {
+    const hours = Math.floor(left / 3_600_000);
+    const time = `${String(at.getUTCHours()).padStart(2, "0")}:${String(at.getUTCMinutes()).padStart(2, "0")} UTC`;
+    return `today at ${time}, ${hours < 1 ? "in under an hour" : `in ${hours} ${hours === 1 ? "hour" : "hours"}`}`;
+  }
+  const days = Math.floor(left / 86_400_000);
+  return `on ${deletionDay(rfc3339)}, in ${days} ${days === 1 ? "day" : "days"}`;
 }
 
 /** The person chose "Sign in again" in the delete dialog; once they have signed in, the dialog comes back. */

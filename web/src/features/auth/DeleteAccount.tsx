@@ -23,10 +23,9 @@ function PlannerScope() {
   const open = tasks.filter((t) => t.deletedAt === null).length;
   return (
     <div className="scope2">
-      <span className="appi ap-pl" aria-hidden="true"><Icon name="check" small /></span>
       <div>
-        <b>Orbyn Planner</b>
-        <small>{count(open, "task", "tasks")}, {count(lists.length, "list", "lists")}, {count(projects.length, "project", "projects")}, {count(calendars.length, "calendar", "calendars")}</small>
+        <b>Planner: {count(open, "task", "tasks")}, {count(lists.length, "list", "lists")}, {count(projects.length, "project", "projects")}, {count(calendars.length, "calendar", "calendars")}</b>
+        <small>And anything you’ve saved in other Orbyn apps.</small>
       </div>
     </div>
   );

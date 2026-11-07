@@ -1584,9 +1584,11 @@ describe("deleting the account", () => {
     const { auth } = await signedIn();
     expect(screen.getByText("Deletes your Orbyn account and its data in every Orbyn app, after 7 days.")).toBeInTheDocument();
     const dialog = await openDialog();
-    expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus());
     expect(dialog).toHaveTextContent("7 days from now. Until then everything keeps working, and you can cancel from Settings or from the email we send.");
-    expect(dialog).toHaveTextContent("Orbyn Planner");
+    expect(dialog).toHaveTextContent(/Planner: 0 tasks, \d+ lists?, 0 projects, \d+ calendars?/);
+    expect(dialog).toHaveTextContent("And anything you’ve saved in other Orbyn apps.");
+    expect(dialog).not.toHaveTextContent("Plus plan");
     expect(dialog).toHaveTextContent("it is gone from Orbyn’s servers and from every device the next time it opens. This can’t be undone.");
     expect(within(dialog).queryByLabelText(/Type your email|Your password/)).toBeNull(); // no typed email, no password
     expect(within(dialog).queryByLabelText("Two-factor code")).toBeNull(); // two-factor is off
@@ -1649,7 +1651,7 @@ describe("deleting the account", () => {
     await userEvent.click(confirm);
     expect(await screen.findByText("For your safety, deleting an account needs a sign-in from the last 10 minutes. Sign in again and you’ll come straight back here.")).toBeInTheDocument();
     const stale = screen.getByRole("dialog", { name: "Delete your Orbyn account" });
-    expect(within(stale).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    await waitFor(() => expect(within(stale).getByRole("button", { name: "Cancel" })).toHaveFocus());
     expect(engine.accounts.get("sam@example.com")!.deletion).toBeUndefined();
     await userEvent.click(within(stale).getByRole("button", { name: "Sign in again" }));
     await fillSignIn();

@@ -3,7 +3,7 @@ import { ApiFailure } from "../../api/auth";
 import { cancelDeletion } from "../../auth/flows";
 import { useAuth } from "../../auth/AuthProvider";
 import type { AuthServices } from "../../auth/services";
-import { deletionDay, deletionIn, deletionNotice, useDeletionScheduledAt } from "../../auth/deletionNotice";
+import { deletionCountdown, deletionNotice, useDeletionScheduledAt } from "../../auth/deletionNotice";
 import { useNow } from "../../app/clock";
 import { useUi } from "../../app/ui";
 import { BusyButton } from "../../components/BusyButton";
@@ -92,14 +92,13 @@ export function DeletionBanner() {
   const now = useNow();
   const { cancel, busy, error, again, signInAgain } = useCancelDeletion();
   if (!at) return null;
-  const day = deletionDay(at);
-  const left = deletionIn(at, now);
+  const when = deletionCountdown(at, now);
   return (
     <aside className="banner warn deletion-banner" role="status" aria-label="Account deletion">
       <span className="dot amber" aria-hidden="true" />
       <b className="banner-title">Deletion scheduled</b>
-      <span className="banner-text long">Your Orbyn account and everything in it will be deleted on {day}, {left}.</span>
-      <span className="banner-text short">Your account will be deleted on {day}, {left}.</span>
+      <span className="banner-text long">Your Orbyn account and everything in it will be deleted {when}.</span>
+      <span className="banner-text short">Your account will be deleted {when}.</span>
       {error && <span className="err" role="alert">{error}</span>}
       <div className="end">
         {again && <button type="button" className="ghost sm" onClick={() => void signInAgain()}>Sign in again</button>}
