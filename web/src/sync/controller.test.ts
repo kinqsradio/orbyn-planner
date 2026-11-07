@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mockSockets } from "../api/testing/MockSocket";
 import { SyncController, socketUrl, type SyncOptions } from "./controller";
 import { createSyncRig, type SyncRig, type TestDevice } from "./testing/rig";
@@ -136,5 +136,68 @@ describe("offline and online", () => {
     a.c.start();
     await until(() => a.c.getState().phase === "error");
     expect(a.c.getState().error).toMatch(/keeps refusing/);
+  });
+});
+
+describe("a tab that holds its account in memory only", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  /** Another planner tab holds the sync lock, and every BroadcastChannel made or posted to is counted. */
+  function sharedWorld() {
+    // The sync lock is never granted (another tab holds it); the engine's own lock is granted at once.
+    const request = vi.fn((name: string, hold: () => Promise<unknown>) => (name === "orbyn-planner-sync" ? new Promise<void>(() => undefined) : hold()));
+    vi.stubGlobal("navigator", { onLine: true, locks: { request } });
+    const made: string[] = [];
+    const posted: unknown[] = [];
+    vi.stubGlobal(
+      "BroadcastChannel",
+      class {
+        onmessage: unknown = null;
+        constructor(name: string) {
+          made.push(name);
+        }
+        postMessage(data: unknown) {
+          posted.push(data);
+        }
+        close() {}
+      },
+    );
+    return { request, made, posted };
+  }
+
+  it("does not wait for the global sync lock, so it still leads and sends its keys", async () => {
+    const r = await createSyncRig();
+    const world = sharedWorld();
+    r.a.services.keys.holdInMemory();
+    const sockets = mockSockets(r.engine);
+    const c = new SyncController(r.a.services, r.a.store, { socket: sockets.factory, baseUrl: "https://engine.test", delays: FAST, online: () => true });
+    controllers.push(c);
+    c.start();
+    await until(() => c.getState().leader && c.getState().live);
+    expect(world.request.mock.calls.filter(([name]) => name === "orbyn-planner-sync")).toEqual([]);
+  });
+
+  it("does not post its status, with the device names, to the other tabs, and does not listen to them", async () => {
+    const r = await createSyncRig();
+    const world = sharedWorld();
+    r.a.services.keys.holdInMemory();
+    const sockets = mockSockets(r.engine);
+    const c = new SyncController(r.a.services, r.a.store, { socket: sockets.factory, baseUrl: "https://engine.test", delays: FAST, online: () => true });
+    controllers.push(c);
+    c.start();
+    await until(() => c.getState().leader && c.getState().live);
+    expect(world.made).toEqual([]);
+    expect(world.posted).toEqual([]); // the controller reported (it led, it synced) and said nothing to other tabs
+  });
+
+  it("an account kept in storage still competes for the lock and posts its status (the control)", async () => {
+    const r = await createSyncRig();
+    const world = sharedWorld();
+    const sockets = mockSockets(r.engine);
+    const c = new SyncController(r.a.services, r.a.store, { socket: sockets.factory, baseUrl: "https://engine.test", delays: FAST, online: () => true });
+    controllers.push(c);
+    c.start();
+    await until(() => world.request.mock.calls.some(([name]) => name === "orbyn-planner-sync"));
+    expect(world.made).toContain("orbyn-planner-sync-status");
   });
 });

@@ -317,3 +317,27 @@ describe("keys and the quarantine", () => {
     expect(titles(r.b)).toEqual(["Secret plans"]);
   });
 });
+
+describe("which zones' keys reached another device", () => {
+  it("a zone made here is marked as reached only once an envelope with its key was put for the other trusted device", async () => {
+    const r = await createSyncRig();
+    r.a.store.addTask({ title: "Buy milk" });
+    await sync(r, r.a); // A makes the zones, then sends their keys to B, whom it trusts
+    const state = (await r.a.keys.loadSyncState())!;
+    const made = Object.keys(state.made);
+    expect(made.length).toBeGreaterThan(0);
+    for (const zone of made) {
+      expect(state.keysSent[zone], zone).toBeTruthy();
+      expect(state.keysReached?.[zone], zone).toBe(true); // an envelope really went out, not just the "owed to nobody" marker
+    }
+  });
+
+  it("a send the server refuses marks nothing as reached", async () => {
+    const r = await createSyncRig();
+    r.network.refuseKeys = true;
+    r.a.store.addTask({ title: "Buy milk" });
+    await sync(r, r.a);
+    const state = (await r.a.keys.loadSyncState())!;
+    expect(Object.keys(state.keysReached ?? {})).toEqual([]);
+  });
+});

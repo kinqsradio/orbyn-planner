@@ -164,7 +164,7 @@ function CheckEmail({ pending, onBack, onDone }: { pending: PendingSignUp; onBac
 }
 
 /** Sign-up on a browser that can neither store the keys nor hold them in memory (WebAssembly or WebCrypto off, say). Nothing was created. */
-function NoMemory() {
+export function NoMemory() {
   return (
     <div className="authcard keys-card" role="alert" aria-label="This browser can’t create an Orbyn account">
       <span className="pv-red"><Icon name="alert" size={22} /></span>

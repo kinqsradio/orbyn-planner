@@ -11,7 +11,7 @@ import { createMemoryKeyStore, type KeyStore } from "../../api/keyStore";
 import { FakeAuthCrypto } from "../../api/testing/FakeAuthCrypto";
 import { PROTECTION_GENESIS } from "../../api/testing/protectionFake";
 import { createMockEngine, MOCK_TOTP_CODE, type MockEngine } from "../../api/testing/MockEngine";
-import { confirmProtection, confirmTotp, enrolTotp, readProtection, signIn, signOut } from "../../auth/flows";
+import { confirmProtection, confirmTotp, enrolTotp, readProtection, signIn, signOut, signUp } from "../../auth/flows";
 import { signedUp } from "../../auth/testing/signedUp";
 import { createAuthServices, type AuthServices } from "../../auth/services";
 import { deviceName } from "../../auth/deviceName";
@@ -507,6 +507,19 @@ describe("adding a device", () => {
     expect(onDevice.getByRole("alert")).toHaveTextContent("check that this device’s clock is right");
   });
 
+  it("in Add a device, a network failure says nothing was shared, with Start again as the main button", async () => {
+    const { a } = await twoDevices();
+    await mount(a, "/settings");
+    await openAccount();
+    const list = await screen.findByRole("list", { name: "Devices" });
+    await waitFor(() => expect(within(list).getAllByRole("listitem")).toHaveLength(2));
+    engine.refuseNext("/v1/devices/approvals", 500, "internal");
+    await userEvent.click(within(list).getByRole("button", { name: `Approve ${deviceName()}` }));
+    const dialog = screen.getByRole("dialog", { name: "New sign-in" });
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Couldn’t finish approving. Check your connection. Nothing was shared.");
+    expect(within(dialog).getByRole("button", { name: "Start again" })).toHaveClass("btn");
+  });
+
   it("the trusted device gives up waiting for a new device that never shows up", async () => {
     const { a } = await twoDevices();
     const short = services(createMemoryKeyStore(), false, { firstMs: 5, maxMs: 10, totalMs: 60 });
@@ -525,7 +538,7 @@ describe("adding a device", () => {
     await openAccount();
     engine.refuseNext("/v1/devices/approvals", 429, "too_many_attempts");
     await userEvent.click(await screen.findByRole("button", { name: `Approve ${deviceName()}` }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Too many attempts");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Too many attempts"); // a coded refusal keeps the engine's words
     await userEvent.click(screen.getByRole("button", { name: "Start again" }));
     expect(await screen.findByText(/Waiting for .* to show its code/)).toBeInTheDocument();
   });
@@ -759,6 +772,28 @@ describe("keys the browser will not store", () => {
     await waitFor(() => expect(approvalsStarted()).toBe(before + 1));
   });
 
+  it("when approving fails on the network, the tab dialog says nothing was shared and Start again is the main button", async () => {
+    const keysA = createMemoryKeyStore();
+    keysA.replaceDevice = () => Promise.reject(new Error("quota"));
+    const a = services(keysA);
+    const b = services(createMemoryKeyStore());
+    const first = await mount(a);
+    await fillSignUp();
+    await screen.findByRole("alert", { name: "Account created, keys not saved" });
+    first.unmount();
+    const second = await mount(b);
+    await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
+    await fillSignIn();
+    await screen.findByRole("heading", { name: "Approve this device" });
+    second.unmount();
+    await mount(a);
+    engine.refuseNext("/v1/devices/approvals", 500, "internal");
+    await userEvent.click(await screen.findByRole("button", { name: "Approve another device from this tab" }));
+    const dialog = await screen.findByRole("dialog", { name: "Approve another device" });
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Couldn’t finish approving. Check your connection. Nothing was shared.");
+    expect(within(dialog).getByRole("button", { name: "Start again" })).toHaveClass("btn");
+  });
+
   it("in React's development check the approval is started once and is not cancelled", async () => {
     const { b, dialog } = await dialogOpen(true);
     await mount(b);
@@ -778,6 +813,19 @@ describe("keys the browser will not store", () => {
         return request;
       },
     });
+    // Every message to another tab or window is counted: only fixed strings may go out, never a device name, a key, a fingerprint or an id.
+    const messages: unknown[] = [];
+    vi.stubGlobal(
+      "BroadcastChannel",
+      class {
+        onmessage: unknown = null;
+        postMessage(data: unknown) {
+          messages.push(data);
+        }
+        close() {}
+      },
+    );
+    const windowPost = vi.spyOn(window, "postMessage").mockImplementation((data: unknown) => void messages.push(data));
     const writes: string[] = [];
     const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key: string) {
       writes.push(key);
@@ -817,6 +865,7 @@ describe("keys the browser will not store", () => {
       // The other device is a browser of its own, which stores what it likes; what this one writes from here on is counted.
       onB.unmount();
       writes.length = 0;
+      messages.length = 0; // the other device is a browser of its own
       await userEvent.click(await within(onA.root).findByRole("button", { name: "Continue" }));
       await within(onA.root).findByRole("navigation", { name: "Primary" });
 
@@ -828,12 +877,91 @@ describe("keys the browser will not store", () => {
       await within(onA.root).findByLabelText("Protection");
       await within(onA.root).findByText(/Standard protection|Confirming|Choose your protection level/);
 
+      // A memory tab sends nothing at all to other tabs or windows. (The sync status channel is not reached here, since no engine address
+      // is set in this test; `controller.test.ts` guards that one.)
+      expect(messages).toEqual([]);
       expect(opened.filter((name) => name.includes(accountId))).toEqual([]); // no database for the account
       expect(writes.filter((key) => key.includes(accountId) || /protection|notifications-read/.test(key))).toEqual([]);
       expect(await keysA.loadKeys()).toBeNull();
       onA.unmount();
     } finally {
       setItem.mockRestore();
+      windowPost.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("the expiry clock starts before the request that makes the approval, so a slow answer cannot hide an expiry", async () => {
+    const keysA = createMemoryKeyStore();
+    keysA.replaceDevice = () => Promise.reject(new Error("quota"));
+    // The answer to "make an approval" takes eleven minutes on this device's clock.
+    const slow = (async (url: string, init?: RequestInit) => {
+      const response = await engine.fetch(url, init);
+      if ((init?.method ?? "GET") === "POST" && String(url).endsWith("/v1/devices/approvals")) nowMs += 11 * 60_000;
+      return response;
+    }) as typeof fetch;
+    const a = createAuthServices({ wrapSecret: async () => wrapFor(keysA).slice(), fetch: slow, baseUrl: "http://engine.test", keys: keysA, crypto: () => crypto, now: () => nowMs, poll: FAST_POLL });
+    const b = services(createMemoryKeyStore());
+    const first = await mount(a);
+    await fillSignUp();
+    await screen.findByRole("alert", { name: "Account created, keys not saved" });
+    first.unmount();
+    const second = await mount(b);
+    await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
+    await fillSignIn();
+    await screen.findByRole("heading", { name: "Approve this device" });
+    second.unmount();
+    await mount(a);
+    await userEvent.click(await screen.findByRole("button", { name: "Approve another device from this tab" }));
+    const dialog = await screen.findByRole("dialog", { name: "Approve another device" });
+    // Eleven minutes passed while the request was out: that is an expiry, not the other device cancelling.
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Your other device didn’t answer in 10 minutes. Nothing was shared.");
+  });
+
+  it("a stored account in one tab and a memory account in another do not sign each other out", async () => {
+    // A bus like the browser's: a message reaches every other channel of the same name.
+    const channels = new Set<{ name: string; onmessage: ((e: { data: unknown }) => void) | null }>();
+    vi.stubGlobal(
+      "BroadcastChannel",
+      class {
+        onmessage: ((e: { data: unknown }) => void) | null = null;
+        constructor(public name: string) {
+          channels.add(this);
+        }
+        postMessage(data: unknown) {
+          for (const c of channels) if (c !== this && c.name === this.name) c.onmessage?.({ data });
+        }
+        close() {
+          channels.delete(this);
+        }
+      },
+    );
+    try {
+      const keysA = createMemoryKeyStore();
+      const keysB = createMemoryKeyStore();
+      keysB.replaceDevice = () => Promise.reject(new Error("quota")); // B's account is held in memory
+      const a = services(keysA);
+      const b = services(keysB);
+      const sessionA = await signedUp(engine, a, SAM);
+      const pending = await signUp(b, { ...SAM, email: "other@example.com" });
+      await pending.verify(engine.emailCode(pending.signupId)!);
+      expect(b.keys.inMemory).toBe(true);
+      // Each tab listens as the app does: another tab's sign-out ends this one's session.
+      a.signedOut.listen(() => void a.tokens.clear());
+      b.signedOut.listen(() => void b.tokens.clear());
+
+      await signOut(b);
+      await new Promise((r) => setTimeout(r, 20));
+      expect(a.tokens.getSession()?.accountId).toBe(sessionA.accountId); // the stored tab is untouched
+      expect(await keysA.loadSession()).not.toBeNull();
+
+      const again = await signUp(b, { ...SAM, email: "third@example.com" });
+      await again.verify(engine.emailCode(again.signupId)!);
+      expect(b.keys.inMemory).toBe(true);
+      await signOut(a);
+      await new Promise((r) => setTimeout(r, 20));
+      expect(b.tokens.getSession()).not.toBeNull(); // and the memory tab does not act on it
+    } finally {
       vi.unstubAllGlobals();
     }
   });

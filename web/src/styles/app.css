@@ -508,3 +508,5 @@ button.pillx { border: 0; }
 .radio { width: var(--sp-15); height: var(--sp-15); border-radius: var(--r-round); border: var(--bw-1-5) solid var(--line2); display: inline-block; position: relative; flex: none; }
 .radio.on { border-color: var(--t1); }
 .radio.on::after { content: ""; position: absolute; inset: var(--sp-3); border-radius: var(--r-round); background: var(--t1); }
+.pv-dialog { display: flex; flex-direction: column; gap: var(--sp-14); }
+.pv-dialog p { margin: 0; }

@@ -99,7 +99,7 @@ describe("what a refusal says", () => {
     void approver.start();
     void device.run();
     await until(() => device.getState().phase === "closed");
-    expect(device.getState()).toMatchObject({ reason: "mismatch", message: "The two devices didn’t agree. Start again." });
+    expect(device.getState()).toMatchObject({ reason: "mismatch", message: DIGITS_MISMATCH });
     approver.dispose();
 
     const q = await createRig();
