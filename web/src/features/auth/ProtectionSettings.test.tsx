@@ -132,7 +132,7 @@ describe("the other cards", () => {
     cleanup();
     read.mockResolvedValue(report({}));
     render(<ProtectionSettings />);
-    expect(await card()).toHaveTextContent("Right now only your trusted devices hold your keys, and Orbyn holds no copy of them. Standard’s recovery copy and account recovery are Planned, and so is Advanced protection.");
+    expect(await card()).toHaveTextContent("Your planner is encrypted on your devices. Right now only your trusted devices hold your keys, and Orbyn holds no copy of them. Standard’s recovery copy, account recovery and server push and email reminders are Planned, and so is Advanced protection.");
   });
 });
 

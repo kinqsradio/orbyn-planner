@@ -569,3 +569,6 @@ button.pillx { border: 0; }
   .deleted-card .pv-row { flex-direction: column; }
   .deleted-card .pv-row > * { justify-content: center; height: var(--sp-44); }
 }
+
+/* A passkey button the designs draw but that does nothing yet: dimmed, with the Planned label. */
+.passkey-planned { opacity: .6; display: inline-flex; gap: var(--sp-6); align-items: center; justify-content: center; flex-wrap: wrap; height: auto; min-height: var(--sp-32); cursor: default; }

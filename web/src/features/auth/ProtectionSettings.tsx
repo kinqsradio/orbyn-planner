@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Planned } from "../../components/Planned";
 import { ApiFailure } from "../../api/auth";
 import { useAuth } from "../../auth/AuthProvider";
 import { PAUSED_PROTECTION_HINT, useDeletionPaused } from "../../auth/deletionNotice";
@@ -272,7 +273,7 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
             <span className="t2 pv-text">
               Confirmed by your devices.
               {report.head && ` Last change ${day(secsOf(report.head))}${report.signer?.name ? ` on ${report.signer.name}` : ""}.`}
-              {report.level === "standard" && <><br /><span className="t3">Right now only your trusted devices hold your keys, and Orbyn holds no copy of them. Standard’s recovery copy and account recovery are Planned, and so is Advanced protection.</span></>}
+              {report.level === "standard" && <><br /><span className="t3">Your planner is encrypted on your devices. Right now only your trusted devices hold your keys, and Orbyn holds no copy of them. Standard’s recovery copy, account recovery and server push and email reminders are <Planned />, and so is Advanced protection.</span></>}
             </span>
           </>
         ) : kind === "confirming" ? (
@@ -317,8 +318,10 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
         )}
       </div>
       <div className="srow" style={{ opacity: 0.6 }}>
-        <div className="lab2"><b>Advanced protection</b><small>Only your devices hold the keys.</small></div>
-        <span className="st planned"><span className="sd" />Planned</span>
+        <div className="lab2">
+          <b>Advanced protection</b>
+          <small>Advanced is <Planned />. When it ships: switching from Standard deletes Orbyn’s copy of your keys at once; server backups made before the switch may keep a copy until the keys are rotated, which is Planned. An account that starts on Advanced never had one.</small>
+        </div>
       </div>
       </div>
       {details && report && kind && <DetailsDialog report={report} kind={kind} confirmed={confirmed} onClose={() => setDetails(false)} onReviewDevices={onReviewDevices} />}

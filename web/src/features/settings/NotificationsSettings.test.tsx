@@ -69,6 +69,20 @@ describe("Settings · Notifications", () => {
     expect(screen.getByRole("switch", { name: "Remind me about tasks" })).toHaveAttribute("aria-checked", "false");
   });
 
+  it("says where reminders come from, and draws server push, email reminders and the daily summary as Planned and unavailable", async () => {
+    stubNotification("granted");
+    await open();
+    await userEvent.click(screen.getByRole("button", { name: "Notifications" }));
+    const card = screen.getByText("Server push and email reminders").closest(".card")!;
+    const row = (label: string) => screen.getByText(label, { selector: "span" }).closest(".kv")!;
+    expect(row("Reminders")).toHaveTextContent("RemindersOn this device");
+    expect(row("Server push and email reminders")).toHaveTextContent("Server push and email remindersPlanned Not available yet.");
+    expect(row("Daily summary email")).toHaveTextContent("Daily summary emailPlanned Not available yet.");
+    expect(card.querySelectorAll(".st.planned")).toHaveLength(2);
+    // The planned rows have no control: the one switch is still the real one.
+    expect(card.querySelectorAll('[role="switch"]')).toHaveLength(1);
+  });
+
   it("asks when reminders are turned on, and turns them on when allowed", async () => {
     const { request } = stubNotification("default", "granted");
     await open();

@@ -91,7 +91,7 @@ async function fillSignUp(user = SAM) {
   await userEvent.type(screen.getByLabelText("Name"), user.name);
   await userEvent.type(screen.getByLabelText("Email"), user.email);
   await userEvent.type(screen.getByLabelText("Password"), user.password);
-  await userEvent.click(screen.getByRole("button", { name: "Create account" }));
+  await userEvent.click(screen.getByRole("button", { name: "Continue with a password" }));
   // The code step comes when the engine has sent a code; a refusal before that shows its message instead.
   await waitFor(() => expect(screen.queryByLabelText("Code") ?? screen.queryByRole("alert")).not.toBeNull());
   if (screen.queryByLabelText("Code") && engine.latestEmailCode(user.email)) await verifyEmail(user.email);
@@ -146,15 +146,37 @@ describe("the public pages", () => {
     expect(screen.getByText("This device only")).toBeInTheDocument();
   });
 
-  it("the Can’t sign in page offers approval from a trusted device and says the rest is not ready", async () => {
+  it("the Can’t sign in page offers approval from a trusted device and says the rest is Planned, with the frame's footer", async () => {
     await mount(services());
     await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
-    await userEvent.click(screen.getByRole("button", { name: "Can’t sign in?" }));
+    await userEvent.click(screen.getByRole("button", { name: "Forgot your password?" }));
     const group = screen.getByRole("group", { name: "Can’t sign in?" });
-    expect(within(group).getByText("Approve from a trusted device")).toBeInTheDocument();
-    expect(within(group).getAllByText("Not available yet.")).toHaveLength(3);
+    const items = within(group).getAllByRole("listitem");
+    expect(items.map((li) => li.textContent)).toEqual([
+      "Use a passkey Planned Not available yet.",
+      "Approve from a trusted device",
+      "Recover with your email and phone Planned Not available yet.",
+      "Use a recovery key or contact Planned Not available yet.",
+    ]);
+    expect(items[1]).not.toHaveAttribute("aria-disabled"); // approving works today
+    expect(group).toHaveTextContent("Account recovery with your email and phone, with a short wait to keep your account safe, is Planned, as are recovery keys and recovery contacts. Approving from a trusted device works today.");
     await userEvent.click(within(group).getByRole("button", { name: "Back to sign in" }));
     expect(screen.getByRole("form", { name: "Sign in" })).toBeInTheDocument();
+  });
+
+  it("sign up and sign in draw a dimmed Planned passkey button that does nothing, and the primary button reads Continue with a password", async () => {
+    await mount(services());
+    await userEvent.click(await screen.findByRole("button", { name: "Get started" }));
+    const up = screen.getByRole("button", { name: /^Continue with a passkey/ });
+    expect(up).toBeDisabled();
+    expect(up).toHaveTextContent("Continue with a passkey Planned Not available yet.");
+    expect(screen.getByRole("button", { name: "Continue with a password" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    const inn = screen.getByRole("button", { name: /^Sign in with a passkey/ });
+    expect(inn).toBeDisabled();
+    expect(inn).toHaveTextContent("Sign in with a passkey Planned Not available yet.");
+    expect(screen.getByText(/New here\?/)).toHaveTextContent("New here? Create an account · Forgot your password?");
+    expect(engine.calls).toEqual([]); // nothing was sent
   });
 
   it("says plainly that sign-in is not in this build, and sends nothing", async () => {
@@ -189,7 +211,7 @@ describe("sign up", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Get started" }));
     await userEvent.type(screen.getByLabelText("Email"), "sam@example.com");
     await userEvent.type(screen.getByLabelText("Password"), "short");
-    expect(screen.getByRole("button", { name: "Create account" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Continue with a password" })).toBeDisabled();
   });
 
   it("an email that is taken gets the same code step, and nothing tells it apart", async () => {
@@ -253,6 +275,16 @@ describe("sign in", () => {
     expect(screen.queryByRole("checkbox")).toBeNull();
     expect(screen.queryByText(/cancel.*deletion|deletion.*cancel/i)).toBeNull();
     expect(screen.queryByRole("button", { name: /cancel deletion/i })).toBeNull();
+  });
+
+  it("Settings › Account has a Passkeys row marked Planned, with Not available yet.", async () => {
+    await mount(services(), "/settings");
+    await fillSignUp();
+    await openAccount();
+    const row = (await screen.findByText("Passkeys", { exact: false, selector: "span" })).closest(".kv")!;
+    expect(row).toHaveTextContent("Passkeys PlannedNot available yet.");
+    expect(row.querySelector(".st.planned")).not.toBeNull();
+    expect(row.querySelector("button")).toBeNull(); // nothing to press
   });
 
   it("an unknown email looks exactly like a wrong password", async () => {
@@ -560,7 +592,7 @@ describe("adding a device", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Get started" }));
     await userEvent.type(screen.getByLabelText("Email"), SAM.email);
     await userEvent.type(screen.getByLabelText("Password"), SAM.password);
-    await userEvent.click(screen.getByRole("button", { name: "Create account" }));
+    await userEvent.click(screen.getByRole("button", { name: "Continue with a password" }));
     await verifyEmail(SAM.email);
     await openAccount();
     await userEvent.click(await screen.findByRole("button", { name: "Add a device" }));
@@ -1236,7 +1268,7 @@ describe("signing out", () => {
     await userEvent.click(screen.getByRole("button", { name: "Create an account" }));
     await userEvent.type(screen.getByLabelText("Email"), SAM.email);
     await userEvent.type(screen.getByLabelText("Password"), SAM.password);
-    await userEvent.click(screen.getByRole("button", { name: "Create account" }));
+    await userEvent.click(screen.getByRole("button", { name: "Continue with a password" }));
     await verifyEmail(SAM.email);
     await screen.findByRole("list", { name: "Devices" });
     engine.expireAllSessions();
@@ -1266,7 +1298,7 @@ describe("email verification at sign-up", () => {
     await userEvent.type(screen.getByLabelText("Name"), SAM.name);
     await userEvent.type(screen.getByLabelText("Email"), SAM.email);
     await userEvent.type(screen.getByLabelText("Password"), SAM.password);
-    await userEvent.click(screen.getByRole("button", { name: "Create account" }));
+    await userEvent.click(screen.getByRole("button", { name: "Continue with a password" }));
     await screen.findByRole("form", { name: "Check your email" });
     return { auth, keys };
   }
@@ -1362,7 +1394,7 @@ describe("email verification at sign-up", () => {
     await userEvent.type(screen.getByLabelText("Name"), SAM.name);
     await userEvent.type(screen.getByLabelText("Email"), SAM.email);
     await userEvent.type(screen.getByLabelText("Password"), SAM.password);
-    await userEvent.click(screen.getByRole("button", { name: "Create account" }));
+    await userEvent.click(screen.getByRole("button", { name: "Continue with a password" }));
     const card = await screen.findByRole("alert", { name: "This browser can’t create an Orbyn account" });
     expect(card).toHaveTextContent("Orbyn has to keep your encryption keys, and this browser won’t store them or hold them in memory. Nothing was created.");
     expect(within(card).getByRole("button", { name: "Copy this page’s address" })).toBeInTheDocument();
@@ -1477,7 +1509,7 @@ describe("the protection level", () => {
     expect(await within(card).findByText("Standard protection")).toBeInTheDocument();
     expect(card).toHaveTextContent("Verified");
     expect(card).toHaveTextContent("Confirmed by your devices. Last change 7 Nov on");
-    expect(card).toHaveTextContent("Advanced protectionOnly your devices hold the keys.Planned"); // shown, and not available yet
+    expect(card).toHaveTextContent("Advanced protectionAdvanced is Planned. When it ships: switching from Standard deletes Orbyn’s copy of your keys at once; server backups made before the switch may keep a copy until the keys are rotated, which is Planned. An account that starts on Advanced never had one."); // shown, and not available yet
     expect(engine.accounts.get("sam@example.com")!.protection).toHaveLength(1); // signed once, at sign-up
   });
 

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { usePrefs } from "../../app/prefs";
+import { Planned } from "../../components/Planned";
 import { permissionState, type PermissionState } from "../reminders/useReminders";
 
 const PERMISSION_TEXT: Record<PermissionState, string> = {
@@ -42,6 +43,18 @@ export function NotificationsSettings() {
     <>
       <div className="bh"><b>Reminders</b><span></span></div>
       <div className="card" style={{ gap: 0, padding: "0 var(--sp-14)" }}>
+        <div className="kv" style={{ height: "var(--sp-44)", borderBottom: "var(--bw) solid var(--line)" }}>
+          <span>Reminders</span>
+          <b>On this device</b>
+        </div>
+        <div className="kv" style={{ height: "var(--sp-44)", borderBottom: "var(--bw) solid var(--line)" }}>
+          <span>Server push and email reminders</span>
+          <b><Planned /> <span className="t4">Not available yet.</span></b>
+        </div>
+        <div className="kv" style={{ height: "var(--sp-44)", borderBottom: "var(--bw) solid var(--line)" }}>
+          <span>Daily summary email</span>
+          <b><Planned /> <span className="t4">Not available yet.</span></b>
+        </div>
         <div className="kv" style={{ height: "var(--sp-44)" }}>
           <span>Remind me about tasks</span>
           <Switch label="Remind me about tasks" checked={on} disabled={permission === "unsupported"} onChange={(v) => void toggle(v)} />

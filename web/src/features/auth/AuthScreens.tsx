@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { PasskeyButton, Planned } from "../../components/Planned";
 import { ApiFailure } from "../../api/auth";
 import { SignInUnavailable } from "../../api/authCrypto";
 import { BusyButton } from "../../components/BusyButton";
@@ -239,8 +240,9 @@ function SignUp({ go }: { go: (s: AuthScreen) => void }) {
       <p className="t3 small">Your password never leaves this device. Only a sealed proof of it is sent. We’ll email you a code to check the address.</p>
       <CryptoProblem />
       {error && <p className="err" role="alert">{error}</p>}
+      <PasskeyButton label="Continue with a passkey" />
       <button type="submit" className="btn" disabled={busy || !email.trim() || password.length < 8}>
-        {busy ? "Creating your account…" : "Create account"}
+        {busy ? "Creating your account…" : "Continue with a password"}
       </button>
       <span className="t3 small">
         Already have an account? <button type="button" className="link-btn" onClick={() => go("signin")}>Sign in</button>
@@ -384,9 +386,10 @@ function SignIn({ go }: { go: (s: AuthScreen) => void }) {
       <button type="submit" className="btn" disabled={busy || !email.trim() || !password}>
         {busy ? "Signing in…" : "Sign in"}
       </button>
+      <PasskeyButton label="Sign in with a passkey" />
       <span className="t3 small">
         New here? <button type="button" className="link-btn" onClick={() => go("signup")}>Create an account</button> ·{" "}
-        <button type="button" className="link-btn" onClick={() => go("cant")}>Can’t sign in?</button>
+        <button type="button" className="link-btn" onClick={() => go("cant")}>Forgot your password?</button>
       </span>
       <button type="button" className="link-btn quiet-link" onClick={auth.overlay ? auth.closeAuth : auth.useWithoutAccount}>
         {auth.overlay ? "Back to the planner" : "Use without an account"}
@@ -396,26 +399,32 @@ function SignIn({ go }: { go: (s: AuthScreen) => void }) {
 }
 
 function CantSignIn({ go }: { go: (s: AuthScreen) => void }) {
-  const options: { icon: "check" | "bell" | "pin" | "users"; label: string; note: string; ready: boolean }[] = [
-    { icon: "check", label: "Approve from a trusted device", note: "Sign in with your password here. This device then waits for one you already use to approve it.", ready: true },
-    { icon: "pin", label: "Use a passkey", note: "Not available yet.", ready: false },
-    { icon: "bell", label: "Recover with your email and phone", note: "Not available yet.", ready: false },
-    { icon: "users", label: "Use a recovery key or contact", note: "Not available yet.", ready: false },
+  const options: { icon: "key" | "check" | "bell" | "shield"; label: string; planned: boolean }[] = [
+    { icon: "key", label: "Use a passkey", planned: true },
+    { icon: "check", label: "Approve from a trusted device", planned: false },
+    { icon: "bell", label: "Recover with your email and phone", planned: true },
+    { icon: "shield", label: "Use a recovery key or contact", planned: true },
   ];
   return (
     <div className="authcard" role="group" aria-label="Can’t sign in?" style={{ width: "var(--sp-420)" }}>
       <h1 className="auth-title">Can’t sign in?</h1>
       <ul className="auth-options">
         {options.map((o) => (
-          <li key={o.label} className="nav" style={{ height: "auto", minHeight: "var(--sp-44)", background: "var(--raise)", alignItems: "flex-start", padding: "var(--sp-10) var(--sp-8)", opacity: o.ready ? 1 : 0.7 }}>
+          <li key={o.label} className="nav" style={{ height: "var(--sp-44)", background: "var(--raise)", opacity: o.planned ? 0.6 : 1 }} aria-disabled={o.planned || undefined}>
             <Icon name={o.icon} small />
-            <span>
-              <span style={{ display: "block", color: "var(--t1)" }}>{o.label}</span>
-              <span className="t3 small">{o.note}</span>
-            </span>
+            {o.label}
+            {o.planned && (
+              <>
+                {" "}
+                <Planned /> <span className="t3 small">Not available yet.</span>
+              </>
+            )}
           </li>
         ))}
       </ul>
+      <span className="t3" style={{ fontSize: "var(--fs-12-5)" }}>
+        Account recovery with your email and phone, with a short wait to keep your account safe, is Planned, as are recovery keys and recovery contacts. Approving from a trusted device works today.
+      </span>
       <button type="button" className="ghost" onClick={() => go("signin")}>Back to sign in</button>
     </div>
   );
