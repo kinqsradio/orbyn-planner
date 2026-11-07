@@ -236,7 +236,7 @@ button.pill { border: 0; }
 .tbl > .tr:last-child { border-bottom: var(--bw) solid var(--line); }
 .tr .tt { color: var(--t1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tr.done .tt, .row.done .what, .tcard[data-done="true"] .tt, .step-row[data-done="true"] .what {
-  color: var(--t3); text-decoration: line-through; text-decoration-color: var(--line2);
+  color: var(--t3); text-decoration: line-through; /* the strike is the text colour, as the designs draw it */
 }
 .tag { display: inline-flex; align-items: center; gap: var(--sp-6); font-size: var(--fs-12); color: var(--t2); }
 .due { font-size: var(--fs-12); color: var(--t3); }
