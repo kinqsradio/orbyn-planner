@@ -23,6 +23,27 @@ export async function codeSentTo(address: string, not: string[] = [], ms = 30_00
   }
 }
 
+/**
+ * The cancel token in the newest account-deletion email sent to `address` that isn't one of `not`: the link's fragment
+ * (`…/cancel-deletion#<token>`), or the token alone when the engine has no app URL.
+ */
+export async function cancelTokenSentTo(address: string, not: string[] = [], ms = 30_000): Promise<string> {
+  if (!mailUrl) throw new Error("set ORBYN_E2E_MAIL to the test mailbox's API");
+  const end = Date.now() + ms;
+  for (;;) {
+    const found = await fetch(`${mailUrl}/api/v1/search?query=${encodeURIComponent(`to:${address} subject:"will be deleted"`)}`)
+      .then((r) => r.json() as Promise<{ messages?: { ID: string }[] }>)
+      .catch(() => ({ messages: [] as { ID: string }[] }));
+    for (const m of found.messages ?? []) {
+      const full = (await fetch(`${mailUrl}/api/v1/message/${m.ID}`).then((r) => r.json())) as { Text?: string };
+      const token = /cancel-deletion#([A-Za-z0-9_-]{43})/.exec(full.Text ?? "")?.[1];
+      if (token && !not.includes(token)) return token;
+    }
+    if (Date.now() > end) throw new Error(`no cancel link arrived for ${address}`);
+    await new Promise((r) => setTimeout(r, 250));
+  }
+}
+
 /** Signs up and verifies with the code from the test mailbox: the whole sign-up. */
 export async function signUpVerified(services: AuthServices, input: { name: string; email: string; password: string }): Promise<StoredSession> {
   const pending = await signUp(services, input);

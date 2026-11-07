@@ -7,6 +7,7 @@ import { Icon } from "../../components/Icon";
 import { CalendarForms, CalendarList } from "../calendar/CalendarList";
 import { AccountSettings } from "../auth/AccountSettings";
 import { NotificationsSettings } from "./NotificationsSettings";
+import { DeleteAccountRow } from "../auth/DeleteAccount";
 import { ExportSettings } from "../export/ExportSettings";
 import { TagsSettings } from "./TagsSettings";
 import { InstallHint } from "../../components/InstallHint";
@@ -108,7 +109,9 @@ export function SettingsPage() {
           ) : category === "Privacy" ? (
             <>
               <ProtectionSettings onReviewDevices={() => setCategory("Account")} />
-              <ExportSettings />
+              <ExportSettings>
+                <DeleteAccountRow />
+              </ExportSettings>
             </>
           ) : category === "Tags" ? (
             <TagsSettings />

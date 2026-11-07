@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useAuth } from "../../auth/AuthProvider";
 import { AuthScreens } from "./AuthScreens";
+import { DeletionBanner, DeletionWatcher } from "./DeletionBanner";
 import { KeysNotSaved } from "./KeysNotSaved";
 import { PendingScreen } from "./PendingScreen";
 
@@ -75,7 +76,15 @@ export function AuthGate({ children }: { children: ReactNode }) {
       </>
     );
   }
-  if (auth.status === "pending") return <PendingScreen />;
+  if (auth.status === "pending") {
+    return (
+      <>
+        <DeletionWatcher />
+        <DeletionBanner />
+        <PendingScreen />
+      </>
+    );
+  }
   // The keys could not be stored: nothing else opens until they are saved or the tab is closed.
   if (auth.status === "signedIn" && auth.keysInMemory && !auth.memoryAccepted) return <KeysNotSaved />;
   if (auth.status === "signedIn" && incoming.id && incoming.accepted) return <PendingScreen key={incoming.id} repair onDone={incoming.dismiss} />;
@@ -87,6 +96,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
         {children}
       </div>
       {auth.overlay && <AuthScreens start={auth.overlay} />}
+      {auth.status === "signedIn" && <DeletionWatcher />}
       {auth.status === "signedIn" && incoming.id && <RepairNotice onApprove={incoming.accept} onDismiss={incoming.dismiss} />}
     </>
   );

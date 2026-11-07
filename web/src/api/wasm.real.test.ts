@@ -8,7 +8,7 @@ import type { DeviceList } from "../generated/DeviceList";
 import type { PendingApproval } from "../generated/PendingApproval";
 import { decodeBytes, encodeBytes, utf8, uuidBytes } from "./bytes";
 import { FakeAuthCrypto } from "./testing/FakeAuthCrypto";
-import { DEVICE_LOGIN_CONTEXT, DEVICE_REGISTER_CONTEXT, TRUSTED_START_CONTEXT, loginMessage, registerMessage, trustedStartMessage } from "./testing/authMessages";
+import { ACCOUNT_DELETE_CANCEL_CONTEXT, ACCOUNT_DELETE_CONTEXT, DEVICE_LOGIN_CONTEXT, DEVICE_REGISTER_CONTEXT, TRUSTED_START_CONTEXT, accountDeleteMessage, loginMessage, registerMessage, trustedStartMessage } from "./testing/authMessages";
 import { wasmAuthCrypto } from "./WasmAuthCrypto";
 import type { AuthCrypto } from "./authCrypto";
 import * as wasm from "../generated/wasm/orbyn_wasm.js";
@@ -99,6 +99,14 @@ describe("device keys", () => {
     expect(code(() => keys.signRegistration("not an email", upload))).toBe("invalid_email");
     expect(code(() => keys.signTrustedStart("nope", request, 1))).toBe("invalid_email");
     expect(code(() => keys.signLogin("not-a-uuid"))).toBe("invalid_input");
+    // Scheduling the account's deletion and cancelling it sign the same message under contexts of their own.
+    const device = "1b4e28ba-2fa1-41d2-883f-0016d3cca427";
+    const schedule = keys.signAccountDelete(loginId, device, 1_794_000_000);
+    const cancel = keys.signAccountDeleteCancel(loginId, device, 1_794_000_000);
+    const message = accountDeleteMessage(loginId, device, 1_794_000_000);
+    expect(await verifies(keys.signingKey(), ACCOUNT_DELETE_CONTEXT, message, schedule)).toBe(true);
+    expect(await verifies(keys.signingKey(), ACCOUNT_DELETE_CANCEL_CONTEXT, message, cancel)).toBe(true);
+    expect(await verifies(keys.signingKey(), ACCOUNT_DELETE_CONTEXT, message, cancel)).toBe(false);
     void uuidBytes;
   });
 });

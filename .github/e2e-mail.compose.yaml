@@ -16,6 +16,10 @@ services:
       MP_SMTP_REQUIRE_STARTTLS: "true"
     volumes:
       - ${E2E_CERTS_DIR:?set E2E_CERTS_DIR to the directory .github/e2e-mail-certs.sh wrote}:/certs:ro
+  server:
+    environment:
+      # Where the planner is served: the account-deletion email's cancel link points to <this>/cancel-deletion#<token>.
+      ORBYN_ACCOUNT_URL: http://127.0.0.1:5173
   worker:
     environment:
       # The worker opens the queued message with the same setup as the server.

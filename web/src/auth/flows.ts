@@ -538,8 +538,23 @@ const lastSigned = new Map<string, number>();
  * same second, or a clock that is behind); `again` forces a later time than the last attempt.
  */
 async function manageProof(services: AuthServices, session: StoredSession, action: "enrol" | "confirm" | "disable", code = ""): Promise<{ device_signature: string; signed_at: bigint }> {
+  return signedByThisDevice(services, session, action, (keys, signedAt) => keys.signTotpManage(session.accountId, session.deviceId, action, code, signedAt));
+}
+
+/** The signature the engine wants to delete the account (`orbyn/account-delete/v1`), made the same way. */
+async function deleteProof(services: AuthServices, session: StoredSession): Promise<{ device_signature: string; signed_at: bigint }> {
+  return signedByThisDevice(services, session, "delete", (keys, signedAt) => keys.signAccountDelete(session.accountId, session.deviceId, signedAt));
+}
+
+/** Opens this device's keys for the moment, picks the time (see `manageProof`) and signs. */
+async function signedByThisDevice(
+  services: AuthServices,
+  session: StoredSession,
+  action: string,
+  sign: (keys: DeviceKeys, signedAt: number) => Uint8Array,
+): Promise<{ device_signature: string; signed_at: bigint }> {
   const saved = await services.keys.loadKeys();
-  if (!saved) throw new ApiFailure("device_not_trusted", 403, "This device has no keys, so it can’t change two-factor.");
+  if (!saved) throw new ApiFailure("device_not_trusted", 403, "This device has no keys, so it can’t prove this request.");
   const wrap = await services.wrapSecret();
   let keys: DeviceKeys;
   try {
@@ -551,7 +566,7 @@ async function manageProof(services: AuthServices, session: StoredSession, actio
     const slot = `${session.deviceId}:${action}`;
     const signedAt = Math.max(Math.floor(services.now() / 1000), (lastSigned.get(slot) ?? 0) + 1);
     lastSigned.set(slot, signedAt);
-    return { device_signature: encodeBytes(keys.signTotpManage(session.accountId, session.deviceId, action, code, signedAt)), signed_at: BigInt(signedAt) };
+    return { device_signature: encodeBytes(sign(keys, signedAt)), signed_at: BigInt(signedAt) };
   } finally {
     keys.free();
   }
@@ -580,4 +595,22 @@ export async function confirmTotp(services: AuthServices, session: StoredSession
 /** Turns two-factor off: this device's signature alone. */
 export async function disableTotp(services: AuthServices, session: StoredSession): Promise<void> {
   await withProof(async () => services.api.totpDisable(await manageProof(services, session, "disable")));
+}
+
+/**
+ * Schedules the account's deletion and answers when it will happen (RFC 3339), seven days away. Nothing is deleted yet: the account
+ * works as usual until then and can be cancelled (`cancelDeletion`, or the link in the email). This device signs the request, from
+ * a session that signed in in the last ten minutes (an older one is answered `reauthentication_required`), and when
+ * the account has two-factor on, a current code or a recovery code goes with it.
+ */
+export async function scheduleDeletion(services: AuthServices, session: StoredSession, factor: { code?: string; recoveryCode?: string } = {}): Promise<string> {
+  const scheduled = await withProof(async () => services.api.scheduleDeletion({ code: factor.code ?? null, recovery_code: factor.recoveryCode ?? null, ...(await deleteProof(services, session)) }));
+  return scheduled.deletes_at;
+}
+
+/** Cancels a scheduled deletion with this device's signature (a pending device needs a sign-in from the last ten minutes too). */
+export async function cancelDeletion(services: AuthServices, session: StoredSession): Promise<void> {
+  await withProof(async () =>
+    services.api.cancelDeletion(await signedByThisDevice(services, session, "cancel-delete", (keys, signedAt) => keys.signAccountDeleteCancel(session.accountId, session.deviceId, signedAt))),
+  );
 }

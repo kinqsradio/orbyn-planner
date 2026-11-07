@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiFailure } from "../../api/auth";
 import type { ProtectionReport } from "../../auth/flows";
 import type { ProtectionLink } from "../../generated/ProtectionLink";
+import { deletionNotice } from "../../auth/deletionNotice";
 import { ProtectionSettings } from "./ProtectionSettings";
 
 const read = vi.fn<() => Promise<ProtectionReport>>();
@@ -51,6 +52,18 @@ describe("the protection card", () => {
     render(<ProtectionSettings />);
     await userEvent.click(await screen.findByRole("button", { name: "Confirm" }));
     await waitFor(() => expect(confirm).toHaveBeenCalledWith(expect.anything(), expect.anything(), "standard", expect.objectContaining({ seq: 2 })));
+  });
+
+  it("while a deletion is scheduled the confirm dialog does not open by itself", async () => {
+    deletionNotice.set("2026-11-14T09:00:00Z");
+    try {
+      read.mockResolvedValue(report({ state: "provisional", seq: 0 }));
+      render(<ProtectionSettings />);
+      await card();
+      expect(screen.queryByRole("dialog")).toBeNull();
+    } finally {
+      deletionNotice.set(undefined);
+    }
   });
 
   it("when another device changed it first, the dialog refreshes, says so in blue, and asks again", async () => {

@@ -4,20 +4,27 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles/tokens.css";
 import "./styles/app.css";
-import { App } from "./app/App";
-import { ensureRealAuthCrypto } from "./api/realCrypto";
-import { createAuthServices } from "./auth/services";
 import { applyChoice, readStoredChoice, watchSystemTheme } from "./app/theme";
 
 applyChoice(readStoredChoice());
 watchSystemTheme();
 
-// Accounts run on the engine's WebAssembly module. A build with an engine address loads it (in a chunk of its
-// own) before the first account screen; one without never fetches it, and sign-in says it is not available.
-const auth = createAuthServices({ ready: ensureRealAuthCrypto() });
+const root = createRoot(document.getElementById("root")!);
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <App auth={auth} />
-  </StrictMode>,
-);
+async function start() {
+  // The link in the account-deletion email opens a page of its own, before the app: no sign-in, no planner, no stores, and the
+  // engine's module is never started. Nothing below is even loaded for it.
+  if (window.location.pathname === "/cancel-deletion") {
+    const { CancelDeletionPage } = await import("./features/auth/CancelDeletionPage");
+    root.render(
+      <StrictMode>
+        <CancelDeletionPage />
+      </StrictMode>,
+    );
+    return;
+  }
+  const { bootApp } = await import("./bootApp");
+  bootApp(root);
+}
+
+void start();

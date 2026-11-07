@@ -4,6 +4,7 @@ import { SignInUnavailable } from "../../api/authCrypto";
 import { BusyButton } from "../../components/BusyButton";
 import { appsAvailable, downloadUrl } from "../../api/site";
 import { Icon } from "../../components/Icon";
+import { deleteIntent } from "../../auth/deletionNotice";
 import { KeysForAnotherAccount, SecondFactorNeeded, signIn, signUp, type PendingSignUp } from "../../auth/flows";
 import { cryptoLoad } from "../../api/realCrypto";
 import { CryptoProblem, MODULE_LOAD_FAILED } from "./CryptoProblem";
@@ -265,6 +266,12 @@ function SignIn({ go }: { go: (s: AuthScreen) => void }) {
   const [recovery, setRecovery] = useState(false);
   const [factor, setFactor] = useState("");
 
+  /** The sign-in worked: leave the sign-in screens (and, if the person came from the delete dialog, it opens again). */
+  const signedIn = () => {
+    deleteIntent.signedIn();
+    auth.closeAuth();
+  };
+
   // Leaving this screen with a sign-in still waiting for its code lets its keys go (releasing twice is harmless).
   useEffect(() => () => second?.cancel(), [second]);
 
@@ -282,7 +289,7 @@ function SignIn({ go }: { go: (s: AuthScreen) => void }) {
     setError(null);
     try {
       await second.complete(recovery ? { recoveryCode: factor.trim() } : { code: factor.replace(/\D/g, "") });
-      auth.closeAuth();
+      signedIn();
     } catch (e) {
       // A wrong code leaves the sign-in open to try again; anything else has ended it, so the password step comes back.
       if (e instanceof ApiFailure && e.code === "second_factor_failed") setError(describeError(e));
@@ -302,7 +309,7 @@ function SignIn({ go }: { go: (s: AuthScreen) => void }) {
     setError(null);
     try {
       await signIn(auth.services, { email, password, replaceKeys });
-      auth.closeAuth();
+      signedIn();
     } catch (e) {
       if (e instanceof KeysForAnotherAccount) setForeign(e);
       else if (e instanceof SecondFactorNeeded) setSecond(e);

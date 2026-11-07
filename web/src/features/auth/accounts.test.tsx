@@ -11,7 +11,7 @@ import { createMemoryKeyStore, type KeyStore } from "../../api/keyStore";
 import { FakeAuthCrypto } from "../../api/testing/FakeAuthCrypto";
 import { PROTECTION_GENESIS } from "../../api/testing/protectionFake";
 import { createMockEngine, MOCK_TOTP_CODE, type MockEngine } from "../../api/testing/MockEngine";
-import { confirmProtection, confirmTotp, enrolTotp, readProtection, signIn, signOut, signUp } from "../../auth/flows";
+import { confirmProtection, confirmTotp, enrolTotp, readProtection, scheduleDeletion, signIn, signOut, signUp } from "../../auth/flows";
 import { signedUp } from "../../auth/testing/signedUp";
 import { createAuthServices, type AuthServices } from "../../auth/services";
 import { deviceName } from "../../auth/deviceName";
@@ -243,6 +243,14 @@ describe("sign in", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("That email and password don’t match.");
     expect(engine.calls.some((c) => c.path === "/v1/sessions/login/finish")).toBe(false);
     expect(screen.queryByRole("heading", { name: "Nothing planned yet" })).not.toBeInTheDocument();
+  });
+
+  it("the sign-in screen has no way to cancel a deletion: that is the banner's and the email's job", async () => {
+    await mount(services());
+    await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.queryByText(/cancel.*deletion|deletion.*cancel/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /cancel deletion/i })).toBeNull();
   });
 
   it("an unknown email looks exactly like a wrong password", async () => {
@@ -1562,6 +1570,178 @@ describe("the protection level", () => {
     expect(screen.getByRole("button", { name: "Review" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(screen.queryByText(/Protection was changed to/)).toBeNull();
+  });
+});
+
+describe("deleting the account", () => {
+  async function signedIn() {
+    const keys = createMemoryKeyStore();
+    const auth = services(keys);
+    await mount(auth, "/settings");
+    await fillSignUp();
+    await screen.findByRole("navigation", { name: "Primary" });
+    await userEvent.click(await screen.findByRole("button", { name: "Privacy" }));
+    return { auth, keys };
+  }
+  const openDialog = async () => {
+    await userEvent.click(await screen.findByRole("button", { name: "Delete account…" }));
+    return screen.getByRole("dialog", { name: "Delete your Orbyn account" });
+  };
+
+  it("the row sits under Export; the dialog has Cancel focused, names the date and what Planner holds, and Delete works with no code when two-factor is off", async () => {
+    const { auth } = await signedIn();
+    expect(screen.getByText("Deletes your Orbyn account and its data in every Orbyn app, after 7 days.")).toBeInTheDocument();
+    const dialog = await openDialog();
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus());
+    expect(dialog).toHaveTextContent("7 days from now. Until then everything keeps working, and you can cancel from Settings or from the email we send.");
+    expect(dialog).toHaveTextContent(/Orbyn Planner0 tasks, \d+ lists?, 0 projects, \d+ calendars?/);
+    expect(dialog).toHaveTextContent("And anything you’ve saved in other Orbyn apps.");
+    expect(dialog).not.toHaveTextContent("Plus plan");
+    expect(dialog).toHaveTextContent("it is gone from Orbyn’s servers and from every device the next time it opens. Orbyn keeps a record that the account was deleted and the day, with no email and no content. This can’t be undone.");
+    expect(within(dialog).queryByLabelText(/Type your email|Your password/)).toBeNull(); // no typed email, no password
+    expect(within(dialog).queryByLabelText("Two-factor code")).toBeNull(); // two-factor is off
+    const confirm = await within(dialog).findByRole("button", { name: "Delete account" });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    await userEvent.click(confirm);
+    // Nothing is deleted: the scheduled card, then the banner and the row say when, and cancel it.
+    const done = await screen.findByRole("dialog", { name: "Deletion scheduled" });
+    expect(done).toHaveTextContent("Everything keeps working until then.");
+    expect(done).toHaveTextContent("We emailed sam@example.com a link to cancel. It works without signing in.");
+    expect(done).toHaveTextContent("Until then you can’t add or remove devices, change protection, change two-factor or sign out everywhere.");
+    expect(engine.accounts.get("sam@example.com")!.deletion).toBeDefined();
+    expect(auth.tokens.getSession()).not.toBeNull();
+    await userEvent.click(within(done).getByRole("button", { name: "Done" }));
+
+    const banner = await screen.findByRole("status", { name: "Account deletion" });
+    expect(banner).toHaveTextContent("Deletion scheduled");
+    expect(banner).toHaveTextContent("Your Orbyn account and everything in it will be deleted on");
+    expect(screen.getByText(/Deletion scheduled for/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete account…" })).toBeNull();
+    await userEvent.click(within(banner).getByRole("button", { name: "Cancel deletion" }));
+    await waitFor(() => expect(screen.queryByRole("status", { name: "Account deletion" })).toBeNull());
+    expect(engine.accounts.get("sam@example.com")!.deletion).toBeUndefined();
+    expect(await screen.findByText("Deletion cancelled. Your account stays as it is.")).toBeInTheDocument(); // the toast
+    expect(await screen.findByRole("button", { name: "Delete account…" })).toBeInTheDocument();
+  });
+
+  it("with two-factor on the second factor is the confirmation: Delete waits for a full code, a wrong one shows under the field, a recovery code swaps in", async () => {
+    const { auth } = await signedIn();
+    const session = auth.tokens.getSession()!;
+    await enrolTotp(auth, session);
+    const { recovery_codes } = await confirmTotp(auth, session, MOCK_TOTP_CODE);
+    const dialog = await openDialog();
+    const field = await within(dialog).findByLabelText("Two-factor code");
+    expect(dialog).toHaveTextContent("From your authenticator app.");
+    const confirm = within(dialog).getByRole("button", { name: "Delete account" });
+    expect(confirm).toBeDisabled();
+    await userEvent.type(field, "00000");
+    expect(confirm).toBeDisabled(); // not a full code yet
+    await userEvent.type(field, "0");
+    expect(confirm).toBeEnabled();
+    await userEvent.click(confirm);
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("That code isn’t right. Use the current code from your authenticator app.");
+    expect(engine.accounts.get("sam@example.com")!.deletion).toBeUndefined(); // the dialog stays open and nothing was scheduled
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Use a recovery code" }));
+    expect(dialog).toHaveTextContent("Each recovery code works once.");
+    await userEvent.type(within(dialog).getByLabelText("Recovery code"), recovery_codes[0]!);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete account" }));
+    expect(await screen.findByRole("dialog", { name: "Deletion scheduled" })).toBeInTheDocument();
+    expect(engine.accounts.get("sam@example.com")!.deletion).toBeDefined();
+  });
+
+  it("a sign-in older than ten minutes says so, and Sign in again goes to sign-in and comes back to the dialog", async () => {
+    await signedIn();
+    engine.refuseNext("/v1/accounts/delete", 401, "reauthentication_required", "Sign in again to do this.", 1); // the sign-in is older than ten minutes
+    const dialog = await openDialog();
+    const confirm = await within(dialog).findByRole("button", { name: "Delete account" });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    await userEvent.click(confirm);
+    expect(await screen.findByText("For your safety, deleting an account needs a sign-in from the last 10 minutes. Sign in again and you’ll come straight back here.")).toBeInTheDocument();
+    const stale = screen.getByRole("dialog", { name: "Delete your Orbyn account" });
+    await waitFor(() => expect(within(stale).getByRole("button", { name: "Cancel" })).toHaveFocus());
+    expect(engine.accounts.get("sam@example.com")!.deletion).toBeUndefined();
+    await userEvent.click(within(stale).getByRole("button", { name: "Sign in again" }));
+    await fillSignIn();
+    expect(await screen.findByRole("dialog", { name: "Delete your Orbyn account" })).toBeInTheDocument(); // back, with the dialog open
+  });
+});
+
+describe("while a deletion is scheduled", () => {
+  async function scheduledSignedIn() {
+    const auth = services();
+    const view = await mount(auth, "/settings");
+    await fillSignUp();
+    await screen.findByRole("navigation", { name: "Primary" });
+    await scheduleDeletion(auth, auth.tokens.getSession()!);
+    return { auth, view };
+  }
+
+  it("devices, protection and two-factor are paused with a hint, and the banner stays above", async () => {
+    await scheduledSignedIn();
+    expect(await screen.findByRole("status", { name: "Account deletion" })).toBeInTheDocument();
+    await openAccount();
+    expect(await screen.findByText("Adding devices is paused")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add a device" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Add a device" })).toHaveAttribute("title", "Cancel deletion to change this");
+    expect(screen.getByRole("button", { name: "Turn on…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeEnabled(); // signing out on this device still works
+  });
+
+  it("Remove, Approve, Turn off and Choose are each disabled, with the hint, while a deletion is scheduled", async () => {
+    engine.refuseNext("/v1/keychain/protection", 500, "internal", "Refused.", 1); // no setting was signed: Choose is on the card
+    const auth = services();
+    await mount(auth, "/settings");
+    await fillSignUp();
+    await screen.findByRole("navigation", { name: "Primary" });
+    const session = auth.tokens.getSession()!;
+    await signIn(services(), SAM); // another device, waiting for approval (before two-factor is on)
+    await enrolTotp(auth, session);
+    await confirmTotp(auth, session, MOCK_TOTP_CODE);
+    await scheduleDeletion(auth, session, { code: MOCK_TOTP_CODE });
+    await screen.findByRole("status", { name: "Account deletion" });
+
+    await openAccount();
+    const list = await screen.findByRole("list", { name: "Devices" });
+    await waitFor(() => expect(within(list).getAllByRole("listitem")).toHaveLength(2));
+    for (const button of [within(list).getByRole("button", { name: /^Approve / }), within(list).getByRole("button", { name: /^Remove / }), screen.getByRole("button", { name: "Turn off…" })]) {
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute("title", "Cancel deletion to change this");
+    }
+    await userEvent.click(await screen.findByRole("button", { name: "Privacy" }));
+    const choose = await within(await screen.findByLabelText("Protection")).findByRole("button", { name: "Choose" });
+    expect(choose).toBeDisabled();
+    expect(choose).toHaveAttribute("title", "Cancel deletion to change protection");
+  });
+
+  it("a change the engine refuses with deletion_scheduled shows the paused state", async () => {
+    const auth = services();
+    await mount(auth, "/settings");
+    await fillSignUp();
+    await screen.findByRole("navigation", { name: "Primary" });
+    // Another device scheduled it; this one has not looked yet.
+    engine.accounts.get("sam@example.com")!.deletion = { at: nowMs + 7 * 86_400_000, token: "t" };
+    await expect(auth.api.setProtection({ level: "standard", seq: 9, prev: "x", signed_at: 1, device_signature: "s" } as never)).rejects.toMatchObject({ code: "deletion_scheduled" });
+    expect(await screen.findByRole("status", { name: "Account deletion" })).toBeInTheDocument();
+  });
+});
+
+describe("cancelling a scheduled deletion", () => {
+  /** An account with a deletion scheduled, made from its first browser. */
+  async function scheduled() {
+    const first = services();
+    const session = await signedUp(engine, first, SAM);
+    await scheduleDeletion(first, session);
+    return { first, session };
+  }
+
+  it("every signed-in device shows the banner, a device waiting for approval too", async () => {
+    const { first } = await scheduled();
+    const second = services();
+    await signIn(second, SAM); // pending
+    await mount(second);
+    expect(await screen.findByRole("status", { name: "Account deletion" })).toBeInTheDocument();
+    expect(first.tokens.getSession()).not.toBeNull();
   });
 });
 

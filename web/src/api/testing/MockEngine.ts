@@ -13,6 +13,9 @@ import { PROTECTION_CONTEXT, PROTECTION_GENESIS, protectionHash, protectionMessa
 import {
   DEVICE_LOGIN_CONTEXT,
   DEVICE_REGISTER_CONTEXT,
+  ACCOUNT_DELETE_CANCEL_CONTEXT,
+  ACCOUNT_DELETE_CONTEXT,
+  accountDeleteMessage,
   TOTP_MANAGE_CONTEXT,
   totpManageMessage,
   TRUSTED_START_CONTEXT,
@@ -46,6 +49,8 @@ interface Account {
   protection?: ProtectionLink[];
   /** A server that serves the chain from sequence 1 whatever `?from=` asks (how an old chain is shown again). */
   protectionFromStart?: boolean;
+  /** A scheduled deletion: when (ms) and the token in the email's cancel link. */
+  deletion?: { at: number; token: string };
 }
 /** The mock's one-time code: any other six digits are wrong. Recovery codes are `RECOV-0000N`. */
 export const MOCK_TOTP_CODE = "123456";
@@ -84,7 +89,9 @@ const uuid = () => `00000000-0000-4000-8000-${String(++ids).padStart(12, "0")}`;
  */
 export function createMockEngine(now: () => number = () => Date.now()) {
   const accounts = new Map<string, Account>();
-  const sessions = new Map<string, { accountId: string; deviceId: string }>();
+  const sessions = new Map<string, { accountId: string; deviceId: string; authenticatedAt?: number }>();
+  /** The deletion emails sent: the address and the cancel link's token, oldest first. */
+  const mail: { to: string; token: string }[] = [];
   const approvals = new Map<string, Approval>();
   const logins = new Map<string, { email: string; trusted: boolean }>();
   /** Sign-ins waiting for their second factor, with the wrong codes so far (five close one). */
@@ -134,7 +141,7 @@ export function createMockEngine(now: () => number = () => Date.now()) {
 
   const createSession = (account: Account, device: Device) => {
     const token = `token-${uuid()}`;
-    sessions.set(token, { accountId: account.id, deviceId: device.id });
+    sessions.set(token, { accountId: account.id, deviceId: device.id, authenticatedAt: now() });
     return { token, account_id: account.id, device_id: device.id, device_state: device.state, expires_at: expiry() };
   };
 
@@ -271,16 +278,32 @@ export function createMockEngine(now: () => number = () => Date.now()) {
       return json(200, enterDevice(account, pending.device));
     }
 
+    // The cancel link's token: no session, and it does nothing but cancel.
+    if (method === "POST" && path === "/v1/accounts/delete/cancel-by-mail") {
+      const token = (body as { token?: string }).token;
+      const account = [...accounts.values()].find((a) => a.deletion && a.deletion.token === token && a.deletion.at > now());
+      if (!account) return fail(400, "invalid_cancel_token", "The cancel link is not valid.");
+      account.deletion = undefined;
+      return json(204, null);
+    }
+
     // Everything below needs a session.
     const who = session(authorization?.replace(/^Bearer /, "") ?? null);
     if (!who) return fail(401, "unauthorized", "Unauthorized.");
     const { account, device } = who;
+    /** A session that finished its sign-in in the last ten minutes (one a test made directly counts as fresh). */
+    const fresh = () => now() - (sessions.get(authorization?.replace(/^Bearer /, "") ?? "")?.authenticatedAt ?? now()) <= 600_000;
     const view = (d: Device): Device => ({ ...d, current: d.id === device.id });
 
     if (method === "DELETE" && path === "/v1/sessions/current") {
       for (const [t, s] of sessions) if (s.deviceId === device.id && authorization?.endsWith(t)) sessions.delete(t);
       return json(204, null);
     }
+    // While a deletion is scheduled the engine refuses changes to devices, protection and two-factor.
+    const changes =
+      (method === "POST" && (path === "/v1/devices/approvals" || path === "/v1/keychain/protection" || path.startsWith("/v1/accounts/totp"))) ||
+      (method === "DELETE" && path.startsWith("/v1/devices/") && path !== "/v1/devices/current");
+    if (changes && account.deletion) return fail(409, "deletion_scheduled", "Your account is scheduled for deletion.");
     if (path.startsWith("/v1/keychain/protection")) {
       if (device.state !== "trusted") return fail(403, "device_not_trusted", "This device isn't trusted.");
       const chain = (account.protection ??= []);
@@ -304,6 +327,40 @@ export function createMockEngine(now: () => number = () => Date.now()) {
         return json(201, link);
       }
     }
+    /** The signature a request carries, accepted if it is by this device, for this context, now. */
+    const signed = (context: string, b: { device_signature?: string | null; signed_at?: number | bigint | null }) => {
+      const signedAt = Number(b.signed_at ?? NaN);
+      return typeof b.device_signature === "string" && Math.abs(now() / 1000 - signedAt) <= 300 &&
+        fakeVerify(decodeBytes(device.signing_key), context, accountDeleteMessage(account.id, device.id, signedAt), decodeBytes(b.device_signature));
+    };
+    if (path === "/v1/accounts/delete" && method === "POST") {
+      if (device.state !== "trusted") return fail(403, "device_not_trusted", "This device isn't trusted.");
+      const b = body as { code?: string | null; recovery_code?: string | null; device_signature?: string | null; signed_at?: number | bigint | null };
+      const signedAt = Number(b.signed_at ?? NaN);
+      const slot = `${device.id}:delete`;
+      // Accepted once: strictly later than the last signature this device had accepted.
+      if (!signed(ACCOUNT_DELETE_CONTEXT, b) || signedAt <= (state.lastManage.get(slot) ?? 0)) return fail(401, "device_proof_required", "This request needs the device's signature.");
+      if (!fresh()) return fail(401, "reauthentication_required", "Sign in again to do this.");
+      state.lastManage.set(slot, signedAt);
+      if (account.totp?.enabled) {
+        const ok = b.code ? b.code === MOCK_TOTP_CODE : b.recovery_code ? spendRecovery(account, b.recovery_code) : false;
+        if (!ok || (b.code && b.recovery_code)) return fail(401, "second_factor_failed", "That code didn't work.");
+      }
+      // Already scheduled: the same time, nothing new. Otherwise seven days from now, and one email with a new token.
+      if (!account.deletion) {
+        account.deletion = { at: now() + 7 * 86_400_000, token: `cancel-token-${uuid()}` };
+        mail.push({ to: account.email, token: account.deletion.token });
+      }
+      return json(202, { deletes_at: new Date(account.deletion.at).toISOString() });
+    }
+    if (path === "/v1/accounts/delete/cancel" && method === "POST") {
+      // A trusted device signs; a pending one signs too and needs a sign-in from the last ten minutes.
+      if (!signed(ACCOUNT_DELETE_CANCEL_CONTEXT, body as { device_signature?: string | null; signed_at?: number | bigint | null })) return fail(401, "device_proof_required", "This request needs the device's signature.");
+      if (device.state !== "trusted" && !fresh()) return fail(401, "reauthentication_required", "Sign in again to do this.");
+      account.deletion = undefined;
+      return json(204, null);
+    }
+
     if (path.startsWith("/v1/accounts/totp") && method === "POST") {
       if (device.state !== "trusted") return fail(403, "device_not_trusted", "This device isn't trusted.");
       const b = body as { code?: string; device_signature?: string | null; signed_at?: number | bigint | null };
@@ -348,7 +405,7 @@ export function createMockEngine(now: () => number = () => Date.now()) {
 
     if (method === "GET" && path === "/v1/devices/current") {
       const approval = [...approvals.values()].find((a) => a.deviceId === device.id && open(a));
-      return json(200, { device: view(device), approval: approval ? viewOf(approval) : null, totp_enabled: account.totp?.enabled === true, totp_pending: account.totp !== undefined && !account.totp.enabled });
+      return json(200, { device: view(device), approval: approval ? viewOf(approval) : null, totp_enabled: account.totp?.enabled === true, totp_pending: account.totp !== undefined && !account.totp.enabled, deletion_scheduled_at: account.deletion ? new Date(account.deletion.at).toISOString() : null });
     }
     if (method === "GET" && /^\/v1\/devices\/approvals\/[^/]+$/.test(path)) {
       const a = approvalOf(path);
@@ -464,6 +521,7 @@ export function createMockEngine(now: () => number = () => Date.now()) {
     },
     fetch: handle as unknown as typeof fetch,
     calls,
+    mail,
     accounts,
     sessions,
     state,

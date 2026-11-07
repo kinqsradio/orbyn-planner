@@ -1,5 +1,5 @@
 {
-  "engine": "f41d6008e5b8b22d44d97de71bf5c21709a5633d",
+  "engine": "83ab4ff58a215bd1f427ff8955c0d009a8fe25a3",
   "rust": "1.99.1",
   "wasmBindgen": "0.2.130",
   "files": {

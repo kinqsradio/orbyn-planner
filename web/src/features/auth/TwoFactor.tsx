@@ -4,6 +4,7 @@ import { useAuth } from "../../auth/AuthProvider";
 import { confirmTotp, disableTotp, enrolTotp } from "../../auth/flows";
 import { saveFile } from "../export/save";
 import { useUi } from "../../app/ui";
+import { PAUSED_HINT, useDeletionPaused } from "../../auth/deletionNotice";
 import { TOAST_BRIEF_MS } from "../../styles/tokens";
 import { Modal } from "../../components/Modal";
 import { describeError } from "./AuthScreens";
@@ -173,6 +174,7 @@ function DisableDialog({ onClose, onDone }: { onClose: () => void; onDone: () =>
 
 /** Settings · Account · Two-factor: the row, and the dialogs to turn it on (QR code, then recovery codes) and off. The state is the engine's (`totp_enabled`). */
 export function TwoFactorRow() {
+  const paused = useDeletionPaused();
   const auth = useAuth();
   const [on, setOn] = useState<boolean | null>(null);
   const [dialog, setDialog] = useState<"on" | "off" | null>(null);
@@ -206,7 +208,7 @@ export function TwoFactorRow() {
         <span>Two-factor</span>
         <b className="ctl">
           <span className="t3">{on === null ? "…" : on ? "On" : "Off"}</span>
-          <button type="button" className="ghost" disabled={on === null} onClick={() => setDialog(on ? "off" : "on")}>{on ? "Turn off…" : "Turn on…"}</button>
+          <button type="button" className="ghost" disabled={on === null || paused} title={paused ? PAUSED_HINT : undefined} onClick={() => setDialog(on ? "off" : "on")}>{on ? "Turn off…" : "Turn on…"}</button>
         </b>
       </div>
       {dialog === "on" && <EnrolDialog onClose={() => setDialog(null)} onDone={done} />}

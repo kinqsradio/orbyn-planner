@@ -3,7 +3,7 @@ import { ApiFailure } from "../api/auth";
 import { createMemoryKeyStore } from "../api/keyStore";
 import { FakeAuthCrypto } from "../api/testing/FakeAuthCrypto";
 import { createMockEngine, MOCK_TOTP_CODE, type MockEngine } from "../api/testing/MockEngine";
-import { confirmTotp, disableTotp, enrolTotp, SecondFactorNeeded, signIn } from "./flows";
+import { confirmTotp, disableTotp, enrolTotp, scheduleDeletion, SecondFactorNeeded, signIn } from "./flows";
 import { signedUp } from "./testing/signedUp";
 import { createAuthServices, type AuthServices } from "./services";
 
@@ -109,5 +109,30 @@ describe("changing two-factor needs this device's signature, and turning it off 
     engine.refuseNext("/v1/accounts/totp", 401, "device_proof_required");
     const failed = await enrolTotp(services, session).catch((e: unknown) => e);
     expect((failed as ApiFailure).code).toBe("device_proof_required");
+  });
+
+  it("scheduling the deletion: each signature is strictly later, one refusal is answered by signing again once, and a wrong code keeps the account and the session", async () => {
+    const engine = createMockEngine();
+    const services = browser(engine);
+    const session = await signedUp(engine, services, SAM);
+    await enrolTotp(services, session);
+    await confirmTotp(services, session, MOCK_TOTP_CODE);
+    const times = () => engine.calls.filter((c) => c.path === "/v1/accounts/delete").map((c) => Number((c.body as { signed_at: number }).signed_at));
+
+    const wrong = await scheduleDeletion(services, session, { code: "000000" }).catch((e: unknown) => e);
+    expect((wrong as ApiFailure).code).toBe("second_factor_failed");
+    expect(engine.accounts.has(SAM.email)).toBe(true);
+    expect(services.tokens.getSession()).not.toBeNull(); // a wrong code is not the end of the session
+    const again = await scheduleDeletion(services, session, { code: "000000" }).catch((e: unknown) => e);
+    expect((again as ApiFailure).code).toBe("second_factor_failed");
+    const [first, second] = times();
+    expect(second).toBeGreaterThan(first!); // the same second, still a later time
+
+    engine.refuseNext("/v1/accounts/delete", 401, "device_proof_required");
+    const at = await scheduleDeletion(services, session, { code: MOCK_TOTP_CODE }); // refused once, signed again, accepted
+    expect(times()).toHaveLength(4);
+    // Nothing is deleted yet: the account stays, with the date it will go.
+    expect(engine.accounts.has(SAM.email)).toBe(true);
+    expect(engine.accounts.get(SAM.email)!.deletion?.at).toBe(Date.parse(at));
   });
 });

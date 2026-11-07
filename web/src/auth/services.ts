@@ -3,6 +3,7 @@ import { requireAuthCrypto, type AuthCrypto } from "../api/authCrypto";
 import { defaultKeyStore, withMemoryFallback, type FallbackKeyStore, type KeyStore } from "../api/keyStore";
 import { TokenStore } from "../api/tokenStore";
 import { freshWrapSecret, wrapSecretFrom } from "../api/wrapSecret";
+import { deletionNotice } from "./deletionNotice";
 import { browserLock, createEngineHost, type EngineHost, type Lock } from "./engineHost";
 
 /** Everything the account screens use, so tests can swap the network, the storage and the crypto. */
@@ -52,13 +53,18 @@ export interface AuthServiceOptions {
 export function createAuthServices(options: AuthServiceOptions = {}): AuthServices {
   const keys = withMemoryFallback(options.keys ?? defaultKeyStore(), options.lock ?? browserLock);
   const tokens = new TokenStore(keys);
+  // The engine refuses changes to devices, protection and two-factor while a deletion is scheduled: when it does, the date is read
+  // again, so every screen shows those controls as paused.
+  const later: { api?: AuthApi } = {};
   const api = createAuthApi({
+    onDeletionScheduled: () => void later.api?.currentDevice().then((d) => deletionNotice.set(d.deletion_scheduled_at ?? null), () => undefined),
     fetch: options.fetch,
     baseUrl: options.baseUrl,
     token: tokens.token,
     // A 401 on a signed-in call: the session is over, so forget the token.
     onUnauthorized: () => void tokens.clear(),
   });
+  later.api = api;
   const crypto = options.crypto ?? requireAuthCrypto;
   const now = options.now ?? Date.now;
   const wrapSecret = options.wrapSecret ?? (() => wrapSecretFrom(keys));

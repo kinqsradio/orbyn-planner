@@ -55,6 +55,10 @@ export interface DeviceKeys {
    * `disable`; `code` is the six digits for `confirm` and empty otherwise; `signedAt` is Unix seconds, within five minutes of the server's clock.
    */
   signTotpManage(accountId: string, deviceId: string, action: string, code: string, signedAt: number): Uint8Array;
+  /** The signature that lets this device schedule the account's deletion (`orbyn/account-delete/v1`); `signedAt` is Unix seconds, and each one is accepted once. */
+  signAccountDelete(accountId: string, deviceId: string, signedAt: number): Uint8Array;
+  /** The signature that lets this device cancel a scheduled deletion (`orbyn/account-delete-cancel/v1`); not single-use. */
+  signAccountDeleteCancel(accountId: string, deviceId: string, signedAt: number): Uint8Array;
 }
 
 /**

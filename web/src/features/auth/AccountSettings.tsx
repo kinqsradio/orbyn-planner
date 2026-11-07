@@ -11,6 +11,8 @@ import { TwoFactorRow } from "./TwoFactor";
 import type { Device } from "../../generated/Device";
 import { useAuth } from "../../auth/AuthProvider";
 import { removeDevice, verifiedDevices } from "../../auth/flows";
+import { PAUSED_HINT, useDeletionPaused } from "../../auth/deletionNotice";
+import { useCancelDeletion } from "./DeletionBanner";
 import { useApprover } from "./useApprover";
 import { describeError } from "./AuthScreens";
 
@@ -203,6 +205,8 @@ function SignedInAccount() {
   const [removing, setRemoving] = useState<Device | null>(null);
   const [adding, setAdding] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const paused = useDeletionPaused();
+  const { cancel: cancelDeletion, busy: cancelling } = useCancelDeletion();
 
   const load = useCallback(
     () =>
@@ -238,6 +242,13 @@ function SignedInAccount() {
       </div>
 
       <div className="bh"><b>Devices</b><span>{devices?.length ?? ""}</span></div>
+      {paused && (
+        <div className="card" role="status">
+          <b><Icon name="alert" small /> Adding devices is paused</b>
+          <span className="t3">While your account is scheduled for deletion you can’t add or remove devices, change protection, turn two-factor on or off, or sign out everywhere. Signing out on this device still works.</span>
+          <span><button type="button" className="btn sm" disabled={cancelling} onClick={() => void cancelDeletion()}>Cancel deletion</button></span>
+        </div>
+      )}
       {error && <p className="err" role="alert">{error}</p>}
       <ul className="card" style={{ gap: 0, padding: "0 var(--sp-14)" }} aria-label="Devices">
         {(devices ?? []).map((d, i, all) => (
@@ -255,12 +266,12 @@ function SignedInAccount() {
                 <span className="t3">Added {when(d.created_at)}</span>
               )}
               {needsApproval(d) && (
-                <button type="button" className="ghost" aria-label={d.state === "pending" ? `Approve ${d.name}` : `Approve ${d.name} again`} onClick={() => setApproving(d)}>
+                <button type="button" className="ghost" disabled={paused} title={paused ? PAUSED_HINT : undefined} aria-label={d.state === "pending" ? `Approve ${d.name}` : `Approve ${d.name} again`} onClick={() => setApproving(d)}>
                   {d.state === "pending" ? "Approve" : "Approve again"}
                 </button>
               )}
               {!d.current && (
-                <button type="button" className="ghost" aria-label={`Remove ${d.name}`} onClick={() => setRemoving(d)}>Remove</button>
+                <button type="button" className="ghost" disabled={paused} title={paused ? PAUSED_HINT : undefined} aria-label={`Remove ${d.name}`} onClick={() => setRemoving(d)}>Remove</button>
               )}
             </b>
           </li>
@@ -270,7 +281,7 @@ function SignedInAccount() {
       <div className="account-actions">
         <button type="button" className="ghost" onClick={() => setSigningOut(true)}>Sign out</button>
         <button type="button" className="ghost" onClick={() => void load()}>Refresh</button>
-        <button type="button" className="ghost" onClick={() => setAdding(true)}>
+        <button type="button" className="ghost" disabled={paused} title={paused ? PAUSED_HINT : undefined} onClick={() => setAdding(true)}>
           <Icon name="plus" small />
           Add a device
         </button>

@@ -519,3 +519,24 @@ button.pillx { border: 0; }
 .pv-dialog { display: flex; flex-direction: column; gap: var(--sp-14); }
 .pv-dialog p { margin: 0; }
 .btn.lg, .ghost.lg { justify-content: center; }
+
+/* Account deletion: the banner, the dialog's list of what is deleted, the row. */
+.deletion-banner { margin: var(--sp-8) var(--sp-28) 0; flex-wrap: wrap; }
+.deletion-banner .banner-title { font-weight: var(--fw-medium); }
+.deletion-banner .banner-text.short { display: none; }
+.scope2 { display: flex; gap: var(--sp-12); align-items: flex-start; padding: var(--sp-10) 0; border-top: var(--bw) solid var(--line); }
+.scope2 b { font-weight: var(--fw-regular); color: var(--t1); }
+.scope2 small { display: block; color: var(--t3); font-size: var(--fs-12); }
+.appi { width: var(--sp-22); height: var(--sp-22); border-radius: var(--r-6); display: inline-grid; place-items: center; background: var(--btn); color: var(--btnt); flex: none; }
+.field[aria-invalid="true"] { border-color: var(--red); }
+.fld-hint { color: var(--t3); font-size: var(--fs-11-5); }
+.mono-field { font-family: var(--mono); letter-spacing: .06em; }
+@media (max-width: 767px) {
+  .deletion-banner { margin: var(--sp-8) var(--sp-16) 0; }
+  .deletion-banner .banner-text.long { display: none; }
+  .deletion-banner .banner-text.short { display: inline; }
+  .deletion-banner .end { width: 100%; }
+  .deletion-banner .end .btn { flex: 1; height: var(--sp-40); border-radius: var(--r-12); justify-content: center; }
+  .delete-form .dialog-actions { flex-direction: column-reverse; align-items: stretch; }
+  .delete-form .dialog-actions .ghost, .delete-form .dialog-actions .danger { height: var(--sp-40); border-radius: var(--r-12); justify-content: center; }
+}

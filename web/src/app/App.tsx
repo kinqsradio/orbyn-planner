@@ -4,6 +4,7 @@ import { Portal } from "../components/Portal";
 import { useDialog } from "../components/useDialog";
 import { CalendarPage } from "../features/calendar/CalendarPage";
 import { ListsPage } from "../features/lists/ListsPage";
+import { DeletionBanner } from "../features/auth/DeletionBanner";
 import { NotificationsPage } from "../features/notifications/NotificationsPage";
 import { NotificationsProvider, useNotifications } from "../features/notifications/useNotifications";
 import { ProjectPage } from "../features/projects/ProjectPage";
@@ -136,6 +137,7 @@ function Shell() {
         </nav>
       </aside>
       <main id="content" ref={main} tabIndex={-1} className="sheet">
+        <DeletionBanner />
         <div className={ui.taskId || ui.eventKey ? "sheet-grid has-panel" : "sheet-grid"}>
           <div className="sheet-main">{page()}</div>
           <TaskPanel />
