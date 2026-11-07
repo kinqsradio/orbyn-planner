@@ -162,19 +162,27 @@ describe("Event panel", () => {
     const store = await open({ seed: seedWeek });
     await userEvent.click(screen.getByRole("button", { name: /Lunch with Maya/ }));
     const panel = screen.getByRole("complementary", { name: "Event" });
+    // Paste instead of typing a key at a time: the test is about what is saved, and per-key typing made it slow under load.
     const title = within(panel).getByRole("textbox", { name: "Title" });
     await userEvent.clear(title);
-    await userEvent.type(title, "Lunch with Maya and Jo");
-    await userEvent.type(within(panel).getByRole("textbox", { name: "Where" }), "Cafe");
+    await userEvent.click(title);
+    await userEvent.paste("Lunch with Maya and Jo");
+    await userEvent.click(within(panel).getByRole("textbox", { name: "Where" }));
+    await userEvent.paste("Cafe");
     await userEvent.selectOptions(within(panel).getByRole("combobox", { name: "Reminder" }), "30");
-    await userEvent.type(within(panel).getByRole("textbox", { name: "Add a person" }), "jo@example.com{Enter}");
+    const person = within(panel).getByRole("textbox", { name: "Add a person" });
+    await userEvent.click(person);
+    await userEvent.paste("jo@example.com");
+    await userEvent.keyboard("{Enter}");
     await userEvent.click(within(panel).getByRole("button", { name: "Save" }));
-    expect(store.getState().events.find((e) => e.title.startsWith("Lunch"))).toMatchObject({
-      title: "Lunch with Maya and Jo",
-      place: "Cafe",
-      reminder: 30,
-      people: [{ email: "jo@example.com", response: "none" }],
-    });
+    await waitFor(() =>
+      expect(store.getState().events.find((e) => e.title.startsWith("Lunch"))).toMatchObject({
+        title: "Lunch with Maya and Jo",
+        place: "Cafe",
+        reminder: 30,
+        people: [{ email: "jo@example.com", response: "none" }],
+      }),
+    );
   });
 
   it("will not save an event that ends before it starts", async () => {
