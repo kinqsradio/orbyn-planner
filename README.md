@@ -21,4 +21,4 @@ cd web && npm run check && npm test && npm run build
 
 ## Licence
 
-No licence has been chosen yet, so all rights are reserved for now. The repository is public so the work can be followed.
+Orbyn Planner is source-available under the [PolyForm Strict License 1.0.0](LICENSE): you may read the source and use the app for personal, non-commercial purposes, but not copy, change or redistribute it. The engine crates it uses keep their own licences (MIT or Apache 2.0); see [orbyn-engine](https://github.com/orbyn-dev/orbyn-engine). Third-party packages keep their own licences and notices. The Orbyn name and logo are trademarks and are not licensed.
