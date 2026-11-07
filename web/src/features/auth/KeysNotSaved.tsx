@@ -6,6 +6,7 @@ import { Icon } from "../../components/Icon";
 import { Modal } from "../../components/Modal";
 import { motionMs } from "../../styles/tokens";
 import { useApprover } from "./useApprover";
+import { APPROVAL_FAILED, DIGITS_MISMATCH } from "../../auth/pairing";
 import { groupCode } from "./AccountSettings";
 
 /** The steps with this device's side of the approval: digits to match, the key fingerprint, and what it is waiting for. */
@@ -41,16 +42,18 @@ function ApprovalSteps({ device, onClose, onApproved }: { device: Device; onClos
   };
   const closed = state.phase === "closed" ? state : null;
   /** Why the approval ended, in the words the designs give: a real expiry, the other device cancelling, or the digits not matching. */
-  const ended = declined || closed?.reason === "mismatch" ? "mismatch" : closed?.reason === "expired" ? "expired" : closed?.reason === "closed" ? "cancelled" : null;
+  const ended = declined || closed?.reason === "mismatch" ? "mismatch" : closed?.reason === "expired" ? "expired" : closed?.reason === "closed" ? "cancelled" : closed?.reason === "failed" ? "failed" : null;
   const stopped = declined || (closed !== null && closed.reason !== "cancelled");
   const endedText =
     ended === "mismatch"
-      ? "The digits didn’t match, so nothing was shared. If you didn’t start this, someone else may be trying to add a device."
+      ? DIGITS_MISMATCH
       : ended === "expired"
         ? "Your other device didn’t answer in 10 minutes. Nothing was shared."
         : ended === "cancelled"
           ? "Your other device cancelled. Nothing was shared."
-          : null;
+          : ended === "failed"
+            ? APPROVAL_FAILED
+            : null;
   return (
     <>
       <ol className="steps numbered">

@@ -18,11 +18,14 @@ export type CloseReason = "cancelled" | "mismatch" | "expired" | "closed" | "fai
 export const CLOCK_HINT = "If this keeps happening, check that this device’s clock is right.";
 
 /** Right after the person compared the digits themselves, the plain words are the most useful. */
-export const DIGITS_MISMATCH = "The digits didn’t match, so this approval was closed.";
+export const DIGITS_MISMATCH = "The digits didn’t match, so nothing was shared. If you didn’t start this, someone else may be trying to add a device.";
+
+/** The approving device's line when the approval could not be finished (a network or server error). */
+export const APPROVAL_FAILED = "Couldn’t finish approving. Check your connection. Nothing was shared.";
 
 const REASONS: Record<CloseReason, string> = {
   cancelled: "This approval was cancelled.",
-  mismatch: "The two devices didn’t agree. Start again.",
+  mismatch: DIGITS_MISMATCH,
   expired: `This approval ran out of time. ${CLOCK_HINT}`,
   closed: `This approval was closed, by the other device or because it ran out of time. ${CLOCK_HINT}`,
   failed: "Something went wrong, so this approval was closed.",
@@ -156,9 +159,10 @@ export class ApproverController extends Controller<ApproverState> {
       const pairing = await this.services.engine.run(this.session, (e) => e.startApproval(this.pending, nowSecs(this.services)));
       if (this.ended || this.disposed) return;
       this.pairing = pairing;
+      // Taken before the request, so this device's clock cannot run behind the server's when it decides an approval has expired.
+      this.startedAt = this.services.now();
       const created = await this.services.api.createApproval(pairing.createRequest);
       this.id = created.id;
-      this.startedAt = this.services.now();
       if (this.ended) {
         // Cancelled while it was being created: close what the server just made.
         await this.services.api.cancelApproval(created.id).catch(() => undefined);
@@ -224,7 +228,7 @@ export class ApproverController extends Controller<ApproverState> {
         this.set({ phase: "done" });
       }
     } catch (e) {
-      await this.fail(e, true); // after "They match"
+      await this.fail(e);
     }
   }
 
@@ -252,11 +256,12 @@ export class ApproverController extends Controller<ApproverState> {
     return undefined;
   }
 
-  private async fail(error: unknown, afterComparison = false): Promise<void> {
+  private async fail(error: unknown): Promise<void> {
     if (this.ended || this.disposed) return;
     this.ended = true;
     let reason: CloseReason = "failed";
-    let message: string = REASONS.failed;
+    // A network or server error: this device says so in the words of the designs, whatever the engine's message.
+    let message: string = APPROVAL_FAILED;
     if (error instanceof ApiFailure && error.code === "poll_timeout") {
       reason = "expired";
       message = REASONS.expired;
@@ -271,9 +276,7 @@ export class ApproverController extends Controller<ApproverState> {
     } else if (error instanceof Error && /^mismatch:/.test(error.message)) {
       // The module's one code for any disagreement; at this end it means the keys the server showed are not the ones this device started with.
       reason = "mismatch";
-      message = afterComparison ? DIGITS_MISMATCH : REASONS.mismatch;
-    } else if (error instanceof ApiFailure) {
-      message = error.message;
+      message = DIGITS_MISMATCH;
     }
     if (this.id) await this.services.api.cancelApproval(this.id).catch(() => undefined);
     this.set({ phase: "closed", reason, message }, true);

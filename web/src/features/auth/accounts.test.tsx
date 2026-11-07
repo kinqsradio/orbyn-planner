@@ -507,6 +507,19 @@ describe("adding a device", () => {
     expect(onDevice.getByRole("alert")).toHaveTextContent("check that this device’s clock is right");
   });
 
+  it("in Add a device, a network failure says nothing was shared, with Start again as the main button", async () => {
+    const { a } = await twoDevices();
+    await mount(a, "/settings");
+    await openAccount();
+    const list = await screen.findByRole("list", { name: "Devices" });
+    await waitFor(() => expect(within(list).getAllByRole("listitem")).toHaveLength(2));
+    engine.refuseNext("/v1/devices/approvals", 500, "internal");
+    await userEvent.click(within(list).getByRole("button", { name: `Approve ${deviceName()}` }));
+    const dialog = screen.getByRole("dialog", { name: "New sign-in" });
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Couldn’t finish approving. Check your connection. Nothing was shared.");
+    expect(within(dialog).getByRole("button", { name: "Start again" })).toHaveClass("btn");
+  });
+
   it("the trusted device gives up waiting for a new device that never shows up", async () => {
     const { a } = await twoDevices();
     const short = services(createMemoryKeyStore(), false, { firstMs: 5, maxMs: 10, totalMs: 60 });
@@ -525,7 +538,7 @@ describe("adding a device", () => {
     await openAccount();
     engine.refuseNext("/v1/devices/approvals", 429, "too_many_attempts");
     await userEvent.click(await screen.findByRole("button", { name: `Approve ${deviceName()}` }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Too many attempts");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn’t finish approving. Check your connection. Nothing was shared.");
     await userEvent.click(screen.getByRole("button", { name: "Start again" }));
     expect(await screen.findByText(/Waiting for .* to show its code/)).toBeInTheDocument();
   });
@@ -759,6 +772,28 @@ describe("keys the browser will not store", () => {
     await waitFor(() => expect(approvalsStarted()).toBe(before + 1));
   });
 
+  it("when approving fails on the network, the tab dialog says nothing was shared and Start again is the main button", async () => {
+    const keysA = createMemoryKeyStore();
+    keysA.replaceDevice = () => Promise.reject(new Error("quota"));
+    const a = services(keysA);
+    const b = services(createMemoryKeyStore());
+    const first = await mount(a);
+    await fillSignUp();
+    await screen.findByRole("alert", { name: "Account created, keys not saved" });
+    first.unmount();
+    const second = await mount(b);
+    await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
+    await fillSignIn();
+    await screen.findByRole("heading", { name: "Approve this device" });
+    second.unmount();
+    await mount(a);
+    engine.refuseNext("/v1/devices/approvals", 500, "internal");
+    await userEvent.click(await screen.findByRole("button", { name: "Approve another device from this tab" }));
+    const dialog = await screen.findByRole("dialog", { name: "Approve another device" });
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Couldn’t finish approving. Check your connection. Nothing was shared.");
+    expect(within(dialog).getByRole("button", { name: "Start again" })).toHaveClass("btn");
+  });
+
   it("in React's development check the approval is started once and is not cancelled", async () => {
     const { b, dialog } = await dialogOpen(true);
     await mount(b);
@@ -778,6 +813,19 @@ describe("keys the browser will not store", () => {
         return request;
       },
     });
+    // Every message to another tab or window is counted: only fixed strings may go out, never a device name, a key, a fingerprint or an id.
+    const messages: unknown[] = [];
+    vi.stubGlobal(
+      "BroadcastChannel",
+      class {
+        onmessage: unknown = null;
+        postMessage(data: unknown) {
+          messages.push(data);
+        }
+        close() {}
+      },
+    );
+    const windowPost = vi.spyOn(window, "postMessage").mockImplementation((data: unknown) => void messages.push(data));
     const writes: string[] = [];
     const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key: string) {
       writes.push(key);
@@ -828,12 +876,15 @@ describe("keys the browser will not store", () => {
       await within(onA.root).findByLabelText("Protection");
       await within(onA.root).findByText(/Standard protection|Confirming|Choose your protection level/);
 
+      expect(messages.every((m) => m === "signed-out" || m === "quarantined")).toBe(true); // nothing but the fixed words goes to other tabs
+      expect(JSON.stringify(messages)).not.toContain(accountId);
       expect(opened.filter((name) => name.includes(accountId))).toEqual([]); // no database for the account
       expect(writes.filter((key) => key.includes(accountId) || /protection|notifications-read/.test(key))).toEqual([]);
       expect(await keysA.loadKeys()).toBeNull();
       onA.unmount();
     } finally {
       setItem.mockRestore();
+      windowPost.mockRestore();
       vi.unstubAllGlobals();
     }
   });
