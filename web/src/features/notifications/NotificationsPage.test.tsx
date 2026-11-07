@@ -24,7 +24,7 @@ const at = Math.floor(new Date(2026, 10, 7, 9, 41).getTime() / 1000);
 const changed: ProtectionReport = {
   seq: 2, state: "verified", level: "standard", stopped: null, problem: null,
   head: { level: "standard", seq: 2, prev: "p", signed_at: BigInt(at), signer_device_id: "d2", signature: "s" },
-  signer: { id: "d2", name: "iPhone 16", thisDevice: false }, changedBy: { id: "d2", name: "iPhone 16" },
+  signer: { id: "d2", listed: true, thisDevice: false }, changedBy: { id: "d2" },
 };
 const task = (over: Partial<Task>): Task => ({
   id: "t1", title: "Send the launch brief to Priya", notes: "", listId: "l", due: "2026-11-07T12:00", priority: "none", done: false, completedAt: null, deletedAt: null,
@@ -108,7 +108,7 @@ describe("Notifications", () => {
   it("shows a protection change another device made, with its time and an unread dot; selecting it opens Privacy in Settings", async () => {
     read.mockResolvedValue(changed);
     ui();
-    const row = await screen.findByText(/Protection was changed to Standard on iPhone 16/);
+    const row = await screen.findByText(/Protection was changed to Standard on another device/);
     const item = row.closest("li")!;
     expect(item).toHaveTextContent("Opens Data protection in your account");
     expect(item).toHaveTextContent("09:41");

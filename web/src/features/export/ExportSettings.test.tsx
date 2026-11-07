@@ -9,6 +9,7 @@ import { LocalStore } from "../../store/LocalStore";
 import { MemoryPersistence } from "../../store/persistence";
 import { SettingsPage } from "../settings/SettingsPage";
 import { fileSize } from "../../lib/fileSize";
+import { EXPORT_WARNING } from "./ExportSettings";
 import { readExport } from "./exportJson";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -44,7 +45,7 @@ describe("Settings · Privacy · Export your data", () => {
     await userEvent.click(screen.getByRole("button", { name: "Privacy" }));
     await userEvent.click(screen.getByRole("button", { name: "Export…" }));
     const dialog = screen.getByRole("dialog", { name: "Export your data" });
-    expect(within(dialog).getByText("The exported file isn’t encrypted. Anyone who gets it can read it. Keep it somewhere safe.")).toBeInTheDocument();
+    expect(within(dialog).getByText(EXPORT_WARNING)).toBeInTheDocument();
     await waitFor(() => expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus()); // the safe choice has focus
 
     await userEvent.click(within(dialog).getByRole("button", { name: "Export" })); // JSON is chosen to begin with

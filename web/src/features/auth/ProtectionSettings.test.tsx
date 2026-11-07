@@ -17,7 +17,7 @@ const link = (seq: number, signedAt: number): ProtectionLink => ({ level: "stand
 const secs = (iso: string) => Math.floor(new Date(iso).getTime() / 1000);
 const report = (over: Partial<ProtectionReport>): ProtectionReport => ({
   seq: 1, state: "verified", level: "standard", stopped: null, problem: null, head: link(1, secs("2026-11-03T09:00:00Z")),
-  signer: { id: "d2", name: "MacBook Air", thisDevice: false }, changedBy: null, ...over,
+  signer: { id: "d2", listed: true, thisDevice: false }, changedBy: null, ...over,
 });
 
 beforeEach(() => {
@@ -35,7 +35,7 @@ describe("the protection card", () => {
     const first = render(<ProtectionSettings />);
     const dialog = await screen.findByRole("dialog", { name: "Confirm your protection level" });
     expect(dialog).toHaveTextContent("Your account uses Standard protection: data is encrypted on your devices, and only your trusted devices hold the keys; Standard’s recovery copy is Planned.");
-    expect(within(dialog).getByText("Set on").parentElement).toHaveTextContent("MacBook Air · 3 Nov");
+    expect(within(dialog).getByText("Set on").parentElement).toHaveTextContent("A device in your list · 3 Nov");
     // Focus moves in when the dialog's effects have run, which is just after it appears: wait for it, not for the first paint.
     await waitFor(() => expect(within(dialog).getByRole("button", { name: "Not now" })).toHaveFocus()); // the safe choice has focus
     await userEvent.click(within(dialog).getByRole("button", { name: "Not now" }));
@@ -68,12 +68,12 @@ describe("the protection card", () => {
 
   it("when another device changed it first, the dialog refreshes, says so in blue, and asks again", async () => {
     read.mockResolvedValueOnce(report({ state: "provisional", seq: 0 }));
-    read.mockResolvedValue(report({ state: "provisional", seq: 0, head: link(2, Math.floor(Date.now() / 1000)), signer: { id: "d3", name: "iPhone 16", thisDevice: false } }));
+    read.mockResolvedValue(report({ state: "provisional", seq: 0, head: link(2, Math.floor(Date.now() / 1000)), signer: { id: "d3", listed: true, thisDevice: false } }));
     confirm.mockRejectedValueOnce(new ApiFailure("protection_conflict", 409, "Another device changed the protection level first."));
     render(<ProtectionSettings />);
     await userEvent.click(await screen.findByRole("button", { name: "Confirm" }));
-    expect(await screen.findByText("Protection was just changed on iPhone 16, so this shows the current setting. Check it and confirm again.")).toBeInTheDocument();
-    expect(await screen.findByText(/iPhone 16 · just now/)).toBeInTheDocument();
+    expect(await screen.findByText("Protection was just changed on another device, so this shows the current setting. Check it and confirm again.")).toBeInTheDocument();
+    expect(await screen.findByText("Another device · just now")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled();
   });
 
@@ -93,7 +93,7 @@ describe("the protection card", () => {
     expect(details).toHaveTextContent("ReasonThe server showed an older setting");
     expect(details).not.toHaveTextContent("Devices that confirmed");
     expect(details).toHaveTextContent("Newest setting on the serverStandard · change 1");
-    expect(details).toHaveTextContent("Signed byMacBook Air · 3 Nov");
+    expect(details).toHaveTextContent("Signed byA device in your list · 3 Nov");
     expect(details).toHaveTextContent("Last confirmed on this browserStandard · change 1 · 3 Nov");
     expect(within(details).getByRole("button", { name: "Copy details" })).toBeInTheDocument();
     await userEvent.click(within(details).getByRole("button", { name: "Done" }));
@@ -101,7 +101,7 @@ describe("the protection card", () => {
   });
 
   it("a change signed by a device this one doesn't know says so, with Review devices first", async () => {
-    read.mockResolvedValue(report({ state: "provisional", stopped: "untrusted_signer", signer: { id: "d9", name: "Old Mac", thisDevice: false } }));
+    read.mockResolvedValue(report({ state: "provisional", stopped: "untrusted_signer", signer: { id: "d9", listed: true, thisDevice: false } }));
     const review = vi.fn();
     render(<ProtectionSettings onReviewDevices={review} />);
     const c = await card();
@@ -111,13 +111,49 @@ describe("the protection card", () => {
   });
 });
 
-describe("the Standard card when the signing device is gone", () => {
-  it("reads Last change 3 Nov. with no device name, and never a made-up one", async () => {
-    read.mockResolvedValue(report({ signer: { id: "d2", name: null, thisDevice: false } }));
+describe("who signed the last change", () => {
+  const text = async (signer: ProtectionReport["signer"]) => {
+    read.mockResolvedValue(report({ signer }));
     render(<ProtectionSettings />);
-    const text = (await card()).textContent!;
-    expect(text).toContain("Confirmed by your devices. Last change 3 Nov.");
-    expect(text).not.toMatch(/Last change 3 Nov on/);
+    return (await card()).textContent!;
+  };
+
+  it("this device: Last change 3 Nov on this device., from the signed record, not from a name", async () => {
+    expect(await text({ id: "d1", listed: true, thisDevice: true })).toContain("Confirmed by your devices. Last change 3 Nov on this device.");
+  });
+
+  it("another device, or one the account doesn't list: Last change 3 Nov. with no device", async () => {
+    expect(await text({ id: "d2", listed: true, thisDevice: false })).toContain("Confirmed by your devices. Last change 3 Nov.Your planner");
+    cleanup();
+    expect(await text({ id: "d9", listed: false, thisDevice: false })).toContain("Confirmed by your devices. Last change 3 Nov.Your planner");
+  });
+
+  it("never shows a device name the server sent: the report carries none, and so nothing names a device", async () => {
+    const withName = { id: "d2", listed: true, thisDevice: false, name: "Evil Mac" } as unknown as ProtectionReport["signer"];
+    expect(await text(withName)).not.toContain("Evil Mac");
+    cleanup();
+    read.mockResolvedValue(report({ signer: withName, stopped: "untrusted_signer", state: "provisional" }));
+    render(<ProtectionSettings />);
+    await userEvent.click(within(await card()).getByRole("button", { name: "Details" }));
+    expect(screen.getByRole("dialog", { name: "Protection details" })).not.toHaveTextContent("Evil Mac");
+  });
+});
+
+describe("the protection choices", () => {
+  it("are a radio group; the arrow keys go nowhere, because Advanced is not available, and Standard stays checked and focusable", async () => {
+    read.mockResolvedValue(report({}));
+    render(<ProtectionSettings />);
+    const group = await card();
+    expect(group).toHaveAttribute("role", "radiogroup");
+    const standard = within(group).getByRole("radio", { name: "Standard protection" });
+    const advanced = within(group).getByRole("radio", { name: "Advanced protection" });
+    standard.focus();
+    for (const key of ["{ArrowDown}", "{ArrowUp}", "{ArrowRight}", "{ArrowLeft}"]) {
+      await userEvent.keyboard(key);
+      expect(standard).toHaveAttribute("aria-checked", "true");
+      expect(advanced).toHaveAttribute("aria-checked", "false");
+      expect(standard).toHaveFocus();
+    }
   });
 });
 
@@ -142,7 +178,7 @@ describe("the other cards", () => {
     cleanup();
     read.mockResolvedValue(report({}));
     render(<ProtectionSettings />);
-    expect(await card()).toHaveTextContent("Confirmed by your devices. Last change 3 Nov on MacBook Air."); // the date from the verified head, the name from the device list
+    expect(await card()).toHaveTextContent("Confirmed by your devices. Last change 3 Nov."); // another device signed it: no name, whatever the server calls it
     expect(await card()).toHaveTextContent("Your planner is encrypted on your devices. Right now only your trusted devices hold your keys, and Orbyn holds no copy of them. Standard’s recovery copy, account recovery and server push and email reminders are Planned, and so is Advanced protection.");
   });
 });
@@ -236,7 +272,7 @@ describe("a conflict in Confirm", () => {
 
 describe("a signer the account doesn't list", () => {
   it("has its own card with Review devices first, and the matching reason in Details", async () => {
-    read.mockResolvedValue(report({ state: "provisional", stopped: "untrusted_signer", signer: { id: "d9", name: null, thisDevice: false } }));
+    read.mockResolvedValue(report({ state: "provisional", stopped: "untrusted_signer", signer: { id: "d9", listed: false, thisDevice: false } }));
     const review = vi.fn();
     render(<ProtectionSettings onReviewDevices={review} />);
     const c = await card();

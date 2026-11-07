@@ -32,7 +32,7 @@ function kindOf(report: ProtectionReport): Kind {
   if (report.problem === "rollback") return "rollback";
   if (report.problem === "fork") return "fork";
   // A signer the account doesn't list at all, or one it lists that this browser doesn't know.
-  if (report.stopped === "untrusted_signer") return report.signer?.name ? "unknownDevice" : "unlisted";
+  if (report.stopped === "untrusted_signer") return report.signer?.listed ? "unknownDevice" : "unlisted";
   if (report.stopped === "invalid_signature") return "badSignature";
   if (report.stopped === "gap") return "gap";
   if (report.stopped === "invalid") return "invalid";
@@ -75,7 +75,6 @@ function ConfirmDialog({ report, changedNow, onClose, onNotNow, onDone, onConfli
   const [error, setError] = useState<string | null>(null);
   const head = report.head;
   const level: ProtectionLevel = head?.level ?? "standard";
-  const setBy = report.signer?.name ?? "another device";
   const [openedAt] = useState(() => Date.now() / 1000);
   const sign = async () => {
     if (!auth.session) return;
@@ -110,7 +109,7 @@ function ConfirmDialog({ report, changedNow, onClose, onNotNow, onDone, onConfli
             <>Your account uses <b style={{ fontWeight: "var(--fw-medium)" }}>Advanced protection</b>: only your devices hold the keys. Confirming lets this browser check every later change.</>
           )}
         </p>
-        {head && <div className="kv"><span>Set on</span><b>{setBy} · {openedAt - secsOf(head) < 60 ? "just now" : day(secsOf(head))}</b></div>}
+        {head && <div className="kv"><span>Set on</span><b>{changedNow ? "Another device" : "A device in your list"} · {openedAt - secsOf(head) < 60 ? "just now" : day(secsOf(head))}</b></div>}
         <div className="dialog-actions">
           <button type="button" className="ghost" data-autofocus disabled={busy} onClick={onNotNow}>Not now</button>
           <BusyButton className="btn" busy={busy} idle={head ? "Confirm" : "Set Standard protection"} working="Confirming…" onClick={() => void sign()} />
@@ -129,7 +128,7 @@ function DetailsDialog({ report, kind, confirmed, onClose, onReviewDevices }: { 
   if (report.head) {
     rows.push(["Newest setting on the server", `${levelName(report.head.level)} · change ${report.head.seq}`]);
     const at = new Date(secsOf(report.head) * 1000);
-    rows.push(["Signed by", `${report.signer?.name ?? "A device this account doesn’t list"} · ${at.getDate()} ${MONTHS[at.getMonth()]!.slice(0, 3)} ${formatTime(at)}`]);
+    rows.push(["Signed by", `${report.signer?.listed ? "A device in your list" : "A device this account doesn’t list"} · ${at.getDate()} ${MONTHS[at.getMonth()]!.slice(0, 3)} ${formatTime(at)}`]);
   }
   if (confirmed) rows.push(["Last confirmed on this browser", `${levelName(confirmed.level)} · change ${confirmed.seq} · ${day(confirmed.at)}`]);
   const copy = () => void navigator.clipboard?.writeText(rows.map(([k, v]) => `${k}: ${v}`).join("\n")).catch(() => undefined);
@@ -248,7 +247,7 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
       {changed && report?.head && (
         <div className="banner" role="status" style={{ marginBottom: "var(--sp-8)" }}>
           <Icon name="info" small />
-          <span>Protection was changed to {levelName(report.head.level)} on <b style={{ fontWeight: "var(--fw-medium)" }}>{changed.name ?? "another device"} · {when(changed.at, now)}</b></span>
+          <span>Protection was changed to {levelName(report.head.level)} on <b style={{ fontWeight: "var(--fw-medium)" }}>another device · {when(changed.at, now)}</b></span>
           <div className="end">
             <button type="button" className="ghost sm" onClick={() => setDetails(true)}>Review</button>
             <button type="button" className="ghost sm" onClick={() => { writeSeen(accountId, changed.seq); setDismissed(changed.seq); }}>Dismiss</button>
@@ -285,7 +284,8 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
             </div>
             <span className="t2 pv-text">
               Confirmed by your devices.
-              {report.head && ` Last change ${day(secsOf(report.head))}${report.signer?.name ? ` on ${report.signer.name}` : ""}.`}
+              {/* "on this device" only when the signed record says this device signed it; no name from the server is ever shown. */}
+              {report.head && ` Last change ${day(secsOf(report.head))}${report.signer?.thisDevice ? " on this device" : ""}.`}
               {report.level === "standard" && <><br /><span className="t3">Your planner is encrypted on your devices. Right now only your trusted devices hold your keys, and Orbyn holds no copy of them. Standard’s recovery copy, account recovery and server push and email reminders are <Planned />, and so is Advanced protection.</span></>}
             </span>
           </>
@@ -366,7 +366,7 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
               const kind = next ? kindOf(next) : null;
               if (next && (kind === "confirming" || kind === "unset")) {
                 setChoosing(true);
-                setChangedNow(next.signer?.name ?? "another device");
+                setChangedNow("another device"); // another device signed it; no name is shown, because nothing signs one
               } else {
                 setChoosing(false);
                 setConfirmOpen(false);

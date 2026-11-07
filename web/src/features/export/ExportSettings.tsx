@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useNow } from "../../app/clock";
 import { useStore } from "../../store/context";
 import { Icon } from "../../components/Icon";
@@ -9,6 +9,9 @@ import { exportJson } from "./exportJson";
 import { saveFile } from "./save";
 
 const stamp = (d: Date) => d.toISOString().slice(0, 10);
+
+/** The warning in the dialog, while it exports and when it is done: one string, so the three states cannot differ. */
+export const EXPORT_WARNING = "The exported file isn’t encrypted. Anyone who gets it can read it, including the addresses of calendars you subscribe to, which can be private links. Keep it somewhere safe.";
 
 type Kind = "json" | "ics";
 type Step = { name: "choose" } | { name: "busy" } | { name: "done"; file: string; size: number } | { name: "failed" };
@@ -33,9 +36,15 @@ export function ExportSettings({ children }: { children?: ReactNode }) {
   const close = () => {
     setOpen(false);
     setStep({ name: "choose" });
-    // Done and Cancel return focus to the button that opened the dialog.
-    setTimeout(() => document.getElementById("export-planner")?.focus(), 0);
   };
+
+  // When the step changes the buttons change with it, and a real browser drops focus from a button that was disabled (the busy one):
+  // so focus goes to the new step's first choice, Try again after a failure and Done at the end. Closing returns focus to Export…
+  // on its own (useDialog).
+  useEffect(() => {
+    if (!open || step.name === "busy") return;
+    document.querySelector<HTMLElement>('[role="dialog"][aria-label="Export your data"] [data-autofocus]')?.focus();
+  }, [open, step.name]);
 
   const download = async () => {
     setStep({ name: "busy" });
@@ -88,7 +97,7 @@ export function ExportSettings({ children }: { children?: ReactNode }) {
             </div>
           )}
           {step.name !== "failed" && (
-            <p role="note" className="t3 small line"><span className="warn-icon"><Icon name="alert" small /></span>The exported file isn’t encrypted. Anyone who gets it can read it. Keep it somewhere safe.</p>
+            <p role="note" className="t3 small line"><span className="warn-icon"><Icon name="alert" small /></span>{EXPORT_WARNING}</p>
           )}
           <div className="dialog-actions">
             {step.name === "done" ? (
@@ -101,7 +110,8 @@ export function ExportSettings({ children }: { children?: ReactNode }) {
             ) : (
               <>
                 <button type="button" className="ghost" data-autofocus disabled={busy} onClick={close}>Cancel</button>
-                <button type="button" className="btn" disabled={busy} onClick={() => void download()}>
+                {/* aria-disabled, not disabled: a focused button that becomes disabled loses focus in a browser. */}
+                <button type="button" className="btn" aria-disabled={busy || undefined} onClick={() => !busy && void download()}>
                   {busy ? <><span className="spin" aria-hidden="true" />Exporting…</> : "Export"}
                 </button>
               </>

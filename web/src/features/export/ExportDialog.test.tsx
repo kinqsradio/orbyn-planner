@@ -5,7 +5,7 @@ import { ClockProvider } from "../../app/clock";
 import { StoreProvider } from "../../store/context";
 import { LocalStore } from "../../store/LocalStore";
 import { MemoryPersistence } from "../../store/persistence";
-import { ExportSettings } from "./ExportSettings";
+import { EXPORT_WARNING, ExportSettings } from "./ExportSettings";
 
 const save = vi.fn();
 vi.mock("./save", () => ({ saveFile: (...a: unknown[]) => save(...a) }));
@@ -47,7 +47,10 @@ describe("the export dialog", () => {
     const dialog = await open();
     await userEvent.click(within(dialog).getByRole("button", { name: "Export" }));
     const busy = within(dialog).getByRole("button", { name: "Exporting…" });
-    expect(busy).toBeDisabled();
+    expect(busy).toHaveAttribute("aria-disabled", "true"); // not `disabled`: a disabled focused button loses focus in a browser
+    expect(busy).not.toBeDisabled();
+    await userEvent.click(busy);
+    expect(save).toHaveBeenCalledTimes(1); // pressing it again does nothing
     expect(busy.querySelector(".spin")).not.toBeNull();
     expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeDisabled();
     for (const radio of within(dialog).getAllByRole("radio")) expect(radio).toBeDisabled();
@@ -68,6 +71,40 @@ describe("the export dialog", () => {
     await userEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     await waitFor(() => expect(screen.getByRole("button", { name: "Export…" })).toHaveFocus()); // focus returns to Export…
+  });
+
+  it("the same warning, in full, shows in the dialog, while it exports and when it is done, and not after a failure", async () => {
+    expect(EXPORT_WARNING).toBe("The exported file isn’t encrypted. Anyone who gets it can read it, including the addresses of calendars you subscribe to, which can be private links. Keep it somewhere safe.");
+    let finish: (v: boolean) => void = () => undefined;
+    save.mockReturnValueOnce(new Promise<boolean>((r) => (finish = r)));
+    const dialog = await open();
+    expect(within(dialog).getByRole("note")).toHaveTextContent(EXPORT_WARNING);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Export" }));
+    expect(within(dialog).getByRole("note")).toHaveTextContent(EXPORT_WARNING);
+    await act(async () => finish(true));
+    expect(await screen.findByRole("note")).toHaveTextContent(EXPORT_WARNING);
+  });
+
+  it("a failure hides the warning", async () => {
+    save.mockRejectedValueOnce(new Error("disk"));
+    const dialog = await open();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Export" }));
+    await within(dialog).findByRole("alert");
+    expect(screen.queryByRole("note")).toBeNull();
+  });
+
+  it("focus follows the step even when the browser dropped it: Try again after a failure, Done at the end", async () => {
+    let fail: (e: Error) => void = () => undefined;
+    save.mockReturnValueOnce(new Promise<boolean>((_r, rej) => (fail = rej)));
+    const dialog = await open();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Export" }));
+    (document.activeElement as HTMLElement).blur(); // what a browser does to a focused button that has become disabled
+    await act(async () => fail(new Error("disk")));
+    await waitFor(() => expect(within(screen.getByRole("dialog")).getByRole("button", { name: "Try again" })).toHaveFocus());
+    save.mockResolvedValueOnce(true);
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Try again" }));
+    (document.activeElement as HTMLElement).blur();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Done" })).toHaveFocus());
   });
 
   it("the calendar file is named by its date and ends in .ics", async () => {

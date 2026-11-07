@@ -1649,7 +1649,8 @@ describe("the protection level", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Account" }));
     await userEvent.click(await screen.findByRole("button", { name: "Privacy" }));
     const note = await screen.findByText(/Protection was changed to Standard on/);
-    expect(note).toHaveTextContent(phone.name);
+    expect(note).toHaveTextContent("on another device"); // never the name the device list gives it
+    expect(note).not.toHaveTextContent(phone.name);
     expect(screen.getByRole("button", { name: "Review" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(screen.queryByText(/Protection was changed to/)).toBeNull();
