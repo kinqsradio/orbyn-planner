@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, configure } from "@testing-library/react";
+import { cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach } from "vitest";
 
@@ -18,8 +18,3 @@ afterEach(() => {
   if (typeof localStorage !== "undefined") localStorage.clear();
   if (typeof document !== "undefined") document.documentElement.removeAttribute("data-theme");
 });
-
-// `getByRole` checks, for every element, whether it is hidden from the accessibility tree, which means computing styles up the whole
-// tree: most of what a UI test spends when the machine is busy. Roles are matched on the elements as they are; the few tests that
-// care about hidden content say so (`hidden: false`).
-configure({ defaultHidden: true });
