@@ -302,6 +302,13 @@ jobs:
           ref: ${{ steps.pin.outputs.engine }}
           path: engine
           persist-credentials: false
+      # The mailbox's TLS certificate and the CA the worker trusts for it: made here, per run, never committed.
+      - name: Make the test mailbox's certificates
+        if: env.RUN == 'true'
+        working-directory: .
+        run: |
+          .github/e2e-mail-certs.sh "$RUNNER_TEMP/e2e-certs"
+          echo "E2E_CERTS_DIR=$RUNNER_TEMP/e2e-certs" >> "$GITHUB_ENV"
       # The engine image is the pinned commit built once: the saved image is cached by that commit, so a run that doesn't move the
       # pin loads it (seconds) instead of building it (about 2.5 minutes).
       - id: image

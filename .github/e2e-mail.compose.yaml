@@ -1,16 +1,30 @@
 # Added to the engine's compose file for the end-to-end job: a mailbox the worker sends to (Mailpit), so the tests can read the
 # six-digit code a sign-up mails. Sign-up needs it: no account exists until the code is entered.
+#
+# The worker sends mail only over TLS and trusts public CAs only. So Mailpit presents a certificate for `mailpit` signed by a test CA,
+# and the worker trusts that CA (ORBYN_SMTP_CA_FILE) with TLS still required. The certificates are made at setup time by
+# .github/e2e-mail-certs.sh into E2E_CERTS_DIR (not committed); the job and a local run both set it.
 services:
   mailpit:
     image: axllent/mailpit@sha256:757f22b56c1da03570afdb3d259effe5091018008a81bbedc8158cee7e16fdbc # v1.29
     ports:
       - "127.0.0.1:8025:8025"
+    environment:
+      MP_SMTP_TLS_CERT: /certs/mailpit.pem
+      MP_SMTP_TLS_KEY: /certs/mailpit.key
+      # STARTTLS is offered and required, so a client that does not use it is refused, as the worker would not send.
+      MP_SMTP_REQUIRE_STARTTLS: "true"
+    volumes:
+      - ${E2E_CERTS_DIR:?set E2E_CERTS_DIR to the directory .github/e2e-mail-certs.sh wrote}:/certs:ro
   worker:
     environment:
       # The worker opens the queued message with the same setup as the server.
       ORBYN_AUTH_SETUP: ${ORBYN_AUTH_SETUP:-}
-      ORBYN_SMTP_URL: smtp://mailpit:1025
+      ORBYN_SMTP_URL: smtp://mailpit:1025?tls=required
+      ORBYN_SMTP_CA_FILE: /certs/ca.pem
       ORBYN_MAIL_FROM: Orbyn <no-reply@example.com>
+    volumes:
+      - ${E2E_CERTS_DIR:?set E2E_CERTS_DIR to the directory .github/e2e-mail-certs.sh wrote}:/certs:ro
     depends_on:
       mailpit:
         condition: service_started
