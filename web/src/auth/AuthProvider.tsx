@@ -3,6 +3,7 @@ import type { StoredSession } from "../api/keyStore";
 import { setSessionToken } from "../api/session";
 import { closePlanner, removeAccountPlanner } from "../store/planners";
 import { signOut as signOutFlow } from "./flows";
+import { forgetProtectionNotice } from "./protectionNotice";
 import type { AuthServices } from "./services";
 
 export type AuthStatus =
@@ -121,6 +122,7 @@ export function AuthProvider({ services, children }: { services: AuthServices | 
         } catch (e) {
           setProblem(e instanceof Error ? e.message : "Signing out didn’t finish.");
         }
+        if (accountId) forgetProtectionNotice(accountId);
         // The app is on the device-only planner now. This account's stays on disk or goes, as the person chose.
         if (accountId) {
           if (options?.removePlanner) await removeAccountPlanner(accountId).catch(() => setProblem("Signed out, but this account’s planner couldn’t be removed from this browser."));

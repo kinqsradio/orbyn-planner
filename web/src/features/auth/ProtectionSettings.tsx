@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiFailure } from "../../api/auth";
 import { useAuth } from "../../auth/AuthProvider";
+import { changedKey, seenKey } from "../../auth/protectionNotice";
 import { confirmProtection, readProtection, type ProtectionReport } from "../../auth/flows";
 import type { ProtectionLevel } from "../../generated/ProtectionLevel";
 import { Modal } from "../../components/Modal";
@@ -22,8 +23,6 @@ function reasonOf(report: ProtectionReport): string {
   return "This device hasn’t verified the newest setting yet.";
 }
 
-const seenKey = (accountId: string) => `orbyn-planner.protection-changed.${accountId}`;
-
 /** The "changed on another device" notice outlives the screen until it is dismissed: it is kept for the sequence it was about. */
 function readSeen(accountId: string): number {
   try {
@@ -39,7 +38,6 @@ function writeSeen(accountId: string, seq: number) {
     // Not remembered across visits; fine.
   }
 }
-const changedKey = (accountId: string) => `orbyn-planner.protection-changed-by.${accountId}`;
 
 function ConfirmDialog({ report, onClose, onDone, onConflict }: { report: ProtectionReport; onClose: () => void; onDone: () => void; onConflict: () => void }) {
   const auth = useAuth()!;
@@ -156,7 +154,8 @@ export function ProtectionSettings() {
   } catch {
     changed = null;
   }
-  const showChanged = changed !== null && report?.head?.seq === changed.seq && changed.seq > Math.max(readSeen(accountId), dismissed);
+  // Only a setting this device verified may name a device: a fork or an unverified head names no one.
+  const showChanged = changed !== null && report?.state === "verified" && report.seq === changed.seq && changed.seq > Math.max(readSeen(accountId), dismissed);
   const verified = report?.state === "verified";
 
   return (
@@ -187,7 +186,8 @@ export function ProtectionSettings() {
             {report.state === "provisional" && report.level && (
               <span className="t3 small">The last setting this device verified is {report.level === "standard" ? "Standard" : "Advanced"}, but it may not be the newest, so nothing relies on it.</span>
             )}
-            <div><button type="button" className="ghost" onClick={() => setConfirming(true)}>Confirm protection level</button></div>
+            {/* After a rollback or a fork there is no head this device could sign after, so there is nothing to confirm yet. */}
+            {!report.problem && <div><button type="button" className="ghost" onClick={() => setConfirming(true)}>Confirm protection level</button></div>}
           </>
         )}
         {showChanged && changed && (

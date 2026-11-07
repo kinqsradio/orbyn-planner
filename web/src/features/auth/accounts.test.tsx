@@ -1,6 +1,7 @@
 import { sessionToken } from "../../api/session";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../../app/App";
 import { ClockProvider } from "../../app/clock";
@@ -47,19 +48,19 @@ function services(keys: KeyStore = createMemoryKeyStore(), useRealCrypto = false
   });
 }
 
-async function mount(auth: AuthServices, path = "/today") {
+async function mount(auth: AuthServices, path = "/today", strict = false) {
   window.history.replaceState(null, "", path);
   const store = new LocalStore({ persistence: new MemoryPersistence(), now: () => NOW, broadcast: false });
   await store.ready;
   const root = document.createElement("div");
   root.id = "root";
   document.body.appendChild(root);
-  const view = render(
+  const app = (
     <ClockProvider value={() => NOW}>
       <App store={store} auth={auth} />
-    </ClockProvider>,
-    { container: root },
+    </ClockProvider>
   );
+  const view = render(strict ? <StrictMode>{app}</StrictMode> : app, { container: root });
   return {
     root,
     unmount: () => {
@@ -683,6 +684,18 @@ describe("signing out", () => {
     return auth;
   }
 
+  it("signing out removes what the protection notice kept about the account and another device", async () => {
+    const auth = await signedIn();
+    const accountId = auth.tokens.getSession()!.accountId;
+    localStorage.setItem(`orbyn-planner.protection-changed.${accountId}`, "2");
+    localStorage.setItem(`orbyn-planner.protection-changed-by.${accountId}`, JSON.stringify({ seq: 2, name: "Sam’s iPhone" }));
+    await openAccount();
+    await userEvent.click(await screen.findByRole("button", { name: "Sign out" }));
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Sign out" })).getByRole("button", { name: "Keep on this browser" }));
+    await screen.findByRole("heading", { name: /Your tasks and calendar/ });
+    expect(Object.keys(localStorage).filter((k) => k.includes(accountId))).toEqual([]);
+  });
+
   it("Sign out ends the session on the server and here, and shows the landing page", async () => {
     const auth = await signedIn();
     await openAccount();
@@ -802,9 +815,9 @@ describe("signing out", () => {
 });
 
 describe("email verification at sign-up", () => {
-  async function toCodeStep(keys = createMemoryKeyStore()) {
+  async function toCodeStep(keys = createMemoryKeyStore(), strict = false) {
     const auth = services(keys);
-    await mount(auth);
+    await mount(auth, "/today", strict);
     await userEvent.click(await screen.findByRole("button", { name: "Get started" }));
     await userEvent.type(screen.getByLabelText("Name"), SAM.name);
     await userEvent.type(screen.getByLabelText("Email"), SAM.email);
@@ -838,6 +851,15 @@ describe("email verification at sign-up", () => {
     expect(await keys.loadKeys()).not.toBeNull();
   });
 
+  it("in React's development check, which mounts the screen twice, the right code still signs up", async () => {
+    const { auth, keys } = await toCodeStep(createMemoryKeyStore(), true);
+    await userEvent.type(screen.getByLabelText("Code"), engine.latestEmailCode(SAM.email)!);
+    await userEvent.click(screen.getByRole("button", { name: "Verify" }));
+    await todayShown();
+    expect(auth.tokens.getSession()?.deviceState).toBe("trusted");
+    expect(await keys.loadKeys()).not.toBeNull();
+  });
+
   it("a new code can be asked for a minute after the last one, three times an hour, and the old code stops working", async () => {
     await toCodeStep();
     const resend = () => screen.getByRole("button", { name: /Send a new code/ });
@@ -863,6 +885,7 @@ describe("email verification at sign-up", () => {
     await userEvent.click(screen.getByRole("button", { name: "Use a different email" }));
     expect(screen.getByRole("form", { name: "Create your account" })).toBeInTheDocument();
     expect(screen.getByLabelText("Email")).toHaveValue(SAM.email); // kept, to correct
+    expect(screen.getByLabelText("Password")).toHaveValue(""); // the password was not kept in the page while the code was awaited
     expect(await keys.loadKeys()).toBeNull();
     expect(await keys.loadSnapshot()).toBeNull();
   });
@@ -1003,6 +1026,7 @@ describe("the protection level", () => {
     expect(await within(card).findByText("Your protection level can’t be confirmed on this device")).toBeInTheDocument();
     expect(card).toHaveTextContent("older setting than this device had already verified");
     expect(within(card).queryByText("Standard protection")).toBeNull();
+    expect(within(card).queryByRole("button", { name: "Confirm protection level" })).toBeNull(); // there is no head to sign after
 
     // Or a different setting at sequence 2.
     account.protection = [good[0]!, { ...good[1]!, level: "advanced" }];
@@ -1010,6 +1034,8 @@ describe("the protection level", () => {
     await reopen();
     expect(await within(await screen.findByLabelText("Protection")).findByText(/different setting than the one this device had already verified/)).toBeInTheDocument();
     expect(within(screen.getByLabelText("Protection")).queryByText("Standard protection")).toBeNull();
+    expect(within(screen.getByLabelText("Protection")).queryByRole("button", { name: "Confirm protection level" })).toBeNull();
+    expect(screen.queryByText(/Protection was changed on/)).toBeNull(); // a fork names no device
   });
 
   it("a conflict in Confirm protection level shows the new state and the person chooses again, after the new head", async () => {

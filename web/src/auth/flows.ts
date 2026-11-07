@@ -193,17 +193,19 @@ export interface ProtectionReport {
 }
 
 /** Walks the server's chain page by page into the engine. Throws the engine's `protection_rollback` or `protection_fork`. */
-async function walkProtection(services: AuthServices, engine: ApprovalEngine, devices: DeviceList): Promise<{ head: ProtectionLink | null }> {
+async function walkProtection(services: AuthServices, engine: ApprovalEngine, devices: DeviceList): Promise<{ head: ProtectionLink | null; stopped: ProtectionReport["stopped"] }> {
   let from = engine.protection.from();
   let head: ProtectionLink | null = null;
+  let stopped: ProtectionReport["stopped"] = null;
   for (let page = 0; page < 100; page++) {
     const chain = await services.api.protectionChain(from);
     head = chain.links.at(-1) ?? head;
-    engine.protection.verify(chain, devices);
+    // `stopped` is only in what verifying returns, never in what the engine reports afterwards: the last page says why the walk ended.
+    stopped = engine.protection.verify(chain, devices).stopped ?? null;
     if (!chain.more || chain.links.length === 0) break;
     from = chain.links[chain.links.length - 1]!.seq + 1;
   }
-  return { head };
+  return { head, stopped };
 }
 
 /** Reads the server's protection chain and verifies it on this device. Never signs anything. */
@@ -214,8 +216,9 @@ export async function readProtection(services: AuthServices, session: StoredSess
     const before = engine.protection.level();
     let head: ProtectionLink | null = null;
     let problem: ProtectionReport["problem"] = null;
+    let stopped: ProtectionReport["stopped"] = null;
     try {
-      head = (await walkProtection(services, engine, devices)).head;
+      ({ head, stopped } = await walkProtection(services, engine, devices));
     } catch (e) {
       const code = e instanceof Error ? e.message.split(":")[0] : "";
       if (code === "protection_rollback") problem = "rollback";
@@ -231,7 +234,7 @@ export async function readProtection(services: AuthServices, session: StoredSess
       seq: now.seq,
       state,
       level: now.level ?? null,
-      stopped: now.stopped ?? null,
+      stopped,
       problem,
       head,
       signer,

@@ -111,6 +111,7 @@ describe("the signed protection setting", () => {
     expect(report.head?.seq).toBe(1);
     expect(report.signer).toMatchObject({ thisDevice: false });
     // The second device pins the first only through a recorded approval it can verify: with none it stops, and says why.
-    expect(["verified", "provisional", "unknown"]).toContain(report.state);
+    expect(report.state).not.toBe("verified");
+    expect(report.stopped).toBe("untrusted_signer");
   });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ApiFailure } from "../../api/auth";
 import { SignInUnavailable } from "../../api/authCrypto";
 import { Icon } from "../../components/Icon";
@@ -50,8 +50,18 @@ function CheckEmail({ pending, onBack, onDone }: { pending: PendingSignUp; onBac
   const [resends, setResends] = useState<number[]>([]);
   const [, tick] = useState(0);
 
-  // Leaving this screen, or closing the page, lets the sign-up go: its keys were only ever in memory.
-  useEffect(() => () => pending.cancel(), [pending]);
+  // Leaving this screen lets the sign-up go: its keys were only ever in memory. React's development check unmounts and mounts a
+  // screen at once to test this very cleanup, so the sign-up is let go only if no mount follows straight after.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      setTimeout(() => {
+        if (!mounted.current) pending.cancel();
+      }, 0);
+    };
+  }, [pending]);
   // The countdown on "Send a new code".
   useEffect(() => {
     const id = setInterval(() => tick((n) => n + 1), 1000);
