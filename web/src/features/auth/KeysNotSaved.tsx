@@ -254,7 +254,7 @@ export function KeysNotSaved() {
           {!failed && approve}
         </div>
         {failed && <small className="err" role="alert">Still couldn’t save. This browser may not allow it. Approve another device from this tab instead.</small>}
-        <span className="t4 small">Approving a device you already use gives it the keys while this tab is still open. It uses the same matching digits as Add a device.</span>
+        <span className="t3 small">Approving a device you already use gives it the keys while this tab is still open. It uses the same matching digits as Add a device.</span>
       </div>
       {approving && <ApproveFromTab onClose={() => setApproving(false)} onApproved={(d) => { setApproving(false); setApprovedOn(d.name); }} />}
     </div>

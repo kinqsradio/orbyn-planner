@@ -76,7 +76,7 @@ button { cursor: pointer; }
   background: var(--raise); color: var(--t2); font-size: var(--fs-12-5);
 }
 .mono { font-family: var(--mono); font-size: var(--fs-11-5); }
-.t2 { color: var(--t2); } .t3 { color: var(--t3); } .t4 { color: var(--t4); }
+.t2 { color: var(--t2); } .t3 { color: var(--t3); } /* --t4 is for icons, borders and dividers, never text: text is t1 to t3 */
 
 .pillx {
   display: inline-flex; align-items: center; gap: var(--sp-6); height: var(--sp-22); padding: 0 var(--sp-9); border-radius: var(--r-pill);
@@ -236,7 +236,7 @@ button.pill { border: 0; }
 .tbl > .tr:last-child { border-bottom: var(--bw) solid var(--line); }
 .tr .tt { color: var(--t1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tr.done .tt, .row.done .what, .tcard[data-done="true"] .tt, .step-row[data-done="true"] .what {
-  color: var(--t4); text-decoration: line-through; text-decoration-color: var(--line2);
+  color: var(--t3); text-decoration: line-through; text-decoration-color: var(--line2);
 }
 .tag { display: inline-flex; align-items: center; gap: var(--sp-6); font-size: var(--fs-12); color: var(--t2); }
 .due { font-size: var(--fs-12); color: var(--t3); }
@@ -386,7 +386,7 @@ button.pillx { border: 0; }
 .md:nth-child(7n) { border-right: var(--bw) solid var(--line); }
 .md .n { color: var(--t3); align-self: flex-start; background: none; border: 0; padding: 0; font-size: var(--fs-11-5); }
 .md.today .n { display: inline-grid; place-items: center; width: var(--sp-20); height: var(--sp-20); border-radius: var(--r-pill); background: var(--btn); color: var(--btnt); }
-.md.out .n { color: var(--t4); }
+.md.out .n { color: var(--t3); }
 .more-link { color: var(--t3); background: none; border: 0; padding: 0; text-align: left; font-size: var(--fs-11-5); }
 .ph .acts .ghost.icon { padding: 0; width: var(--sp-30); justify-content: center; }
 .modal-back .authcard.wide { width: var(--sp-520); }
@@ -566,7 +566,7 @@ button.pillx { border: 0; }
 .spin.still { animation: none; width: var(--sp-16); height: var(--sp-16); }
 .deleted-card { width: var(--sp-440); max-width: 100%; text-align: left; align-items: stretch; }
 .deleted-card .line { display: flex; gap: var(--sp-8); align-items: center; }
-.deleted-card .t4.small { font-size: var(--fs-12); }
+.deleted-card .t3.small { font-size: var(--fs-12); }
 .deleted-card .pv-row { display: flex; gap: var(--sp-8); flex-wrap: wrap; }
 .deleted-card .ghost.red { color: var(--red); }
 .prog { height: var(--sp-6); border-radius: var(--r-pill); background: var(--line2); overflow: hidden; }

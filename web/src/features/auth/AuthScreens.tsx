@@ -179,7 +179,7 @@ export function NoMemory() {
           {appsAvailable() && <Icon name="down" small />}
           {appsAvailable() ? "Install the Orbyn app" : "See the Orbyn apps"}
         </a>
-        {!appsAvailable() && <span className="t4 small pv-helper">The apps aren’t out yet. This page lists what’s being built.</span>}
+        {!appsAvailable() && <span className="t3 small pv-helper">The apps aren’t out yet. This page lists what’s being built.</span>}
         <button
           type="button"
           className="ghost lg"
@@ -191,7 +191,7 @@ export function NoMemory() {
           Copy this page’s address
         </button>
       </div>
-      <span className="t4 small">Your email wasn’t verified or saved, so you can start again in another browser.</span>
+      <span className="t3 small">Your email wasn’t verified or saved, so you can start again in another browser.</span>
     </div>
   );
 }

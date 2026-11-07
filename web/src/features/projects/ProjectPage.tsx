@@ -242,7 +242,7 @@ function CalendarTab({ project }: { project: Project }) {
             <div className={cls} role="gridcell" key={day} data-day={day}>
               <span className="n">{date.getDate()}</span>
               {here.map((t) => (
-                <button key={t.id} type="button" className="chipx" data-row-id={t.id} style={t.done ? { textDecoration: "line-through", color: "var(--t4)" } : undefined} onClick={() => open(t.id)}>
+                <button key={t.id} type="button" className="chipx" data-row-id={t.id} style={t.done ? { textDecoration: "line-through", color: "var(--t3)" } : undefined} onClick={() => open(t.id)}>
                   <Swatch colour={project.colour} />
                   {t.title}
                 </button>

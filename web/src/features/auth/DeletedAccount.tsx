@@ -90,7 +90,7 @@ export function DeletedAccountScreen({ account, services, onLeave }: { account: 
     onLeave(to);
   };
 
-  const note = <span className="t4 small">Removing it deletes this browser’s copy for good.</span>;
+  const note = <span className="t3 small">Removing it deletes this browser’s copy for good.</span>;
   const exportIcon = <><Icon name="download" small />Export what’s on this browser</>;
   const removeButton = (className: string, idle = "Remove it now", focus = false) => (
     <BusyButton className={className} data-autofocus={focus || undefined} busy={working === "remove"} disabled={working !== null} idle={idle} working="Removing…" onClick={() => void removeCopy()} />
@@ -145,7 +145,7 @@ export function DeletedAccountScreen({ account, services, onLeave }: { account: 
           <span className="t2">{who}. Its data can’t be restored.</span>
           <span className="t3 small line" role="status"><span className="spin" aria-hidden="true" />Removing its copy from this browser</span>
           <div className="prog blue" aria-hidden="true"><i style={{ width: "55%" }} /></div>
-          <span className="t4 small">This takes a moment. Nothing else opens until it’s done.</span>
+          <span className="t3 small">This takes a moment. Nothing else opens until it’s done.</span>
         </>
       );
       break;
