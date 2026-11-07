@@ -1365,20 +1365,20 @@ describe("email verification at sign-up", () => {
   it("a new code can be asked for a minute after the last one, three times an hour, and the old code stops working", async () => {
     await toCodeStep();
     expect(screen.getByText(/Send a new code in 1:00/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Resend the code" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Send a new code" })).toBeNull();
     const first = engine.latestEmailCode(SAM.email)!;
     for (let i = 1; i <= 3; i++) {
       nowMs += 61_000;
-      const resend = await screen.findByRole("button", { name: "Resend the code" }, { timeout: 3000 });
-      expect(resend).toHaveClass("ghost"); // Planner Designs v29: a ghost Resend the code
+      const resend = await screen.findByRole("button", { name: "Send a new code" }, { timeout: 3000 });
+      expect(resend).toHaveClass("link-btn"); // a link, as the designer decided after v29
       await userEvent.click(resend);
       await waitFor(() => expect(engine.latestEmailCode(SAM.email)).not.toBe(first));
       if (i < 3) await screen.findByText(/Send a new code in/);
     }
     // After the third the limit shows, in amber, with no wait: the code boxes stay usable.
     expect(await screen.findByText("You’ve asked for several codes. Try again later, or check your spam folder.")).toBeInTheDocument();
-    expect(screen.getByText("Send a new code · not available right now")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Resend the code" })).toBeNull();
+    expect(screen.queryByText(/not available right now/)).toBeNull(); // throttled: the banner says so, and there is nothing to press
+    expect(screen.queryByRole("button", { name: "Send a new code" })).toBeNull();
     await userEvent.type(screen.getByLabelText("Code"), first);
     await userEvent.click(screen.getByRole("button", { name: "Verify" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("That code isn’t right. Use the code in the newest email.");
@@ -1388,8 +1388,10 @@ describe("email verification at sign-up", () => {
     await toCodeStep();
     engine.refuseNext("/v1/accounts/email/resend", 429, "too_many_attempts");
     nowMs += 61_000;
-    await userEvent.click(await screen.findByRole("button", { name: "Resend the code" }, { timeout: 3000 }));
-    expect(await screen.findByText("You’ve asked for several codes. Try again later, or check your spam folder.")).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: "Send a new code" }, { timeout: 3000 }));
+    const banner = (await screen.findByText("You’ve asked for several codes. Try again later, or check your spam folder.")).closest(".banner")!;
+    expect(banner).toHaveClass("warn"); // the throttled state is a warn banner
+    expect(screen.queryByRole("button", { name: "Send a new code" })).toBeNull(); // with no resend action
     expect(screen.getByLabelText("Code")).toBeEnabled();
   });
 
@@ -1533,6 +1535,13 @@ describe("the protection level", () => {
     await privacy();
     const card = await screen.findByLabelText("Protection");
     expect(await within(card).findByText("Standard protection")).toBeInTheDocument();
+    expect(screen.getByText("Data protection", { selector: "b" })).toBeInTheDocument();
+    expect(card).not.toHaveTextContent(/recovery copy/i); // no claim about a recovery copy on the Standard card
+    expect(screen.queryByText("Access your planner on the web")).toBeNull(); // the Web card is only an Advanced preview
+    expect(card).toHaveTextContent("Web access under Advanced: off by default; each sign-in is approved on a trusted device and lasts one hour.");
+    expect(screen.getByText("Export your data")).toBeInTheDocument();
+    expect(screen.getByText("Planner as open files")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete account…" })).toHaveClass("red");
     expect(card).toHaveTextContent("Verified");
     // The two levels are a radio group: Standard checked and the one tab stop, Advanced Planned and disabled.
     expect(card).toHaveAttribute("role", "radiogroup");

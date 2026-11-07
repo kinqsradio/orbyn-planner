@@ -38,8 +38,8 @@ export function ExportSettings({ children }: { children?: ReactNode }) {
     <>
       <div className="bh"><b>Your data</b><span></span></div>
       <div className="card" style={{ gap: 0, padding: "0 var(--sp-14)" }}>
-        <div className="kv" style={{ height: "var(--sp-44)" }}>
-          <span>Export your planner</span>
+        <div className="kv" style={{ height: "auto", minHeight: "var(--sp-44)", padding: "var(--sp-6) 0" }}>
+          <span>Export your data<br /><span className="t3 fine">Planner as open files</span></span>
           <button type="button" id="export-planner" className="ghost" onClick={() => { setMessage(null); setOpen(true); }}>Export…</button>
         </div>
         {children}

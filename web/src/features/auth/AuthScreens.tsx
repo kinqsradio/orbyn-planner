@@ -151,12 +151,11 @@ function CheckEmail({ pending, onBack, onDone }: { pending: PendingSignUp; onBac
         </div>
       )}
       <BusyButton type="submit" className="btn lg" busy={busy} disabled={!ready} idle="Verify" working="Checking…" />
-      {limited ? (
-        <span className="t3 small">Send a new code · not available right now</span>
-      ) : wait > 0 ? (
+      {/* Throttled: the banner above says so and there is nothing to press. Otherwise a muted countdown, then the link. */}
+      {limited ? null : wait > 0 ? (
         <span className="t3 small">Send a new code in {seconds}</span>
       ) : (
-        <button type="button" className="ghost" onClick={() => void resend()}>Resend the code</button>
+        <button type="button" className="link-btn small" onClick={() => void resend()}>Send a new code</button>
       )}
       <span className="t3 small">
         Wrong address? <button type="button" className="link-btn link" onClick={onBack}>Change it</button>
