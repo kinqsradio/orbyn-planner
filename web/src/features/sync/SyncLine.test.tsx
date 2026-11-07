@@ -53,6 +53,16 @@ describe("SyncLine", () => {
     expect(screen.queryByText("Last synced")).toBeNull(); // never synced: nothing to say
   });
 
+  it("on a phone the offline pill reads waiting to sync", () => {
+    vi.stubGlobal("matchMedia", (q: string) => ({ matches: true, media: q, addEventListener: () => undefined, removeEventListener: () => undefined }));
+    try {
+      render(<SyncLine status={{ kind: "offline", waiting: 2 }} />);
+      expect(screen.getByRole("status")).toHaveTextContent("Offline · 2 changes waiting to sync");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("calls onRetry", async () => {
     const onRetry = vi.fn();
     render(<SyncLine status={{ kind: "error" }} onRetry={onRetry} />);

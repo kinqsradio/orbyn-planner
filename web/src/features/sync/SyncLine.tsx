@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { getHealth } from "../../api/engine";
 import { Icon } from "../../components/Icon";
+import { PHONE_QUERY, useMediaQuery } from "../../components/useMediaQuery";
 import { formatTime } from "../../lib/dates";
 import type { SyncState } from "../../sync/controller";
 
@@ -29,7 +30,9 @@ export interface WaitingChange {
 /** The offline pill; tapping it lists the changes that have not left this device. */
 function OfflinePill({ status, waiting }: { status: Extract<SyncStatus, { kind: "offline" }>; waiting: WaitingChange[] }) {
   const [open, setOpen] = useState(false);
-  const text = status.waiting === 0 ? "Offline" : `Offline · ${plural(status.waiting, "change", "changes")} waiting`;
+  const phone = useMediaQuery(PHONE_QUERY);
+  // On a phone the pill is a banner, and it says what is waiting for what (Planner Designs p-phone-offline).
+  const text = status.waiting === 0 ? "Offline" : `Offline · ${plural(status.waiting, "change", "changes")} waiting${phone ? " to sync" : ""}`;
   if (status.waiting === 0 || waiting.length === 0) {
     return (
       <p className="pillx offline" role="status">
