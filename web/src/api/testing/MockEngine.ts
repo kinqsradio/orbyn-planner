@@ -11,6 +11,8 @@ import { decodeBytes, encodeBytes, utf8 } from "../bytes";
 import {
   DEVICE_LOGIN_CONTEXT,
   DEVICE_REGISTER_CONTEXT,
+  TOTP_MANAGE_CONTEXT,
+  totpManageMessage,
   TRUSTED_START_CONTEXT,
   loginMessage,
   normalizeEmail,
@@ -36,7 +38,12 @@ interface Account {
   devices: Device[];
   removals?: Removal[];
   records?: MockRecords;
+  /** Two-factor, as the engine keeps it: a pending or enabled secret and the unused recovery codes. */
+  totp?: { enabled: boolean; recovery: string[] };
 }
+/** The mock's one-time code: any other six digits are wrong. Recovery codes are `RECOV-0000N`. */
+export const MOCK_TOTP_CODE = "123456";
+export const MOCK_TOTP_SECRET = "JBSWY3DPEHPK3PXP";
 interface Removal {
   device_id: string;
   signing_key: string;
@@ -73,12 +80,14 @@ export function createMockEngine(now: () => number = () => Date.now()) {
   const accounts = new Map<string, Account>();
   const sessions = new Map<string, { accountId: string; deviceId: string }>();
   const approvals = new Map<string, Approval>();
-  const logins = new Map<string, { email: string }>();
+  const logins = new Map<string, { email: string; trusted: boolean }>();
+  /** Sign-ins waiting for their second factor, with the wrong codes so far (five close one). */
+  const waiting = new Map<string, { email: string; device: LoginFinish["device"]; wrong: number }>();
   const calls: Call[] = [];
   const subscribers = new Set<(accountId: string, zone: string, token: string, author: string) => void>();
   /** Refuse the next calls to a path (or a path prefix) with this error: `refuseNext("/v1/sessions/login/start", 429, "too_many_attempts")`. */
   const refusals: { path: string; status: number; code: string; message: string; times: number }[] = [];
-  const state = { attemptsPerEmail: new Map<string, number>(), trustedProofs: 0 };
+  const state = { attemptsPerEmail: new Map<string, number>(), trustedProofs: 0, lastManage: new Map<string, number>() };
 
   const json = (status: number, body: unknown) => new Response(status === 204 ? null : JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   const fail = (status: number, code: string, message: string) => json(status, { code, message });
@@ -91,6 +100,27 @@ export function createMockEngine(now: () => number = () => Date.now()) {
     const device = account?.devices.find((d) => d.id === s.deviceId);
     return account && device ? { account, device } : null;
   }
+
+  /** The device of a sign-in joins the account (as pending, unless it is already known) and gets a session. */
+  const enterDevice = (account: Account, d: LoginFinish["device"]) => {
+    let device = account.devices.find((x) => x.signing_key === d.signing_key);
+    if (!device) {
+      device = {
+        id: uuid(), name: d.name, platform: d.platform, state: "pending", signing_key: d.signing_key,
+        agreement_key: d.agreement_key, created_at: new Date(now()).toISOString(), approved_by: null, approval_signature: null, current: false,
+      };
+      account.devices.push(device);
+    }
+    return createSession(account, device);
+  };
+
+  /** An unused recovery code works once. */
+  const spendRecovery = (account: Account, code: string) => {
+    const at = account.totp?.recovery.indexOf(code) ?? -1;
+    if (at < 0) return false;
+    account.totp!.recovery.splice(at, 1);
+    return true;
+  };
 
   const createSession = (account: Account, device: Device) => {
     const token = `token-${uuid()}`;
@@ -159,7 +189,7 @@ export function createMockEngine(now: () => number = () => Date.now()) {
         if (n > 10) return fail(429, "too_many_attempts", "Too many attempts.");
       }
       const loginId = uuid();
-      logins.set(loginId, { email });
+      logins.set(loginId, { email, trusted: provedTrusted });
       // An unknown email gets a made-up answer, so sign-in never says whether an account exists.
       const verifier = account?.verifier ?? new Uint8Array(32).fill(7);
       return json(200, { login_id: loginId, credential_response: encodeBytes(new Uint8Array([...utf8("fake-login-response:"), ...verifier])) });
@@ -176,15 +206,27 @@ export function createMockEngine(now: () => number = () => Date.now()) {
         return fail(400, "invalid_signature", "The signature is not valid.");
       }
       state.attemptsPerEmail.delete(login.email);
-      let device = account.devices.find((d) => d.signing_key === b.device.signing_key);
-      if (!device) {
-        device = {
-          id: uuid(), name: b.device.name, platform: b.device.platform, state: "pending", signing_key: b.device.signing_key,
-          agreement_key: b.device.agreement_key, created_at: new Date(now()).toISOString(), approved_by: null, approval_signature: null, current: false,
-        };
-        account.devices.push(device);
+      // Two-factor on, and the start wasn't proven by a trusted device: no session until a code comes.
+      if (account.totp?.enabled && !login.trusted) {
+        waiting.set(b.login_id, { email: login.email, device: b.device, wrong: 0 });
+        return json(401, { code: "second_factor_required", message: "Send the code from your authenticator app to finish signing in.", login_id: b.login_id });
       }
-      return json(200, createSession(account, device));
+      return json(200, enterDevice(account, b.device));
+    }
+
+    if (method === "POST" && path === "/v1/sessions/login/second-factor") {
+      const b = body as { login_id: string; code: string | null; recovery_code: string | null };
+      const pending = waiting.get(b.login_id);
+      const account = pending ? accounts.get(pending.email) : undefined;
+      if (!pending || !account?.totp) return fail(401, "login_failed", "Login failed.");
+      if ((b.code === null) === (b.recovery_code === null)) return fail(400, "invalid_request", "Send one of code and recovery_code.");
+      const ok = b.code !== null ? b.code === MOCK_TOTP_CODE : spendRecovery(account, b.recovery_code!);
+      if (!ok) {
+        if (++pending.wrong >= 5) waiting.delete(b.login_id);
+        return fail(401, "second_factor_failed", "That code didn't work.");
+      }
+      waiting.delete(b.login_id);
+      return json(200, enterDevice(account, pending.device));
     }
 
     // Everything below needs a session.
@@ -195,6 +237,35 @@ export function createMockEngine(now: () => number = () => Date.now()) {
 
     if (method === "DELETE" && path === "/v1/sessions/current") {
       for (const [t, s] of sessions) if (s.deviceId === device.id && authorization?.endsWith(t)) sessions.delete(t);
+      return json(204, null);
+    }
+    if (path.startsWith("/v1/accounts/totp") && method === "POST") {
+      if (device.state !== "trusted") return fail(403, "device_not_trusted", "This device isn't trusted.");
+      const b = body as { code?: string; device_signature?: string | null; signed_at?: number | bigint | null };
+      const action = path === "/v1/accounts/totp" ? "enrol" : path.endsWith("/confirm") ? "confirm" : "disable";
+      // A bare token is not enough: the device signs the account, itself, the action, the code and the time.
+      const signedAt = Number(b.signed_at ?? NaN);
+      const proven =
+        typeof b.device_signature === "string" &&
+        Math.abs(now() / 1000 - signedAt) <= 300 &&
+        fakeVerify(decodeBytes(device.signing_key), TOTP_MANAGE_CONTEXT, totpManageMessage(account.id, device.id, action, action === "confirm" ? (b.code ?? "") : "", signedAt), decodeBytes(b.device_signature));
+      // Accepted once: each signature must be strictly later than the last one this device had accepted for the action.
+      const slot = `${device.id}:${action}`;
+      if (!proven || signedAt <= (state.lastManage.get(slot) ?? 0)) return fail(401, "device_proof_required", "This request needs the device's signature.");
+      state.lastManage.set(slot, signedAt);
+      if (action === "enrol") {
+        if (account.totp?.enabled) return fail(409, "totp_already_enabled", "Two-factor is already on.");
+        account.totp = { enabled: false, recovery: [] };
+        return json(200, { secret: MOCK_TOTP_SECRET, uri: `otpauth://totp/Orbyn:${account.email}?secret=${MOCK_TOTP_SECRET}&issuer=Orbyn&algorithm=SHA1&digits=6&period=30` });
+      }
+      if (action === "confirm") {
+        if (account.totp?.enabled) return fail(409, "totp_already_enabled", "Two-factor is already on.");
+        if (!account.totp || b.code !== MOCK_TOTP_CODE) return fail(401, "second_factor_failed", "That code didn't work.");
+        account.totp = { enabled: true, recovery: Array.from({ length: 10 }, (_, i) => `RECOV-${String(i + 1).padStart(5, "0")}`) };
+        return json(200, { recovery_codes: [...account.totp.recovery] });
+      }
+      if (!account.totp?.enabled) return fail(409, "totp_not_enabled", "Two-factor isn't on.");
+      delete account.totp;
       return json(204, null);
     }
     const open = (a: Approval | undefined) => (a && !a.closed && now() <= a.expiresAt ? a : undefined);
@@ -212,7 +283,7 @@ export function createMockEngine(now: () => number = () => Date.now()) {
 
     if (method === "GET" && path === "/v1/devices/current") {
       const approval = [...approvals.values()].find((a) => a.deviceId === device.id && open(a));
-      return json(200, { device: view(device), approval: approval ? viewOf(approval) : null });
+      return json(200, { device: view(device), approval: approval ? viewOf(approval) : null, totp_enabled: account.totp?.enabled === true, totp_pending: account.totp !== undefined && !account.totp.enabled });
     }
     if (method === "GET" && /^\/v1\/devices\/approvals\/[^/]+$/.test(path)) {
       const a = approvalOf(path);

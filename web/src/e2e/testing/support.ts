@@ -60,3 +60,18 @@ export async function pairedBrowsers(email: string, password = "correct horse ba
   approver.dispose();
   return { a: { ...a, session: first }, b: { ...b, session: b.services.tokens.getSession()! } };
 }
+
+/** The six-digit code RFC 6238 gives for a base32 secret at `unixSeconds` (HMAC-SHA-1, 30-second steps), for tests that play the authenticator app. */
+export async function totpCode(secretBase32: string, unixSeconds: number): Promise<string> {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = "";
+  for (const ch of secretBase32.replace(/[\s=]/g, "").toUpperCase()) bits += alphabet.indexOf(ch).toString(2).padStart(5, "0");
+  const key = new Uint8Array(Math.floor(bits.length / 8)).map((_, i) => parseInt(bits.slice(i * 8, i * 8 + 8), 2));
+  const counter = new Uint8Array(8);
+  new DataView(counter.buffer).setBigUint64(0, BigInt(Math.floor(unixSeconds / 30)), false);
+  const hmacKey = await globalThis.crypto.subtle.importKey("raw", key, { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
+  const mac = new Uint8Array(await globalThis.crypto.subtle.sign("HMAC", hmacKey, counter));
+  const offset = mac[mac.length - 1]! & 0x0f;
+  const value = ((mac[offset]! & 0x7f) << 24) | (mac[offset + 1]! << 16) | (mac[offset + 2]! << 8) | mac[offset + 3]!;
+  return String(value % 1_000_000).padStart(6, "0");
+}

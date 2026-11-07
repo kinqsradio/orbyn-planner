@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNow } from "../../app/clock";
 import { useStore } from "../../store/context";
-import { Modal } from "../auth/AccountSettings";
+import { Modal } from "../../components/Modal";
 import { buildIcs } from "./exportIcs";
 import { exportJson } from "./exportJson";
 import { saveFile } from "./save";

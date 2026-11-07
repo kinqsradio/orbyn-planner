@@ -4,6 +4,8 @@ import { concat, decodeBytes, encodeBytes, utf8 } from "../bytes";
 import {
   DEVICE_LOGIN_CONTEXT,
   DEVICE_REGISTER_CONTEXT,
+  TOTP_MANAGE_CONTEXT,
+  totpManageMessage,
   TRUSTED_START_CONTEXT,
   loginMessage,
   normalizeEmail,
@@ -75,6 +77,10 @@ class FakeDeviceKeys implements DeviceKeys {
   }
   signLogin(loginId: string) {
     return this.sign(DEVICE_LOGIN_CONTEXT, loginMessage(loginId, { signing: this.signing, agreement: this.agreement }));
+  }
+  signTotpManage(accountId: string, deviceId: string, action: string, code: string, signedAt: number) {
+    if (!["enrol", "confirm", "disable"].includes(action)) throw new Error("invalid_input: the action is enrol, confirm or disable");
+    return this.sign(TOTP_MANAGE_CONTEXT, totpManageMessage(accountId, deviceId, action, code, signedAt));
   }
   signTrustedStart(email: string, credentialRequest: Uint8Array, signedAt: number) {
     const normal = normalizeEmail(email);

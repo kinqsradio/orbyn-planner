@@ -8,8 +8,8 @@ import { SIGN_IN_UNAVAILABLE, authCryptoAvailable, registerAuthCrypto } from "..
 import { cryptoLoad, ensureRealAuthCrypto, loadRealAuthCrypto, resetCryptoLoad, setCryptoLoader } from "../../api/realCrypto";
 import { createMemoryKeyStore, type KeyStore } from "../../api/keyStore";
 import { FakeAuthCrypto } from "../../api/testing/FakeAuthCrypto";
-import { createMockEngine, type MockEngine } from "../../api/testing/MockEngine";
-import { signOut } from "../../auth/flows";
+import { createMockEngine, MOCK_TOTP_CODE, type MockEngine } from "../../api/testing/MockEngine";
+import { confirmTotp, enrolTotp, signOut, signUp } from "../../auth/flows";
 import { createAuthServices, type AuthServices } from "../../auth/services";
 import { deviceName } from "../../auth/deviceName";
 import { LocalStore } from "../../store/LocalStore";
@@ -778,6 +778,81 @@ describe("signing out", () => {
     expect(engine.calls.filter((c) => c.path.startsWith("/v1/accounts") || c.path.includes("/login/")).every((c) => c.authorization === null)).toBe(true);
     expect(localStorage.getItem("token")).toBeNull();
     expect(JSON.stringify({ ...localStorage })).not.toMatch(/token-/);
+  });
+});
+
+describe("two-factor", () => {
+  async function signedIn() {
+    const auth = services();
+    await mount(auth, "/settings");
+    await fillSignUp();
+    await screen.findByRole("navigation", { name: "Primary" });
+    await openAccount();
+    return auth;
+  }
+
+  it("Settings turns it on with a QR code made here, the secret as text and a code, shows ten recovery codes once to copy or download, and turns it off with no code", async () => {
+    await signedIn();
+    const row = await screen.findByText("Two-factor");
+    await waitFor(() => expect(within(row.parentElement!).getByText("Off")).toBeInTheDocument());
+    await userEvent.click(within(row.parentElement!).getByRole("button", { name: "Turn on…" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Continue" }));
+    expect(await screen.findByRole("img", { name: "QR code for your authenticator app" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Secret key")).toHaveTextContent(/JBSW Y3DP EHPK 3PXP/);
+    expect(engine.calls.filter((c) => c.path === "/v1/accounts/totp")).toHaveLength(1); // the QR came from that one answer: nothing else was asked
+
+    await userEvent.type(screen.getByLabelText("Code from the app"), "000000");
+    await userEvent.click(screen.getByRole("button", { name: "Turn on" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("That code didn’t work.");
+    await userEvent.clear(screen.getByLabelText("Code from the app"));
+    await userEvent.type(screen.getByLabelText("Code from the app"), MOCK_TOTP_CODE);
+    await userEvent.click(screen.getByRole("button", { name: "Turn on" }));
+
+    const list = await screen.findByRole("list", { name: "Recovery codes" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(10);
+    const written: string[] = [];
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (t: string) => void written.push(t) } });
+    await userEvent.click(screen.getByRole("button", { name: "Copy" }));
+    expect(written[0]).toContain("RECOV-00001");
+    expect(await screen.findByText("Copied.")).toBeInTheDocument();
+    URL.createObjectURL = vi.fn(() => "blob:codes");
+    URL.revokeObjectURL = vi.fn();
+    const saved: string[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      saved.push(this.download);
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Download .txt" }));
+    expect(saved).toEqual(["orbyn-recovery-codes.txt"]);
+    expect(screen.getByRole("button", { name: "Done" })).toBeDisabled(); // not until the person says they saved them
+    await userEvent.click(screen.getByRole("checkbox", { name: "I’ve saved these codes" }));
+    await userEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    await waitFor(() => expect(within(row.parentElement!).getByText("On")).toBeInTheDocument());
+    await userEvent.click(within(row.parentElement!).getByRole("button", { name: "Turn off…" }));
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Turn off two-factor" })).getByRole("button", { name: "Turn off" }));
+    await waitFor(() => expect(within(row.parentElement!).getByText("Off")).toBeInTheDocument());
+  });
+
+  it("signing in on a new browser asks for a code, says when it didn’t work, and takes a recovery code instead", async () => {
+    // The account has two-factor on, set up from its first browser.
+    const first = services();
+    const session = await signUp(first, { name: SAM.name, email: SAM.email, password: SAM.password });
+    await enrolTotp(first, session);
+    const { recovery_codes } = await confirmTotp(first, session, MOCK_TOTP_CODE);
+
+    const second = services();
+    await mount(second);
+    await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
+    await fillSignIn();
+    expect(await screen.findByRole("form", { name: "Two-factor code" })).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Code"), "000000");
+    await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("That code didn’t work.");
+    await userEvent.click(screen.getByRole("button", { name: "Use a recovery code" }));
+    await userEvent.type(screen.getByLabelText("Recovery code"), recovery_codes[0]!);
+    await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(second.tokens.getSession()).not.toBeNull());
+    expect(screen.queryByRole("form", { name: "Two-factor code" })).not.toBeInTheDocument();
   });
 });
 

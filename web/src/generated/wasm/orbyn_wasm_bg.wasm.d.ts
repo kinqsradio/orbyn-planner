@@ -18,6 +18,7 @@ export const devicekeys_import: (a: number, b: number, c: number, d: number, e: 
 export const devicekeys_sign: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
 export const devicekeys_signLogin: (a: number, b: number, c: number, d: number) => void;
 export const devicekeys_signRegistration: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+export const devicekeys_signTotpManage: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => void;
 export const devicekeys_signTrustedStart: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
 export const devicekeys_signingKey: (a: number, b: number) => void;
 export const devicesession_nonceJson: (a: number, b: number) => void;

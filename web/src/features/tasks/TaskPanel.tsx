@@ -12,6 +12,7 @@ import { inOrder, keyBetween } from "../../store/order";
 import { CannotMoveSeries, type Scope } from "../../store/eventScope";
 import type { Repeat } from "../../store/repeat";
 import { allowedScopes, editTaskRepeat, undoableTasks, type RepeatEdit } from "../../store/taskRepeat";
+import { MAX_TAGS_PER_TASK } from "../../store/records";
 import { LIST_COLOURS, PRIORITIES, type Task } from "../../store/types";
 import { ScopeDialog } from "../calendar/ScopeDialog";
 import { RepeatPicker } from "./RepeatPicker";
@@ -199,32 +200,38 @@ function Panel({ task }: { task: Task }) {
           {shownTags(task, tags).map((t) => (
             <TagChip key={t.id} tag={t} label={labels.get(t.id)} onRemove={() => store.setTaskTag(task.id, t.id, false)} />
           ))}
-          {tags.some((t) => t.deletedAt === null && !task.tags.includes(t.id)) && (
-            <select className="inp" aria-label="Add a tag" value="" onChange={(e) => e.target.value && store.setTaskTag(task.id, e.target.value, true)}>
-              <option value="">Add a tag</option>
-              {tags.filter((t) => t.deletedAt === null && !task.tags.includes(t.id)).map((t) => (
-                <option key={t.id} value={t.id}>{labels.get(t.id) ?? t.name}</option>
-              ))}
-            </select>
+          {task.tags.length >= MAX_TAGS_PER_TASK ? (
+            <span className="t3 small" role="note">A task can have 100 tags at most.</span>
+          ) : (
+            <>
+            {tags.some((t) => t.deletedAt === null && !task.tags.includes(t.id)) && (
+              <select className="inp" aria-label="Add a tag" value="" onChange={(e) => e.target.value && store.setTaskTag(task.id, e.target.value, true)}>
+                <option value="">Add a tag</option>
+                {tags.filter((t) => t.deletedAt === null && !task.tags.includes(t.id)).map((t) => (
+                  <option key={t.id} value={t.id}>{labels.get(t.id) ?? t.name}</option>
+                ))}
+              </select>
+            )}
+            <input
+              className="inp"
+              aria-label="New tag"
+              placeholder="New tag"
+              value={newTag}
+              onChange={(e) => setNewTag(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return;
+                e.preventDefault();
+                const name = newTag.trim();
+                if (!name) return;
+                // An existing tag of that name is used, not made twice.
+                const same = tags.find((t) => t.deletedAt === null && t.name.toLowerCase() === name.toLowerCase());
+                const tag = same ?? store.addTag(name, LIST_COLOURS[tags.length % LIST_COLOURS.length]!);
+                store.setTaskTag(task.id, tag.id, true);
+                setNewTag("");
+              }}
+            />
+            </>
           )}
-          <input
-            className="inp"
-            aria-label="New tag"
-            placeholder="New tag"
-            value={newTag}
-            onChange={(e) => setNewTag(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key !== "Enter") return;
-              e.preventDefault();
-              const name = newTag.trim();
-              if (!name) return;
-              // An existing tag of that name is used, not made twice.
-              const same = tags.find((t) => t.deletedAt === null && t.name.toLowerCase() === name.toLowerCase());
-              const tag = same ?? store.addTag(name, LIST_COLOURS[tags.length % LIST_COLOURS.length]!);
-              store.setTaskTag(task.id, tag.id, true);
-              setNewTag("");
-            }}
-          />
         </b>
       </div>
       <div className="kv">

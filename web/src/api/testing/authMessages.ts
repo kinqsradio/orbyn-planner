@@ -8,6 +8,7 @@ import { concat, utf8, uuidBytes } from "../bytes";
 export const DEVICE_REGISTER_CONTEXT = "orbyn/device-register/v1";
 export const DEVICE_LOGIN_CONTEXT = "orbyn/device-login/v1";
 export const TRUSTED_START_CONTEXT = "orbyn/trusted-login-start/v1";
+export const TOTP_MANAGE_CONTEXT = "orbyn/totp-manage/v1";
 
 /** A device's two public keys, 32 bytes each. */
 export interface DevicePublic {
@@ -60,4 +61,11 @@ export function trustedStartMessage(email: string, credentialRequest: Uint8Array
   const time = new Uint8Array(8);
   new DataView(time.buffer).setBigInt64(0, BigInt(signedAt), false);
   return concat(prefixed(utf8(email)), prefixed(credentialRequest), time);
+}
+
+/** What a trusted device signs to change the account's second factor: account, device, action, the code (for confirm) and the time. */
+export function totpManageMessage(accountId: string, deviceId: string, action: string, code: string, signedAt: number): Uint8Array {
+  const time = new Uint8Array(8);
+  new DataView(time.buffer).setBigInt64(0, BigInt(signedAt), false);
+  return concat(uuidBytes(accountId), uuidBytes(deviceId), prefixed(utf8(action)), prefixed(utf8(code)), time);
 }

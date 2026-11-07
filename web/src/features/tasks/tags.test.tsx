@@ -77,4 +77,19 @@ describe("tags in the planner", () => {
     expect(store.getState().tags.find((t) => t.id === tag.id)!.deletedAt).toBeNull();
     expect(store.getState().tasks.find((t) => t.id === mail.id)!.tags).toEqual([tag.id]);
   });
+
+  it("a task with 100 tags can't be given another: Add a tag and New tag go, and come back when one is removed", async () => {
+    const { store, water } = await open();
+    const ids = Array.from({ length: 100 }, (_, i) => store.addTag(`Tag ${i}`, "c1").id);
+    store.addTag("One more", "c2");
+    for (const id of ids) store.setTaskTag(water.id, id, true);
+    await userEvent.click(await screen.findByRole("button", { name: "water plants" }));
+    const panel = screen.getByRole("complementary", { name: "Task" });
+    expect(within(panel).getByText("A task can have 100 tags at most.")).toBeInTheDocument();
+    expect(within(panel).queryByRole("combobox", { name: "Add a tag" })).toBeNull();
+    expect(within(panel).queryByRole("textbox", { name: "New tag" })).toBeNull();
+    await userEvent.click(within(panel).getByRole("button", { name: "Remove tag Tag 0" }));
+    expect(within(panel).getByRole("combobox", { name: "Add a tag" })).toBeInTheDocument();
+    expect(within(panel).getByRole("textbox", { name: "New tag" })).toBeInTheDocument();
+  });
 });
