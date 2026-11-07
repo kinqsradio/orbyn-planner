@@ -30,11 +30,11 @@ export function useDeletionScheduledAt(): string | null | undefined {
   return useSyncExternalStore(deletionNotice.subscribe, deletionNotice.get);
 }
 
-/** "Saturday 14 November": the day, as the designs word it. */
+/** "Saturday 14 November": the day, as the designs word it, by the UTC calendar like the countdown. */
 export function deletionDay(rfc3339: string): string {
   const at = new Date(rfc3339);
   if (Number.isNaN(at.getTime())) return rfc3339;
-  return `${WEEKDAYS[at.getDay()]} ${at.getDate()} ${MONTHS[at.getMonth()]}`;
+  return `${WEEKDAYS[at.getUTCDay()]} ${at.getUTCDate()} ${MONTHS[at.getUTCMonth()]}`;
 }
 
 /**

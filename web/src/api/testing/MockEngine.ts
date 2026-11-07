@@ -89,6 +89,8 @@ const uuid = () => `00000000-0000-4000-8000-${String(++ids).padStart(12, "0")}`;
  */
 export function createMockEngine(now: () => number = () => Date.now()) {
   const accounts = new Map<string, Account>();
+  /** Deleted accounts: id to the UTC day (RFC 3339 at 00:00 UTC) they were deleted. */
+  const tombstones = new Map<string, string>();
   const sessions = new Map<string, { accountId: string; deviceId: string; authenticatedAt?: number }>();
   /** The deletion emails sent: the address and the cancel link's token, oldest first. */
   const mail: { to: string; token: string }[] = [];
@@ -285,6 +287,12 @@ export function createMockEngine(now: () => number = () => Date.now()) {
       if (!account) return fail(400, "invalid_cancel_token", "The cancel link is not valid.");
       account.deletion = undefined;
       return json(204, null);
+    }
+
+    // Has this account been deleted? No session; 200 with the tombstone's UTC day, otherwise 404.
+    if (method === "POST" && path === "/v1/accounts/status") {
+      const at = tombstones.get((body as { account_id: string }).account_id);
+      return at ? json(200, { deleted_at: at }) : fail(404, "not_found", "Not found.");
     }
 
     // Everything below needs a session.
@@ -531,6 +539,15 @@ export function createMockEngine(now: () => number = () => Date.now()) {
     latestEmailCode: (address: string) => [...signups.values()].filter((s) => s.email === normalizeEmail(address)).at(-1)?.code,
     refuseNext(path: string, status: number, code: string, message = "Refused.", times = 1) {
       refusals.push({ path, status, code, message, times });
+    },
+    /** The account's deletion finished: its data and sessions are gone, and its id answers the status route with the day. */
+    deleteAccountNow(email: string, deletedAt = "2026-11-14T00:00:00Z") {
+      const key = normalizeEmail(email) ?? "";
+      const account = accounts.get(key);
+      if (!account) throw new Error("no such account");
+      for (const [token, s] of [...sessions]) if (s.accountId === account.id) sessions.delete(token);
+      tombstones.set(account.id, deletedAt);
+      accounts.delete(key);
     },
     /** Ends every session on the server, as if they expired: the next signed-in call is a 401. */
     expireAllSessions() {

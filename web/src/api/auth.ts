@@ -1,3 +1,4 @@
+import type { AccountStatus } from "../generated/AccountStatus";
 import type { ApiError } from "../generated/ApiError";
 import type { CancelAccountDeletion } from "../generated/CancelAccountDeletion";
 import type { CancelDeletionByMail } from "../generated/CancelDeletionByMail";
@@ -192,6 +193,19 @@ export function createAuthApi(options: AuthApiOptions) {
     /** Cancels a scheduled deletion: a trusted device's signature, or a pending device's with a sign-in from the last ten minutes. */
     cancelDeletion: (body: CancelAccountDeletion) => call<void>("POST", "/v1/accounts/delete/cancel", body, true, true),
     /** Cancels it with the token from the email's link. No session; it does nothing else. */
+    /**
+     * Whether an account was deleted, asked without a session (it went with the account): the answer once a tombstone exists, `null`
+     * for everything else (404, which never says an account exists). Asked once after a 401; anything else, an unreachable engine
+     * included, throws and is read as "not deleted".
+     */
+    accountStatus: async (accountId: string): Promise<AccountStatus | null> => {
+      try {
+        return await call<AccountStatus>("POST", "/v1/accounts/status", { account_id: accountId });
+      } catch (e) {
+        if (e instanceof ApiFailure && e.status === 404) return null;
+        throw e;
+      }
+    },
     cancelDeletionByMail: (body: CancelDeletionByMail) => call<void>("POST", "/v1/accounts/delete/cancel-by-mail", body),
     /** Ends this device's session. */
     signOut: () => call<void>("DELETE", "/v1/sessions/current", undefined, true),

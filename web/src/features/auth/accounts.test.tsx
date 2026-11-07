@@ -1,3 +1,4 @@
+import { deletedAccount } from "../../auth/deletedAccount";
 import { sessionToken } from "../../api/session";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -80,6 +81,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  deletedAccount.set(null);
   document.getElementById("root")?.remove();
   registerAuthCrypto(null);
 });
@@ -1723,6 +1725,58 @@ describe("while a deletion is scheduled", () => {
     engine.accounts.get("sam@example.com")!.deletion = { at: nowMs + 7 * 86_400_000, token: "t" };
     await expect(auth.api.setProtection({ level: "standard", seq: 9, prev: "x", signed_at: 1, device_signature: "s" } as never)).rejects.toMatchObject({ code: "deletion_scheduled" });
     expect(await screen.findByRole("status", { name: "Account deletion" })).toBeInTheDocument();
+  });
+});
+
+describe("an account that was deleted", () => {
+  const statusCalls = () => engine.calls.filter((c) => c.path === "/v1/accounts/status");
+
+  it("a 401 asks the status route once; a 200 shows the deleted-account screen and nothing else opens", async () => {
+    const auth = services();
+    await mount(auth);
+    await fillSignUp();
+    await todayShown();
+    expect(statusCalls()).toHaveLength(0); // nothing is asked while the session works
+    engine.deleteAccountNow(SAM.email, "2026-11-14T00:00:00Z");
+    const card = await screen.findByRole("group", { name: "This account was deleted" });
+    expect(card).toHaveTextContent("Sam@Example.com".toLowerCase() + " was deleted on Saturday 14 November.");
+    expect(screen.queryByRole("navigation", { name: "Primary" })).toBeNull();
+    expect(statusCalls()).toHaveLength(1);
+    expect(statusCalls()[0]!.body).toEqual({ account_id: expect.any(String) });
+  });
+
+  it("a 404 is an ordinary signed-out state: the landing page, nothing removed, and the question was asked once", async () => {
+    await mount(services());
+    await fillSignUp();
+    await todayShown();
+    engine.expireAllSessions();
+    expect(await screen.findByRole("heading", { name: /Your tasks and calendar/ })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "This account was deleted" })).toBeNull();
+    expect(statusCalls()).toHaveLength(1);
+  });
+
+  it("if the status route can't be reached nothing is shown (it is asked again on the next 401)", async () => {
+    engine.refuseNext("/v1/accounts/status", 503, "internal");
+    const auth = services();
+    await mount(auth);
+    await fillSignUp();
+    await todayShown();
+    engine.deleteAccountNow(SAM.email);
+    expect(await screen.findByRole("heading", { name: /Your tasks and calendar/ })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "This account was deleted" })).toBeNull();
+    expect(statusCalls()).toHaveLength(1);
+  });
+
+  it("Create a new account leaves the screen for the sign-up form", async () => {
+    await mount(services(), "/today", false);
+    await fillSignUp();
+    await todayShown();
+    engine.deleteAccountNow(SAM.email);
+    await screen.findByRole("group", { name: "This account was deleted" });
+    await userEvent.click(screen.getByRole("button", { name: "Remove it now" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Create a new account" }));
+    expect(await screen.findByLabelText("Name")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "This account was deleted" })).toBeNull();
   });
 });
 
