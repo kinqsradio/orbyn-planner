@@ -2,6 +2,7 @@ import "@fontsource-variable/geist/wght.css";
 import "@fontsource/jetbrains-mono/400.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import "./styles/tokens.css";
 import "./styles/app.css";
 import { App } from "./app/App";
 import { ensureRealAuthCrypto } from "./api/realCrypto";

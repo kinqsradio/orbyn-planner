@@ -22,7 +22,7 @@ function Row({ calendar }: { calendar: PlannerCalendar }) {
 
   return (
     <li className="cal-row">
-      <div className="kv" style={{ height: 40 }}>
+      <div className="kv" style={{ height: "var(--sp-40)" }}>
         {renaming ? (
           <form
             style={{ flex: 1 }}

@@ -41,34 +41,34 @@ export function NotificationsSettings() {
   return (
     <>
       <div className="bh"><b>Reminders</b><span></span></div>
-      <div className="card" style={{ gap: 0, padding: "0 14px" }}>
-        <div className="kv" style={{ height: 44 }}>
+      <div className="card" style={{ gap: 0, padding: "0 var(--sp-14)" }}>
+        <div className="kv" style={{ height: "var(--sp-44)" }}>
           <span>Remind me about tasks</span>
           <Switch label="Remind me about tasks" checked={on} disabled={permission === "unsupported"} onChange={(v) => void toggle(v)} />
         </div>
       </div>
-      <p className="t3" style={{ fontSize: 12.5 }} role="status">{PERMISSION_TEXT[permission]}</p>
-      <p className="t3" style={{ fontSize: 12.5 }}>
+      <p className="t3" style={{ fontSize: "var(--fs-12-5)" }} role="status">{PERMISSION_TEXT[permission]}</p>
+      <p className="t3" style={{ fontSize: "var(--fs-12-5)" }}>
         Reminders only work while Orbyn Planner is open in a browser tab. The phone and desktop apps will remind you when it’s closed.
         A task with a date but no time reminds at 09:00.
       </p>
 
       <div className="bh"><b>Quiet hours</b><span></span></div>
-      <div className="card" style={{ gap: 0, padding: "0 14px" }}>
-        <div className="kv" style={{ height: 44, borderBottom: "1px solid var(--line)" }}>
+      <div className="card" style={{ gap: 0, padding: "0 var(--sp-14)" }}>
+        <div className="kv" style={{ height: "var(--sp-44)", borderBottom: "var(--bw) solid var(--line)" }}>
           <span>No notifications during quiet hours</span>
           <Switch label="Quiet hours" checked={prefs.quiet.enabled} onChange={(enabled) => setPrefs({ quiet: { ...prefs.quiet, enabled } })} />
         </div>
-        <div className="kv" style={{ height: 44, borderBottom: "1px solid var(--line)" }}>
+        <div className="kv" style={{ height: "var(--sp-44)", borderBottom: "var(--bw) solid var(--line)" }}>
           <label htmlFor="quiet-from">From</label>
           <b className="ctl"><input id="quiet-from" className="inp" type="time" value={prefs.quiet.from} onChange={(e) => e.target.value && setPrefs({ quiet: { ...prefs.quiet, from: e.target.value } })} /></b>
         </div>
-        <div className="kv" style={{ height: 44 }}>
+        <div className="kv" style={{ height: "var(--sp-44)" }}>
           <label htmlFor="quiet-to">Until</label>
           <b className="ctl"><input id="quiet-to" className="inp" type="time" value={prefs.quiet.to} onChange={(e) => e.target.value && setPrefs({ quiet: { ...prefs.quiet, to: e.target.value } })} /></b>
         </div>
       </div>
-      <p className="t3" style={{ fontSize: 12.5 }}>A reminder that falls inside quiet hours is skipped, not delayed.</p>
+      <p className="t3" style={{ fontSize: "var(--fs-12-5)" }}>A reminder that falls inside quiet hours is skipped, not delayed.</p>
     </>
   );
 }

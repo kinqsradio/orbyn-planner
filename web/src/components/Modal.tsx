@@ -9,7 +9,7 @@ export function Modal({ label, onClose, children }: { label: string; onClose: ()
   return (
     <Portal>
       <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-        <div ref={ref} className="authcard" style={{ width: 440 }} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1}>
+        <div ref={ref} className="authcard" style={{ width: "var(--sp-440)" }} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1}>
           {children}
         </div>
       </div>

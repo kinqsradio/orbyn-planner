@@ -52,7 +52,7 @@ function OfflinePill({ status, waiting }: { status: Extract<SyncStatus, { kind: 
             This device is offline. Your changes are saved here and reach your other devices as soon as you’re back online.
           </span>
           {waiting.slice(0, 5).map((w) => (
-            <div className="kv" key={w.id} style={{ borderTop: "1px solid var(--line)", height: 38 }}>
+            <div className="kv" key={w.id} style={{ borderTop: "var(--bw) solid var(--line)", height: "var(--sp-38)" }}>
               <span style={{ color: "var(--t1)" }}>{w.label}</span>
               <b>Edited {formatTime(new Date(w.at))}</b>
             </div>

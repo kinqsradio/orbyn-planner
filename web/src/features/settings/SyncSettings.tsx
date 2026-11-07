@@ -22,7 +22,7 @@ export function SyncSettings() {
   return (
     <>
       <div className="bh"><b>Sync</b><span></span></div>
-      <div className="card" style={{ gap: 6 }}>
+      <div className="card" style={{ gap: "var(--sp-6)" }}>
         <span role="status">{line}</span>
         <span className="t3 small">{when}{sync.live ? " · Live" : ""}</span>
         {sync.quarantined > 0 && (

@@ -23,8 +23,8 @@ export function QrCode({ value, label }: { value: string; label: string }) {
     }
   });
   return (
-    <svg role="img" aria-label={label} viewBox={`0 0 ${total} ${total}`} width={176} height={176} shapeRendering="crispEdges" style={{ background: "#fff", borderRadius: 8, flex: "none" }}>
-      <path d={path.join("")} fill="#000" />
+    <svg role="img" aria-label={label} viewBox={`0 0 ${total} ${total}`} shapeRendering="crispEdges" style={{ width: "var(--sp-176)", height: "var(--sp-176)", background: "var(--qr-paper)", borderRadius: "var(--r-8)", flex: "none" }}>
+      <path d={path.join("")} style={{ fill: "var(--qr-ink)" }} />
     </svg>
   );
 }

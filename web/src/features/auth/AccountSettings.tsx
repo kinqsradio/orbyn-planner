@@ -126,7 +126,7 @@ function SignOutDialog({ onClose }: { onClose: () => void }) {
       <div className="dialog-actions">
         <button type="button" className="ghost" onClick={onClose}>Cancel</button>
         <button type="button" className="ghost" onClick={() => go(false)}>Keep on this browser</button>
-        <button type="button" className="btn" data-autofocus onClick={() => go(true)}>Remove</button>
+        <button type="button" className="danger" data-autofocus onClick={() => go(true)}>Remove</button>
       </div>
     </Modal>
   );
@@ -156,7 +156,7 @@ function RemoveDialog({ device, onClose, onDone }: { device: Device; onClose: ()
       {error && <p className="err" role="alert">{error}</p>}
       <div className="dialog-actions">
         <button type="button" className="ghost" onClick={onClose}>Cancel</button>
-        <button type="button" className="ghost danger" disabled={busy} onClick={() => void remove()}>Remove</button>
+        <button type="button" className="danger" disabled={busy} onClick={() => void remove()}>Remove</button>
       </div>
     </Modal>
   );
@@ -187,7 +187,7 @@ function EngineNotice() {
   }, [services]);
   if (!message) return null;
   return (
-    <div className="card" role="status" style={{ gap: 6 }}>
+    <div className="card" role="status" style={{ gap: "var(--sp-6)" }}>
       <span className="t3">{message}</span>
       <button type="button" className="ghost" onClick={() => services.engine.notice.clear()}>Dismiss</button>
     </div>
@@ -233,17 +233,17 @@ function SignedInAccount() {
   return (
     <>
       <EngineNotice />
-      <div className="card" style={{ gap: 0, padding: "0 14px" }}>
-        <div className="kv" style={{ height: 44, borderBottom: "1px solid var(--line)" }}><span>Name</span><b>{session?.name || "Not set"}</b></div>
-        <div className="kv" style={{ height: 44 }}><span>Email</span><b>{session?.email}</b></div>
+      <div className="card" style={{ gap: 0, padding: "0 var(--sp-14)" }}>
+        <div className="kv" style={{ height: "var(--sp-44)", borderBottom: "var(--bw) solid var(--line)" }}><span>Name</span><b>{session?.name || "Not set"}</b></div>
+        <div className="kv" style={{ height: "var(--sp-44)" }}><span>Email</span><b>{session?.email}</b></div>
         <TwoFactorRow />
       </div>
 
       <div className="bh"><b>Devices</b><span>{devices?.length ?? ""}</span></div>
       {error && <p className="err" role="alert">{error}</p>}
-      <ul className="card" style={{ gap: 0, padding: "0 14px" }} aria-label="Devices">
+      <ul className="card" style={{ gap: 0, padding: "0 var(--sp-14)" }} aria-label="Devices">
         {(devices ?? []).map((d, i, all) => (
-          <li key={d.id} className="kv device-row" style={{ minHeight: 44, borderBottom: i < all.length - 1 ? "1px solid var(--line)" : undefined }}>
+          <li key={d.id} className="kv device-row" style={{ minHeight: "var(--sp-44)", borderBottom: i < all.length - 1 ? "var(--bw) solid var(--line)" : undefined }}>
             <span>
               {d.name}
               {d.current && <span className="t3"> · this device</span>}
@@ -311,8 +311,8 @@ export function AccountSettings() {
   if (auth.status === "signedIn") return <SignedInAccount />;
   return (
     <>
-      <div className="card" style={{ gap: 6 }}>
-        <b style={{ fontWeight: 500 }}>This device only</b>
+      <div className="card" style={{ gap: "var(--sp-6)" }}>
+        <b style={{ fontWeight: "var(--fw-medium)" }}>This device only</b>
         <span className="t3">Your planner is saved on this device. An account keeps it on your other devices too.</span>
         {!authCryptoAvailable() && cryptoLoad.get() !== "failed" && <span className="t3 small">{SIGN_IN_UNAVAILABLE}.</span>}
         <CryptoProblem />

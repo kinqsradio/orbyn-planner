@@ -113,7 +113,7 @@ export function SearchDialog() {
   return (
     <Portal>
     <div className="modal-back top" onMouseDown={(e) => e.target === e.currentTarget && ui.closeSearch()}>
-      <div ref={ref} className="authcard" style={{ width: 620, padding: 10, gap: 4 }} role="dialog" aria-modal="true" aria-label="Search or add" tabIndex={-1} onKeyDown={onKeyDown}>
+      <div ref={ref} className="authcard" style={{ width: "var(--sp-620)", padding: "var(--sp-10)", gap: "var(--sp-4)" }} role="dialog" aria-modal="true" aria-label="Search or add" tabIndex={-1} onKeyDown={onKeyDown}>
         <div className="field bare">
           <Icon name="search" small />
           <input

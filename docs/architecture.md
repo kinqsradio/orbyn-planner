@@ -10,6 +10,18 @@ The plan lives in the internal Orbyn Platform Plan, and the screens in the inter
 - Wire types come from orbyn-engine's contracts and are generated, never written by hand.
 - The app works offline. A sync line always says whether this device is synced, syncing, offline with changes waiting, or unable to sync.
 
+## Design tokens
+
+`web/src/styles/tokens.css` holds every visual and motion value, taken from the Planner Designs, Motion Designs and Components sources, and `tokens.ts` mirrors the few the JavaScript needs (a test keeps them equal). Nothing else in `web/src` may hard-code a colour, a font, a font size, a spacing or size length, a radius, a shadow, a duration or an easing: use the token (`var(--sp-12)`, `var(--fs-12-5)`, `var(--r-9)`, `var(--bw)`, `var(--sh-pop)`, `var(--m-fast)`).
+
+- **Colour:** the light, dark and dim sets (`--bg`, `--main`, `--raise`, `--sel`, `--line`, `--line2`, `--t1`–`--t4`, `--btn`, `--btnt`, `--amber`, `--amber-text`, `--amber-bg`, `--amber-line`, `--red`, `--red-bg`, `--c1`–`--c4`, plus `--green` and `--blue` with their tints). `--amber` is for fills, dots, borders, icons and large figures; every small amber text uses `--amber-text` (light #9a5705, 5.62:1 on #fff and 5.20:1 on #f6f6f6; in dark and dim it equals `--amber`). Red is #d42a2a in light (5.04:1 on #fff, 4.67:1 on #f6f6f6).
+- **Fonts and sizes:** `--sans` and `--mono`, weights 400 and 500 (`--fw-regular`, `--fw-medium`), font sizes `--fs-*`, radii `--r-*` (`--r-pill`, `--r-round`), border widths `--bw*`, spacing and sizes `--sp-*` (px), and the time grid's `--hour`.
+- **Shadows:** `--sh-pop` (menus, popovers and dialogs; darker in dark and dim) and the rings `--ring-1`, `--ring-2`, `--ring-amber`, `--ring-sel`; `--scrim` is the dim behind a dialog.
+- **Motion:** the 13 tokens `--m-fast`, `--m-base`, `--m-slow`, `--m-page` and their `-out` versions, `--m-stag`, `--m-wait`, `--m-hover`, and the easings `--m-out` and `--m-io`, all multiplied by `--k` (1; 4 under `html.slow`, the designs' "Slow ×4"). Reduced motion is a media rule: no transforms, only colour and opacity change, at `--m-fast`. Only transform, opacity and colour animate. `--spin` is the spinner's turn from the designs' `.spin` rule.
+- **Red:** a filled red button (`.danger`) is for confirming a delete or a remove inside a dialog and nowhere else; red text (`.ghost.red`, `.mi.red`, `.red-text`) is for every other delete or remove.
+- **Not tokens, by necessity:** `@media` breakpoints (a custom property cannot be used in a media query; the phone breakpoint, 767px, is `PHONE_MAX_PX` in `tokens.ts`), percentages, unitless line heights, z-index layers, and the pixel position a time-grid event gets from its start and length (computed from `HOUR_PX`).
+- **No 3D** anywhere, and the calendar modes are Month, Week, Day and Agenda only.
+
 ## Local store
 
 The UI talks to a `PlannerStore`. `LocalStore` keeps the records in IndexedDB, one object store per record type, and the Rust engine will later implement the same interface.

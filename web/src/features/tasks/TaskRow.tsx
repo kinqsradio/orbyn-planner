@@ -33,8 +33,8 @@ function Check({ task }: { task: Task }) {
   );
 }
 
-const TASKS_COLS = "22px minmax(0,1fr) 120px 110px 70px";
-const LIST_COLS = "22px minmax(0,1fr) 110px";
+const TASKS_COLS = "var(--sp-22) minmax(0,1fr) var(--sp-120) var(--sp-110) var(--sp-70)";
+const LIST_COLS = "var(--sp-22) minmax(0,1fr) var(--sp-110)";
 const priorityLabel = (t: Task) => (t.priority === "none" ? "" : t.priority[0]!.toUpperCase() + t.priority.slice(1));
 
 /** One aligned table row: Tasks (list, due, priority), a list's own tasks, or Completed. */
@@ -54,7 +54,7 @@ export function TaskRow({ task, layout = "tasks", extra }: { task: Task; layout?
       {list.name}
     </span>
   );
-  const columns = layout === "tasks" ? TASKS_COLS : layout === "list" ? LIST_COLS : "22px minmax(0,1fr) 140px 120px";
+  const columns = layout === "tasks" ? TASKS_COLS : layout === "list" ? LIST_COLS : "var(--sp-22) minmax(0,1fr) var(--sp-140) var(--sp-120)";
 
   return (
     <li className={`tr ${layout}${task.done ? " done" : ""}`} data-row-id={task.id} style={{ gridTemplateColumns: columns }} data-done={task.done}>
@@ -100,11 +100,11 @@ export function TodayRow({ task, late, compact = false }: { task: Task; late?: n
   else meta = list && !list.isInbox ? list.name : (list?.name ?? "");
 
   return (
-    <li className={task.done ? "row done" : "row"} data-row-id={task.id} data-done={task.done} style={compact ? { gridTemplateColumns: "16px minmax(0,1fr) auto" } : undefined}>
+    <li className={task.done ? "row done" : "row"} data-row-id={task.id} data-done={task.done} style={compact ? { gridTemplateColumns: "var(--sp-16) minmax(0,1fr) auto" } : undefined}>
       {!compact && <span className="time">{time}</span>}
       <Check task={task} />
       <button type="button" className="what link-btn" onClick={open}>{task.title}</button>
-      <span className="meta" style={act ? { color: "var(--amber)", fontWeight: 500 } : undefined}>{compact ? (parsed?.hasTime ? formatTime(parsed.date) : "") : meta}</span>
+      <span className="meta" style={act ? { color: "var(--amber-text)", fontWeight: "var(--fw-medium)" } : undefined}>{compact ? (parsed?.hasTime ? formatTime(parsed.date) : "") : meta}</span>
     </li>
   );
 }

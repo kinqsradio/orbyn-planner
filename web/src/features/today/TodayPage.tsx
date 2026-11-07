@@ -107,9 +107,9 @@ export function TodayPage() {
         </button>
       </PageHeader>
 
-      <div className="grid4 today-stats" style={{ padding: "4px 28px 0" }}>
+      <div className="grid4 today-stats" style={{ padding: "var(--sp-4) var(--sp-28) 0" }}>
         <div className="stat"><small>Today</small><b>{todayOpen + todayEvents.length}</b></div>
-        <div className="stat"><small>Overdue</small><b style={g.overdue.length > 0 ? { color: "var(--amber)" } : undefined}>{g.overdue.length}</b></div>
+        <div className="stat"><small>Overdue</small><b style={g.overdue.length > 0 ? { color: "var(--amber-text)" } : undefined}>{g.overdue.length}</b></div>
         <div className="stat"><small>This week</small><b>{g.thisWeekOpen}</b></div>
         <div className="stat"><small>Done this week</small><b>{g.doneThisWeek}</b></div>
       </div>
@@ -136,7 +136,7 @@ export function TodayPage() {
               )}
               {g.overdue.length > 0 && (
                 <>
-                  <div className="bh" style={{ paddingTop: 16 }}>
+                  <div className="bh" style={{ paddingTop: "var(--sp-16)" }}>
                     <b className="amber">Overdue</b>
                     <span>{g.overdue.length}</span>
                   </div>
@@ -172,7 +172,7 @@ export function TodayPage() {
               );
             })}
           </ul>
-          <div className="bh" style={{ paddingTop: 16 }}><b>Progress</b></div>
+          <div className="bh" style={{ paddingTop: "var(--sp-16)" }}><b>Progress</b></div>
           <div className="kv"><span>Tasks done this week</span><b>{g.doneThisWeek} of {g.weekTotal}</b></div>
           <div className="meter" role="progressbar" aria-label="Tasks done this week" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}><i style={{ width: `${pct}%` }} /></div>
         </div>

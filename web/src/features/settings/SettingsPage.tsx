@@ -41,8 +41,8 @@ export function SettingsPage() {
           {category === "Planning" ? (
             <>
               <div className="bh"><b>Your week</b><span></span></div>
-              <div className="card" style={{ gap: 0, padding: "0 14px" }}>
-                <div className="kv" style={{ height: 44, borderBottom: "1px solid var(--line)" }}>
+              <div className="card" style={{ gap: 0, padding: "0 var(--sp-14)" }}>
+                <div className="kv" style={{ height: "var(--sp-44)", borderBottom: "var(--bw) solid var(--line)" }}>
                   <span id="week-start-label">Week starts on</span>
                   <div role="radiogroup" aria-labelledby="week-start-label" className="pills">
                     {(["mon", "sun"] as const).map((d) => (
@@ -52,7 +52,7 @@ export function SettingsPage() {
                     ))}
                   </div>
                 </div>
-                <div className="kv" style={{ height: 44 }}>
+                <div className="kv" style={{ height: "var(--sp-44)" }}>
                   <span id="week-days-label">Days in the week view</span>
                   <div role="radiogroup" aria-labelledby="week-days-label" className="pills">
                     {([5, 7] as const).map((n) => (
@@ -64,8 +64,8 @@ export function SettingsPage() {
                 </div>
               </div>
               <div className="bh"><b>Appearance</b><span></span></div>
-              <div className="card" style={{ gap: 0, padding: "0 14px" }}>
-                <div className="kv" style={{ height: 44 }}>
+              <div className="card" style={{ gap: 0, padding: "0 var(--sp-14)" }}>
+                <div className="kv" style={{ height: "var(--sp-44)" }}>
                   <span id="theme-label">Theme</span>
                   <div role="radiogroup" aria-labelledby="theme-label" className="pills">
                     {CHOICES.map((c) => (
@@ -95,11 +95,11 @@ export function SettingsPage() {
           ) : category === "Calendars" ? (
             <>
               <div className="bh"><b>Your calendars</b><span></span></div>
-              <div className="card" style={{ gap: 0, padding: "0 14px" }}>
+              <div className="card" style={{ gap: 0, padding: "0 var(--sp-14)" }}>
                 <CalendarList />
               </div>
               <CalendarForms />
-              <span className="t3" style={{ fontSize: 12.5 }}>
+              <span className="t3" style={{ fontSize: "var(--fs-12-5)" }}>
                 Subscribed calendars are read from their link in this browser, once an hour while Orbyn Planner is open. Some servers don’t allow that yet.
               </span>
             </>
