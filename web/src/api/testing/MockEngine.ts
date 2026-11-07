@@ -44,6 +44,8 @@ interface Account {
   totp?: { enabled: boolean; recovery: string[] };
   /** The signed protection settings, oldest first. */
   protection?: ProtectionLink[];
+  /** A server that serves the chain from sequence 1 whatever `?from=` asks (how an old chain is shown again). */
+  protectionFromStart?: boolean;
 }
 /** The mock's one-time code: any other six digits are wrong. Recovery codes are `RECOV-0000N`. */
 export const MOCK_TOTP_CODE = "123456";
@@ -283,7 +285,7 @@ export function createMockEngine(now: () => number = () => Date.now()) {
       if (device.state !== "trusted") return fail(403, "device_not_trusted", "This device isn't trusted.");
       const chain = (account.protection ??= []);
       if (method === "GET") {
-        const from = Number(new URL(`http://x${path}`).searchParams.get("from") ?? 1);
+        const from = account.protectionFromStart ? 1 : Number(new URL(`http://x${path}`).searchParams.get("from") ?? 1);
         return json(200, { links: chain.filter((l) => l.seq >= from).slice(0, 100), more: chain.filter((l) => l.seq >= from).length > 100 });
       }
       if (method === "POST") {

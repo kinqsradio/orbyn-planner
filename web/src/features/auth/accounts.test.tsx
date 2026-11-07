@@ -8,6 +8,7 @@ import { SIGN_IN_UNAVAILABLE, authCryptoAvailable, registerAuthCrypto } from "..
 import { cryptoLoad, ensureRealAuthCrypto, loadRealAuthCrypto, resetCryptoLoad, setCryptoLoader } from "../../api/realCrypto";
 import { createMemoryKeyStore, type KeyStore } from "../../api/keyStore";
 import { FakeAuthCrypto } from "../../api/testing/FakeAuthCrypto";
+import { PROTECTION_GENESIS } from "../../api/testing/protectionFake";
 import { createMockEngine, MOCK_TOTP_CODE, type MockEngine } from "../../api/testing/MockEngine";
 import { confirmProtection, confirmTotp, enrolTotp, readProtection, signIn, signOut } from "../../auth/flows";
 import { signedUp } from "../../auth/testing/signedUp";
@@ -979,6 +980,58 @@ describe("the protection level", () => {
     await userEvent.click(sign);
     await waitFor(() => expect(engine.accounts.get("sam@example.com")!.protection).toHaveLength(1));
     expect(await within(await screen.findByLabelText("Protection")).findByText("Standard protection")).toBeInTheDocument();
+  });
+
+  it("after a rollback or a fork the level is not shown as verified: the card warns and says why", async () => {
+    const auth = await privacy();
+    const session = auth.tokens.getSession()!;
+    await screen.findByText("Standard protection");
+    const account = engine.accounts.get("sam@example.com")!;
+    await confirmProtection(auth, session, "standard", (await readProtection(auth, session)).head); // this device verified sequence 2
+    const good = [...account.protection!];
+    const reopen = async () => {
+      await userEvent.click(await screen.findByRole("button", { name: "Account" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Privacy" }));
+    };
+
+    // The server now shows only sequence 1: older than what this device verified.
+    account.protection = good.slice(0, 1);
+    account.protectionFromStart = true;
+    await reopen();
+    const card = await screen.findByLabelText("Protection");
+    expect(await within(card).findByText("Your protection level can’t be confirmed on this device")).toBeInTheDocument();
+    expect(card).toHaveTextContent("older setting than this device had already verified");
+    expect(within(card).queryByText("Standard protection")).toBeNull();
+
+    // Or a different setting at sequence 2.
+    account.protection = [good[0]!, { ...good[1]!, level: "advanced" }];
+    account.protectionFromStart = false;
+    await reopen();
+    expect(await within(await screen.findByLabelText("Protection")).findByText(/different setting than the one this device had already verified/)).toBeInTheDocument();
+    expect(within(screen.getByLabelText("Protection")).queryByText("Standard protection")).toBeNull();
+  });
+
+  it("a conflict in Confirm protection level shows the new state and the person chooses again, after the new head", async () => {
+    engine.refuseNext("/v1/keychain/protection", 500, "internal", "Refused.", 1);
+    await privacy();
+    const card = await screen.findByLabelText("Protection");
+    await userEvent.click(await within(card).findByRole("button", { name: "Confirm protection level" }));
+    const dialog = screen.getByRole("dialog", { name: "Confirm protection level" });
+    await userEvent.click(within(dialog).getByRole("radio", { name: /Standard/ }));
+    // Another device signs sequence 1 first.
+    const account = engine.accounts.get("sam@example.com")!;
+    const other = account.devices[0]!;
+    account.protection = [{ level: "standard", seq: 1, prev: PROTECTION_GENESIS, signed_at: 1_794_000_000 as unknown as bigint, signer_device_id: other.id, signature: "not-checked-here" }];
+    await userEvent.click(within(dialog).getByRole("button", { name: "Sign this setting" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Another device changed the protection level first.");
+    // The choice was cleared and the screen re-read the chain: nothing is signed until the person chooses again.
+    expect(within(dialog).getByRole("radio", { name: /Standard/ })).not.toBeChecked();
+    expect(within(dialog).getByRole("button", { name: "Sign this setting" })).toBeDisabled();
+    expect(account.protection).toHaveLength(1);
+    await userEvent.click(within(dialog).getByRole("radio", { name: /Standard/ }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Sign this setting" }));
+    await waitFor(() => expect(account.protection).toHaveLength(2));
+    expect(account.protection![1]!.seq).toBe(2); // after the new head, not a second try at sequence 1
   });
 
   it("says when another device changed the level since this device last saw it, until dismissed", async () => {

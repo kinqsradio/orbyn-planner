@@ -3,7 +3,7 @@ import { ApiFailure } from "../api/auth";
 import { createMemoryKeyStore } from "../api/keyStore";
 import { FakeAuthCrypto } from "../api/testing/FakeAuthCrypto";
 import { createMockEngine, type MockEngine } from "../api/testing/MockEngine";
-import { confirmProtection, readProtection, signIn } from "./flows";
+import { confirmProtection, readProtection, signIn, signUp } from "./flows";
 import { signedUp } from "./testing/signedUp";
 import { createAuthServices, type AuthServices } from "./services";
 
@@ -60,6 +60,37 @@ describe("the signed protection setting", () => {
     const stale = await confirmProtection(a, session, "standard", report.head).catch((e: unknown) => e);
     expect((stale as ApiFailure).code).toBe("protection_conflict");
     expect(posts()).toBe(3);
+    // The engine read the chain after the conflict: it knows sequence 2 now, so the next signing is after it.
+    expect((await readProtection(a, session)).seq).toBe(2);
+    const get = engine.calls.filter((c) => c.path.startsWith("/v1/keychain/protection") && c.method === "GET").length;
+    expect(get).toBeGreaterThanOrEqual(2);
+    await confirmProtection(a, session, "standard", (await readProtection(a, session)).head);
+    expect(engine.accounts.get(SAM.email)!.protection!.map((l) => l.seq)).toEqual([1, 2, 3]);
+  });
+
+  it("after a rollback the report is not verified and names no one", async () => {
+    const engine = createMockEngine();
+    const a = browser(engine);
+    const session = await signedUp(engine, a, SAM);
+    await confirmProtection(a, session, "standard", (await readProtection(a, session)).head);
+    const account = engine.accounts.get(SAM.email)!;
+    account.protection = account.protection!.slice(0, 1); // the server shows an older chain
+    account.protectionFromStart = true;
+    const report = await readProtection(a, session);
+    expect(report).toMatchObject({ problem: "rollback", state: "provisional", changedBy: null });
+  });
+
+  it("a failure to keep the keys after the code is right says the account was made, not that the code was wrong", async () => {
+    const engine = createMockEngine();
+    const keys = createMemoryKeyStore();
+    keys.saveKeys = () => Promise.reject(new Error("quota"));
+    const a = createAuthServices({ fetch: engine.fetch, baseUrl: "http://e.test", keys, crypto: () => crypto, wrapSecret: async () => new Uint8Array(32).fill(4) });
+    const pending = await signUp(a, SAM);
+    const failed = await pending.verify(engine.emailCode(pending.signupId)!).catch((e: unknown) => e);
+    expect((failed as ApiFailure).code).toBe("keys_not_saved");
+    expect((failed as ApiFailure).message).toContain("Account created");
+    expect(a.tokens.getSession()).toBeNull();
+    expect(engine.accounts.has("sam@example.com")).toBe(true);
   });
 
   it("a second device, once approved, reads the setting the first signed as verified", async () => {

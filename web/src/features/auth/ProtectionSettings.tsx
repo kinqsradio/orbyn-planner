@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { ApiFailure } from "../../api/auth";
 import { useAuth } from "../../auth/AuthProvider";
 import { confirmProtection, readProtection, type ProtectionReport } from "../../auth/flows";
 import type { ProtectionLevel } from "../../generated/ProtectionLevel";
@@ -40,7 +41,7 @@ function writeSeen(accountId: string, seq: number) {
 }
 const changedKey = (accountId: string) => `orbyn-planner.protection-changed-by.${accountId}`;
 
-function ConfirmDialog({ report, onClose, onDone }: { report: ProtectionReport; onClose: () => void; onDone: () => void }) {
+function ConfirmDialog({ report, onClose, onDone, onConflict }: { report: ProtectionReport; onClose: () => void; onDone: () => void; onConflict: () => void }) {
   const auth = useAuth()!;
   const [level, setLevel] = useState<ProtectionLevel | null>(null);
   const [busy, setBusy] = useState(false);
@@ -55,6 +56,11 @@ function ConfirmDialog({ report, onClose, onDone }: { report: ProtectionReport; 
     } catch (e) {
       setError(describeError(e));
       setBusy(false);
+      if (e instanceof ApiFailure && e.code === "protection_conflict") {
+        // Another device signed first: the screen shows the new state, and the person chooses again from it.
+        setLevel(null);
+        onConflict();
+      }
     }
   };
   return (
@@ -195,7 +201,20 @@ export function ProtectionSettings() {
           <button type="button" className="ghost" disabled>Coming later</button>
         </div>
       </div>
-      {confirming && report && <ConfirmDialog report={report} onClose={() => setConfirming(false)} onDone={() => { setConfirming(false); void load(); }} />}
+      {confirming && report && (
+        <ConfirmDialog
+          report={report}
+          onClose={() => {
+            setConfirming(false);
+            void load(); // what the engine learned meanwhile is shown, whether or not anything was signed
+          }}
+          onDone={() => {
+            setConfirming(false);
+            void load();
+          }}
+          onConflict={() => void load()}
+        />
+      )}
     </>
   );
 }

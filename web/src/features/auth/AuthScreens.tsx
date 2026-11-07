@@ -130,6 +130,7 @@ function SignUp({ go }: { go: (s: AuthScreen) => void }) {
     setError(null);
     try {
       setPending(await signUp(auth.services, { name, email, password }));
+      setPassword(""); // the sign-up is waiting for its code: the password is not needed again, and is not kept in the page
     } catch (e) {
       setError(describeError(e));
     } finally {

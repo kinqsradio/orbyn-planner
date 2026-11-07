@@ -50,7 +50,7 @@ export function fakeProtection(keys: DeviceKeys, accountId: string, deviceId: st
       const trusted = new Set(verifiedDevices(list));
       const links = [...chain.links].sort((a, b) => a.seq - b.seq);
       const last = links.at(-1);
-      if (state.head && last && last.seq < state.head.seq && !chain.more) throw new Error("protection_rollback: the chain is older than the newest setting this device verified");
+      if (state.head && last && last.seq < state.head.seq) throw new Error("protection_rollback: the chain is older than the newest setting this device verified");
       let stopped: ProtectionView["stopped"] = null;
       for (const link of links) {
         if (state.head && link.seq <= state.head.seq) {

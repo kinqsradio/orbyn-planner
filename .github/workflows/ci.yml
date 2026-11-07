@@ -49,7 +49,7 @@ jobs:
           # --no-renames lists both paths of a move, so moving code into docs still counts.
           if ! files=$(git diff --no-renames --name-only "$BASE"...HEAD); then all "could not compare with the base"; exit 0; fi
           docs='^(docs/|[^/]+\.md$|\.github/ISSUE_TEMPLATE/|\.github/pull_request_template\.md$|\.github/(CODEOWNERS|dependabot\.yml)$)'
-          web='^(web/|\.github/workflows/)'
+          web='^(web/|\.github/workflows/|\.github/e2e-mail\.compose\.yaml$|\.github/e2e-mail-certs\.sh$)'
           desktop='^(desktop/|\.github/workflows/)'
           # scripts/ holds the title checker, which the cheap checks run.
           known="$web|$desktop|^scripts/"
