@@ -6,6 +6,9 @@ import { concat, decodeBytes, encodeBytes, utf8 } from "../bytes";
 import {
   DEVICE_LOGIN_CONTEXT,
   DEVICE_REGISTER_CONTEXT,
+  ACCOUNT_DELETE_CANCEL_CONTEXT,
+  ACCOUNT_DELETE_CONTEXT,
+  accountDeleteMessage,
   TOTP_MANAGE_CONTEXT,
   totpManageMessage,
   TRUSTED_START_CONTEXT,
@@ -79,6 +82,12 @@ class FakeDeviceKeys implements DeviceKeys {
   }
   signLogin(loginId: string) {
     return this.sign(DEVICE_LOGIN_CONTEXT, loginMessage(loginId, { signing: this.signing, agreement: this.agreement }));
+  }
+  signAccountDelete(accountId: string, deviceId: string, signedAt: number) {
+    return this.sign(ACCOUNT_DELETE_CONTEXT, accountDeleteMessage(accountId, deviceId, signedAt));
+  }
+  signAccountDeleteCancel(accountId: string, deviceId: string, signedAt: number) {
+    return this.sign(ACCOUNT_DELETE_CANCEL_CONTEXT, accountDeleteMessage(accountId, deviceId, signedAt));
   }
   signTotpManage(accountId: string, deviceId: string, action: string, code: string, signedAt: number) {
     if (!["enrol", "confirm", "disable"].includes(action)) throw new Error("invalid_input: the action is enrol, confirm or disable");

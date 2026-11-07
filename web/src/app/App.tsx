@@ -28,6 +28,7 @@ import { AuthProvider, useAuth } from "../auth/AuthProvider";
 import type { AuthServices } from "../auth/services";
 import { DeviceDataOffer } from "../features/auth/DeviceDataOffer";
 import { AuthGate } from "../features/auth/AuthGate";
+import { CANCEL_DELETION_PATH, CancelDeletionPage } from "../features/auth/CancelDeletionPage";
 import { PrefsProvider } from "./prefs";
 import { CalendarsDialog } from "../features/calendar/CalendarsDialog";
 import { EventPanel } from "../features/calendar/EventPanel";
@@ -171,6 +172,8 @@ function Shell() {
 /** `auth` turns accounts on: signed out, the public pages show first. Without it the planner runs on this device alone. */
 export function App({ store, auth }: { store?: PlannerStore; auth?: AuthServices }) {
   useExternalLinks();
+  // The link in the account-deletion email opens a page of its own: no sign-in, no planner behind it.
+  if (auth && window.location.pathname === CANCEL_DELETION_PATH) return <CancelDeletionPage services={auth} />;
   return (
     <UiProvider>
       <PrefsProvider>

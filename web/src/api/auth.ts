@@ -1,4 +1,8 @@
 import type { ApiError } from "../generated/ApiError";
+import type { CancelAccountDeletion } from "../generated/CancelAccountDeletion";
+import type { CancelDeletionByMail } from "../generated/CancelDeletionByMail";
+import type { DeleteAccount } from "../generated/DeleteAccount";
+import type { DeletionScheduled } from "../generated/DeletionScheduled";
 import type { DeleteZone } from "../generated/DeleteZone";
 import type { KeyEnvelopeList } from "../generated/KeyEnvelopeList";
 import type { ProtectionChain } from "../generated/ProtectionChain";
@@ -53,6 +57,9 @@ const MESSAGES: Record<string, string> = {
   protection_conflict: "Another device changed the protection level first. Check it, then try again.",
   invalid_protection: "That protection setting isn’t valid.",
   too_many_changes: "The protection level was changed too many times. Try again later.",
+  reauthentication_required: "For safety, sign in again to do this.",
+  deletion_scheduled: "Your account is scheduled for deletion. Cancel the deletion first to do this.",
+  invalid_cancel_token: "This cancel link isn’t valid any more. It may have been used already, or the deletion may be past its time.",
   device_proof_required: "This device couldn’t prove the request. Try again, and check that this device’s clock is right.",
   totp_already_enabled: "Two-factor is already on for this account.",
   totp_not_enabled: "Two-factor isn’t on for this account.",
@@ -141,8 +148,9 @@ export function createAuthApi(options: AuthApiOptions) {
       // Not our JSON (a proxy's page, say): fall back to the status.
     }
     const code = typeof error.code === "string" ? error.code : response.status === 401 ? "unauthorized" : response.status >= 500 ? "internal" : "invalid_request";
-    // A 401 on a signed-in call ends the session, except for the two-factor calls' own two answers (see `keepSession`).
-    const aboutTheRequest = keepSession && (code === "second_factor_failed" || code === "device_proof_required");
+    // A 401 on a signed-in call ends the session, except the answers about the request (see `keepSession`): a wrong code, a missing device
+    // signature, and a sign-in that is too old for the request.
+    const aboutTheRequest = keepSession && (code === "second_factor_failed" || code === "device_proof_required" || code === "reauthentication_required");
     if (authed && response.status === 401 && !aboutTheRequest) options.onUnauthorized();
     const retry = Number(response.headers.get("retry-after"));
     throw new ApiFailure(code, response.status, plainMessage(code), error.message ?? "", error, Number.isFinite(retry) && retry > 0 ? retry : null);
@@ -171,6 +179,17 @@ export function createAuthApi(options: AuthApiOptions) {
     setProtection: (body: SetProtection) => call<ProtectionLink>("POST", "/v1/keychain/protection", body, true),
     /** The signed protection settings from sequence `from`, oldest first (a page of 100; `more` says to ask again). */
     protectionChain: (from: number) => call<ProtectionChain>("GET", `/v1/keychain/protection?from=${from}`, undefined, true),
+    /**
+     * Schedules the account's deletion (seven days away), from a trusted device that signs the request, from a session that signed in
+     * in the last ten minutes, with a second-factor code when the account has one. Answers when it will happen; asking again while
+     * one is scheduled answers the same time. A wrong code, a refused signature and a stale sign-in are about the request, not the
+     * session, so they don't end it.
+     */
+    scheduleDeletion: (body: DeleteAccount) => call<DeletionScheduled>("POST", "/v1/accounts/delete", body, true, true),
+    /** Cancels a scheduled deletion: a trusted device's signature, or a pending device's with a sign-in from the last ten minutes. */
+    cancelDeletion: (body: CancelAccountDeletion) => call<void>("POST", "/v1/accounts/delete/cancel", body, true, true),
+    /** Cancels it with the token from the email's link. No session; it does nothing else. */
+    cancelDeletionByMail: (body: CancelDeletionByMail) => call<void>("POST", "/v1/accounts/delete/cancel-by-mail", body),
     /** Ends this device's session. */
     signOut: () => call<void>("DELETE", "/v1/sessions/current", undefined, true),
     /** Ends every session; a trusted device only. */

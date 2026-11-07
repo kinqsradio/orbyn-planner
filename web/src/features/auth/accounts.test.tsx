@@ -11,7 +11,7 @@ import { createMemoryKeyStore, type KeyStore } from "../../api/keyStore";
 import { FakeAuthCrypto } from "../../api/testing/FakeAuthCrypto";
 import { PROTECTION_GENESIS } from "../../api/testing/protectionFake";
 import { createMockEngine, MOCK_TOTP_CODE, type MockEngine } from "../../api/testing/MockEngine";
-import { confirmProtection, confirmTotp, enrolTotp, readProtection, signIn, signOut, signUp } from "../../auth/flows";
+import { confirmProtection, confirmTotp, enrolTotp, readProtection, scheduleDeletion, signIn, signOut, signUp } from "../../auth/flows";
 import { signedUp } from "../../auth/testing/signedUp";
 import { createAuthServices, type AuthServices } from "../../auth/services";
 import { deviceName } from "../../auth/deviceName";
@@ -1562,6 +1562,147 @@ describe("the protection level", () => {
     expect(screen.getByRole("button", { name: "Review" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(screen.queryByText(/Protection was changed to/)).toBeNull();
+  });
+});
+
+describe("deleting the account", () => {
+  async function signedIn() {
+    const keys = createMemoryKeyStore();
+    const auth = services(keys);
+    await mount(auth, "/settings");
+    await fillSignUp();
+    await screen.findByRole("navigation", { name: "Primary" });
+    await userEvent.click(await screen.findByRole("button", { name: "Privacy" }));
+    return { auth, keys };
+  }
+
+  const openDialog = async () => {
+    await userEvent.click(await screen.findByRole("button", { name: "Delete…" }));
+    return screen.getByRole("dialog", { name: "Delete your account" });
+  };
+  const fill = async (dialog: HTMLElement, password = SAM.password) => {
+    await userEvent.type(within(dialog).getByLabelText(/Type your email/), "sam@example.com"); // any case: the address is compared without it
+    await userEvent.type(within(dialog).getByLabelText(/Your password/), password);
+  };
+
+  it("asks for the typed email and the password, schedules the deletion, keeps working, and cancels from the banner", async () => {
+    const { auth } = await signedIn();
+    const dialog = await openDialog();
+    const confirm = within(dialog).getByRole("button", { name: "Delete account" });
+    expect(confirm).toBeDisabled();
+    await userEvent.type(within(dialog).getByLabelText(/Type your email/), "someone@else.example");
+    await userEvent.type(within(dialog).getByLabelText(/Your password/), SAM.password);
+    expect(confirm).toBeDisabled(); // the wrong email
+    await userEvent.clear(within(dialog).getByLabelText(/Type your email/));
+    await userEvent.type(within(dialog).getByLabelText(/Type your email/), "sam@example.com");
+    expect(confirm).toBeEnabled();
+    expect(within(dialog).queryByLabelText(/Code from your authenticator app/)).toBeNull(); // two-factor is off
+
+    await userEvent.click(confirm);
+    // The sign-in step and the schedule, in that order; nothing is deleted, and this device stays signed in.
+    expect(await screen.findByRole("dialog", { name: "Deletion scheduled" })).toHaveTextContent("Your account will be deleted on");
+    const paths = engine.calls.filter((c) => c.method === "POST").map((c) => c.path);
+    expect(paths.indexOf("/v1/sessions/login/finish")).toBeLessThan(paths.indexOf("/v1/accounts/delete"));
+    expect(engine.accounts.get("sam@example.com")!.deletion).toBeDefined();
+    expect(auth.tokens.getSession()).not.toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    // The banner and the Settings row say when, and cancel it.
+    const banner = await screen.findByRole("status", { name: "Account deletion" });
+    expect(banner).toHaveTextContent("Your account will be deleted on");
+    expect(screen.getByText(/Deletion scheduled for/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete…" })).toBeNull();
+    await userEvent.click(within(banner).getByRole("button", { name: "Cancel deletion" }));
+    await waitFor(() => expect(screen.queryByRole("status", { name: "Account deletion" })).toBeNull());
+    expect(engine.accounts.get("sam@example.com")!.deletion).toBeUndefined();
+    expect(await screen.findByRole("button", { name: "Delete…" })).toBeInTheDocument();
+  });
+
+  it("a wrong password says so and schedules nothing", async () => {
+    await signedIn();
+    const dialog = await openDialog();
+    await fill(dialog, "not the password");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete account" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("That email and password don’t match.");
+    expect(engine.accounts.get("sam@example.com")!.deletion).toBeUndefined();
+  });
+
+  it("with two-factor on it asks for a code too, says when it didn’t work, and takes a recovery code instead", async () => {
+    const { auth } = await signedIn();
+    const session = auth.tokens.getSession()!;
+    await enrolTotp(auth, session);
+    const { recovery_codes } = await confirmTotp(auth, session, MOCK_TOTP_CODE);
+    const dialog = await openDialog();
+    await fill(dialog);
+    const confirm = within(dialog).getByRole("button", { name: "Delete account" });
+    expect(await within(dialog).findByLabelText("Code from your authenticator app")).toBeInTheDocument();
+    expect(confirm).toBeDisabled(); // no code yet
+    await userEvent.type(within(dialog).getByLabelText("Code from your authenticator app"), "000000");
+    await userEvent.click(confirm);
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("That code didn’t work.");
+    expect(engine.accounts.get("sam@example.com")!.deletion).toBeUndefined(); // nothing was scheduled, and this device is still signed in
+    expect(auth.tokens.getSession()).not.toBeNull();
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Use a recovery code" }));
+    await userEvent.type(within(dialog).getByLabelText("Recovery code"), recovery_codes[0]!);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete account" }));
+    expect(await screen.findByRole("dialog", { name: "Deletion scheduled" })).toBeInTheDocument();
+    expect(engine.accounts.get("sam@example.com")!.deletion).toBeDefined();
+  });
+});
+
+describe("cancelling a scheduled deletion", () => {
+  /** An account with a deletion scheduled, made from its first browser. */
+  async function scheduled() {
+    const first = services();
+    const session = await signedUp(engine, first, SAM);
+    await scheduleDeletion(first, session);
+    return { first, session };
+  }
+
+  it("the email link's page does nothing when it opens, and sends the token only when the button is pressed, once", async () => {
+    await scheduled();
+    const token = engine.mail[0]!.token;
+    await mount(services(), `/cancel-deletion#${token}`);
+    expect(await screen.findByRole("heading", { name: "Cancel your account’s deletion?" })).toBeInTheDocument();
+    expect(window.location.hash).toBe(""); // the token is off the address
+    expect(engine.calls.some((c) => c.path.endsWith("/cancel-by-mail"))).toBe(false); // opening it acted on nothing
+    expect(engine.accounts.get("sam@example.com")!.deletion).toBeDefined();
+
+    await userEvent.click(screen.getByRole("button", { name: "Cancel deletion" }));
+    expect(await screen.findByRole("heading", { name: "Deletion cancelled" })).toBeInTheDocument();
+    expect(engine.accounts.get("sam@example.com")!.deletion).toBeUndefined();
+    expect(engine.calls.filter((c) => c.path.endsWith("/cancel-by-mail"))).toHaveLength(1);
+  });
+
+  it("an old or wrong link says it isn’t valid, and a link with no token says it is incomplete", async () => {
+    await scheduled();
+    const view = await mount(services(), "/cancel-deletion#not-the-token");
+    await userEvent.click(await screen.findByRole("button", { name: "Cancel deletion" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("This cancel link isn’t valid any more.");
+    expect(engine.accounts.get("sam@example.com")!.deletion).toBeDefined();
+    view.unmount();
+    await mount(services(), "/cancel-deletion");
+    expect(await screen.findByRole("heading", { name: "This link is incomplete" })).toBeInTheDocument();
+  });
+
+  it("a new device that chooses ‘cancel deletion’ at sign-in cancels it once signed in", async () => {
+    await scheduled();
+    await mount(services());
+    await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
+    await userEvent.click(screen.getByLabelText("Cancel my account’s scheduled deletion"));
+    await fillSignIn();
+    await waitFor(() => expect(engine.accounts.get("sam@example.com")!.deletion).toBeUndefined());
+    expect(engine.calls.some((c) => c.path === "/v1/accounts/delete/cancel")).toBe(true);
+  });
+
+  it("every signed-in device shows the banner, a device waiting for approval too", async () => {
+    const { first } = await scheduled();
+    const second = services();
+    await signIn(second, SAM); // pending
+    await mount(second);
+    expect(await screen.findByRole("status", { name: "Account deletion" })).toBeInTheDocument();
+    expect(first.tokens.getSession()).not.toBeNull();
   });
 });
 

@@ -4,7 +4,10 @@ import { SignInUnavailable } from "../../api/authCrypto";
 import { BusyButton } from "../../components/BusyButton";
 import { appsAvailable, downloadUrl } from "../../api/site";
 import { Icon } from "../../components/Icon";
-import { KeysForAnotherAccount, SecondFactorNeeded, signIn, signUp, type PendingSignUp } from "../../auth/flows";
+import type { StoredSession } from "../../api/keyStore";
+import { useUi } from "../../app/ui";
+import { deletionNotice } from "../../auth/deletionNotice";
+import { cancelDeletion, KeysForAnotherAccount, SecondFactorNeeded, signIn, signUp, type PendingSignUp } from "../../auth/flows";
 import { cryptoLoad } from "../../api/realCrypto";
 import { CryptoProblem, MODULE_LOAD_FAILED } from "./CryptoProblem";
 import { useAuth, type AuthScreen } from "../../auth/AuthProvider";
@@ -264,6 +267,24 @@ function SignIn({ go }: { go: (s: AuthScreen) => void }) {
   const [second, setSecond] = useState<SecondFactorNeeded | null>(null);
   const [recovery, setRecovery] = useState(false);
   const [factor, setFactor] = useState("");
+  /** "Cancel my account's deletion": once signed in, this device cancels the scheduled deletion (an email says to choose this). */
+  const [cancelIntent, setCancelIntent] = useState(deletionNotice.intent);
+  const ui = useUi();
+
+  /** The sign-in worked: cancel the deletion if the person asked, then leave the sign-in screens. */
+  const signedIn = async (session: StoredSession) => {
+    deletionNotice.setIntent(false);
+    if (cancelIntent) {
+      try {
+        await cancelDeletion(auth.services, session);
+        deletionNotice.set(null);
+        ui.showToast("Deletion cancelled.");
+      } catch (e) {
+        ui.showToast(`Signed in, but the deletion wasn’t cancelled. ${describeError(e)}`);
+      }
+    }
+    auth.closeAuth();
+  };
 
   // Leaving this screen with a sign-in still waiting for its code lets its keys go (releasing twice is harmless).
   useEffect(() => () => second?.cancel(), [second]);
@@ -281,8 +302,7 @@ function SignIn({ go }: { go: (s: AuthScreen) => void }) {
     setBusy(true);
     setError(null);
     try {
-      await second.complete(recovery ? { recoveryCode: factor.trim() } : { code: factor.replace(/\D/g, "") });
-      auth.closeAuth();
+      await signedIn(await second.complete(recovery ? { recoveryCode: factor.trim() } : { code: factor.replace(/\D/g, "") }));
     } catch (e) {
       // A wrong code leaves the sign-in open to try again; anything else has ended it, so the password step comes back.
       if (e instanceof ApiFailure && e.code === "second_factor_failed") setError(describeError(e));
@@ -301,8 +321,7 @@ function SignIn({ go }: { go: (s: AuthScreen) => void }) {
     setBusy(true);
     setError(null);
     try {
-      await signIn(auth.services, { email, password, replaceKeys });
-      auth.closeAuth();
+      await signedIn(await signIn(auth.services, { email, password, replaceKeys }));
     } catch (e) {
       if (e instanceof KeysForAnotherAccount) setForeign(e);
       else if (e instanceof SecondFactorNeeded) setSecond(e);
@@ -372,6 +391,10 @@ function SignIn({ go }: { go: (s: AuthScreen) => void }) {
         <label htmlFor="si-password">Password</label>
         <input id="si-password" className="field" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
       </div>
+      <label className="t3 small" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input type="checkbox" checked={cancelIntent} onChange={(e) => setCancelIntent(e.target.checked)} />
+        Cancel my account’s scheduled deletion
+      </label>
       <CryptoProblem />
       {error && <p className="err" role="alert">{error}</p>}
       <button type="submit" className="btn" disabled={busy || !email.trim() || !password}>

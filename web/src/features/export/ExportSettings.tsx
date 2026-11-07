@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useNow } from "../../app/clock";
 import { useStore } from "../../store/context";
 import { Modal } from "../../components/Modal";
@@ -12,7 +12,7 @@ const stamp = (d: Date) => d.toISOString().slice(0, 10);
  * Settings · Privacy · Your data. The export is made here from what is on this device and saved with a download (or the
  * desktop app's save dialog); nothing goes to the engine. The dialog says plainly that the file isn't encrypted.
  */
-export function ExportSettings() {
+export function ExportSettings({ children }: { children?: ReactNode }) {
   const store = useStore();
   const nowOnScreen = useNow();
   const [open, setOpen] = useState(false);
@@ -42,6 +42,7 @@ export function ExportSettings() {
           <span>Export your planner</span>
           <button type="button" className="ghost" onClick={() => { setMessage(null); setOpen(true); }}>Export…</button>
         </div>
+        {children}
       </div>
       {message && <span className="t3 small" role="status">{message}</span>}
       {open && (

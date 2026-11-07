@@ -9,6 +9,8 @@ export const DEVICE_REGISTER_CONTEXT = "orbyn/device-register/v1";
 export const DEVICE_LOGIN_CONTEXT = "orbyn/device-login/v1";
 export const TRUSTED_START_CONTEXT = "orbyn/trusted-login-start/v1";
 export const TOTP_MANAGE_CONTEXT = "orbyn/totp-manage/v1";
+export const ACCOUNT_DELETE_CONTEXT = "orbyn/account-delete/v1";
+export const ACCOUNT_DELETE_CANCEL_CONTEXT = "orbyn/account-delete-cancel/v1";
 
 /** A device's two public keys, 32 bytes each. */
 export interface DevicePublic {
@@ -68,4 +70,11 @@ export function totpManageMessage(accountId: string, deviceId: string, action: s
   const time = new Uint8Array(8);
   new DataView(time.buffer).setBigInt64(0, BigInt(signedAt), false);
   return concat(uuidBytes(accountId), uuidBytes(deviceId), prefixed(utf8(action)), prefixed(utf8(code)), time);
+}
+
+/** What a device signs to schedule the account's deletion, or (under its cancel context) to cancel it: account, device and the time. */
+export function accountDeleteMessage(accountId: string, deviceId: string, signedAt: number): Uint8Array {
+  const time = new Uint8Array(8);
+  new DataView(time.buffer).setBigInt64(0, BigInt(signedAt), false);
+  return concat(uuidBytes(accountId), uuidBytes(deviceId), time);
 }
