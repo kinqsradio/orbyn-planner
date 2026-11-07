@@ -32,6 +32,16 @@ export function deviceDataAnswer(accountId: string): DeviceDataAnswer | null {
   return memory.get(accountId) ?? null;
 }
 
+/** Forgets what was answered for this account on this browser (its copy is being removed). */
+export function forgetDeviceDataAnswer(accountId: string): void {
+  memory.delete(accountId);
+  try {
+    localStorage.removeItem(key(accountId));
+  } catch {
+    // Storage unavailable: nothing was kept there.
+  }
+}
+
 export function rememberDeviceDataAnswer(accountId: string, answer: DeviceDataAnswer): void {
   memory.set(accountId, answer);
   try {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ApiFailure, createAuthApi, plainMessage } from "./auth";
+import { ApiFailure, STATUS_TIMEOUT_MS, createAuthApi, plainMessage } from "./auth";
 
 function api(respond: (url: string, init: RequestInit) => Response | Promise<Response>, token: string | null = "tok") {
   const fetchMock = vi.fn(async (url: string, init: RequestInit) => respond(url, init));
@@ -133,5 +133,29 @@ describe("errors", () => {
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
     await expect(client.loginFinish({} as never)).rejects.toMatchObject({ status: 401 });
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the account status check", () => {
+  it("sends no token, answers null for a 404, and gives up after the timeout instead of hanging", async () => {
+    const { client, fetchMock } = api(() => error(404, "not_found"));
+    expect(await client.accountStatus("acct-1")).toBeNull();
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://engine.test/v1/accounts/status");
+    expect((init.headers as Record<string, string>).authorization).toBeUndefined();
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+
+    // A server that never answers: the request is aborted when its timeout fires (the timeout's signal stands in for the clock).
+    const timeout = new AbortController();
+    const spy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(timeout.signal);
+    try {
+      const hung = api((_url, request) => new Promise<Response>((_resolve, reject) => request.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")))));
+      const result = hung.client.accountStatus("acct-1").then(() => "answered", (e: unknown) => (e instanceof ApiFailure ? e.code : "other"));
+      expect(spy).toHaveBeenCalledWith(STATUS_TIMEOUT_MS);
+      timeout.abort();
+      expect(await result).toBe("network"); // read as unreachable
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

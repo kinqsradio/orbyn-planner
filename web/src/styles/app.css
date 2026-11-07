@@ -540,3 +540,21 @@ button.pillx { border: 0; }
   .delete-form .dialog-actions { flex-direction: column-reverse; align-items: stretch; }
   .delete-form .dialog-actions .ghost, .delete-form .dialog-actions .danger { height: var(--sp-40); border-radius: var(--r-12); justify-content: center; }
 }
+
+/* A deleted account: choose, exported, failed, removing and last screens (Account Designs: "The account was deleted"). */
+.checking-card { width: var(--sp-420); max-width: 100%; align-items: flex-start; gap: var(--sp-12); }
+.checking-title { font-weight: var(--fw-medium); color: var(--t1); }
+.checking-card .line { display: flex; gap: var(--sp-10); align-items: center; }
+.spin.still { animation: none; width: var(--sp-16); height: var(--sp-16); }
+.deleted-card { width: var(--sp-440); max-width: 100%; text-align: left; align-items: stretch; }
+.deleted-card .line { display: flex; gap: var(--sp-8); align-items: center; }
+.deleted-card .t4.small { font-size: var(--fs-12); }
+.deleted-card .pv-row { display: flex; gap: var(--sp-8); flex-wrap: wrap; }
+.deleted-card .ghost.red { color: var(--red); }
+.prog { height: var(--sp-6); border-radius: var(--r-pill); background: var(--line2); overflow: hidden; }
+.prog i { display: block; height: 100%; background: var(--t1); border-radius: var(--r-pill); }
+.prog.blue i { background: var(--blue-solid); }
+@media (max-width: 767px) {
+  .deleted-card .pv-row { flex-direction: column; }
+  .deleted-card .pv-row > * { justify-content: center; height: var(--sp-44); }
+}

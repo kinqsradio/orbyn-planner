@@ -1,3 +1,4 @@
+import { deletedAccount } from "../../auth/deletedAccount";
 import { sessionToken } from "../../api/session";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -80,6 +81,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  deletedAccount.set(null);
   document.getElementById("root")?.remove();
   registerAuthCrypto(null);
 });
@@ -297,18 +299,20 @@ describe("sign in", () => {
     it("asks first, sends nothing on Cancel, and keeps the keys", async () => {
       const keys = await withOtherAccount();
       const before = await keys.loadKeys();
-      const sent = engine.calls.length;
+      // The start-up check of a device that kept its keys (the status route) is not part of what this is about.
+      const count = () => engine.calls.filter((c) => c.path !== "/v1/accounts/status").length;
+      const sent = count();
       await mount(services(keys));
       await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
       await fillSignIn("alex@example.com", "another long password");
       const dialog = await screen.findByRole("alertdialog", { name: "Sign in to a different account" });
       expect(dialog).toHaveTextContent("s•••@e•••.com");
       expect(dialog).toHaveTextContent("removes them from this browser");
-      expect(engine.calls.length).toBe(sent);
+      expect(count()).toBe(sent);
       await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
       expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument();
-      expect(engine.calls.length).toBe(sent);
+      expect(count()).toBe(sent);
       expect(await keys.loadKeys()).toEqual(before);
     });
 
@@ -1723,6 +1727,103 @@ describe("while a deletion is scheduled", () => {
     engine.accounts.get("sam@example.com")!.deletion = { at: nowMs + 7 * 86_400_000, token: "t" };
     await expect(auth.api.setProtection({ level: "standard", seq: 9, prev: "x", signed_at: 1, device_signature: "s" } as never)).rejects.toMatchObject({ code: "deletion_scheduled" });
     expect(await screen.findByRole("status", { name: "Account deletion" })).toBeInTheDocument();
+  });
+});
+
+describe("an account that was deleted", () => {
+  const statusCalls = () => engine.calls.filter((c) => c.path === "/v1/accounts/status");
+
+  it("a 401 asks the status route once; a 200 shows the deleted-account screen and nothing else opens", async () => {
+    const auth = services();
+    await mount(auth);
+    await fillSignUp();
+    await todayShown();
+    expect(statusCalls()).toHaveLength(0); // nothing is asked while the session works
+    engine.deleteAccountNow(SAM.email, "2026-11-14T00:00:00Z");
+    const card = await screen.findByRole("group", { name: "This account was deleted" });
+    expect(card).toHaveTextContent("Sam@Example.com".toLowerCase() + " was deleted on Saturday 14 November.");
+    expect(screen.queryByRole("navigation", { name: "Primary" })).toBeNull();
+    expect(statusCalls()).toHaveLength(1);
+    expect(statusCalls()[0]!.body).toEqual({ account_id: expect.any(String) });
+  });
+
+  it("while the status check is out the landing stays blank, then a Checking card shows after 400 ms, then the right screen", async () => {
+    let release: () => void = () => undefined;
+    let asked = 0;
+    const gate = new Promise<void>((r) => (release = r));
+    const keys = createMemoryKeyStore();
+    const auth = createAuthServices({
+      wrapSecret: async () => wrapFor(keys).slice(),
+      fetch: ((input: RequestInfo | URL, init?: RequestInit) => (String(input).endsWith("/v1/accounts/status") ? (asked += 1, gate).then(() => engine.fetch(input, init)) : engine.fetch(input, init))) as typeof fetch,
+      baseUrl: "http://engine.test",
+      keys,
+      crypto: () => crypto,
+      now: () => nowMs,
+      poll: FAST_POLL,
+    });
+    await mount(auth);
+    await fillSignUp();
+    await todayShown();
+    engine.deleteAccountNow(SAM.email, "2026-11-14T00:00:00Z");
+    // The session ended: nothing of the landing shows while the check is out.
+    await waitFor(() => expect(asked).toBe(1));
+    expect(screen.queryByRole("heading", { name: /Your tasks and calendar/ })).toBeNull();
+    try {
+      expect(await screen.findByText("Checking your account…", {}, { timeout: 2000 })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: /Your tasks and calendar/ })).toBeNull();
+    } finally {
+      release();
+    }
+    expect(await screen.findByRole("group", { name: "This account was deleted" })).toBeInTheDocument();
+    expect(screen.queryByText("Checking your account…")).toBeNull();
+  });
+
+  it("after a reload the device that kept its keys asks again, so a check that never answered is not lost", async () => {
+    const keys = createMemoryKeyStore();
+    const first = await mount(services(keys));
+    await fillSignUp();
+    await todayShown();
+    first.unmount();
+    await keys.clearSession(); // the 401 cleared the session; the keys stay
+    engine.deleteAccountNow(SAM.email, "2026-11-14T00:00:00Z");
+    expect(statusCalls()).toHaveLength(0);
+    await mount(services(keys)); // a new page load
+    expect(await screen.findByRole("group", { name: "This account was deleted" })).toBeInTheDocument();
+    expect(statusCalls()).toHaveLength(1);
+  });
+
+  it("a 404 is an ordinary signed-out state: the landing page, nothing removed, and the question was asked once", async () => {
+    await mount(services());
+    await fillSignUp();
+    await todayShown();
+    engine.expireAllSessions();
+    expect(await screen.findByRole("heading", { name: /Your tasks and calendar/ })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "This account was deleted" })).toBeNull();
+    expect(statusCalls()).toHaveLength(1);
+  });
+
+  it("if the status route can't be reached nothing is shown (it is asked again on the next 401)", async () => {
+    engine.refuseNext("/v1/accounts/status", 503, "internal");
+    const auth = services();
+    await mount(auth);
+    await fillSignUp();
+    await todayShown();
+    engine.deleteAccountNow(SAM.email);
+    expect(await screen.findByRole("heading", { name: /Your tasks and calendar/ })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "This account was deleted" })).toBeNull();
+    expect(statusCalls()).toHaveLength(1);
+  });
+
+  it("Create a new account leaves the screen for the sign-up form", async () => {
+    await mount(services(), "/today", false);
+    await fillSignUp();
+    await todayShown();
+    engine.deleteAccountNow(SAM.email);
+    await screen.findByRole("group", { name: "This account was deleted" });
+    await userEvent.click(screen.getByRole("button", { name: "Remove it now" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Create a new account" }));
+    expect(await screen.findByLabelText("Name")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "This account was deleted" })).toBeNull();
   });
 });
 

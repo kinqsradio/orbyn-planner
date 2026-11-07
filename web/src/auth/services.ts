@@ -1,3 +1,4 @@
+import { askWhetherDeleted } from "./deletedAccount";
 import { createAuthApi, type AuthApi } from "../api/auth";
 import { requireAuthCrypto, type AuthCrypto } from "../api/authCrypto";
 import { defaultKeyStore, withMemoryFallback, type FallbackKeyStore, type KeyStore } from "../api/keyStore";
@@ -61,8 +62,12 @@ export function createAuthServices(options: AuthServiceOptions = {}): AuthServic
     fetch: options.fetch,
     baseUrl: options.baseUrl,
     token: tokens.token,
-    // A 401 on a signed-in call: the session is over, so forget the token.
-    onUnauthorized: () => void tokens.clear(),
+    // A 401 on a signed-in call: the session is over, so forget the token, and ask once whether the account was deleted.
+    onUnauthorized: () => {
+      const ended = tokens.getSession();
+      void tokens.clear();
+      if (ended && later.api) void askWhetherDeleted(later.api, ended, keys.inMemory);
+    },
   });
   later.api = api;
   const crypto = options.crypto ?? requireAuthCrypto;

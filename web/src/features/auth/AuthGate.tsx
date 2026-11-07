@@ -1,6 +1,9 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useAuth } from "../../auth/AuthProvider";
+import { accountCheck, deletedAccount } from "../../auth/deletedAccount";
+import type { AuthScreen } from "../../auth/AuthProvider";
 import { AuthScreens } from "./AuthScreens";
+import { CheckingAccount, DeletedAccountScreen } from "./DeletedAccount";
 import { DeletionBanner, DeletionWatcher } from "./DeletionBanner";
 import { KeysNotSaved } from "./KeysNotSaved";
 import { PendingScreen } from "./PendingScreen";
@@ -66,13 +69,32 @@ function RepairNotice({ onApprove, onDismiss }: { onApprove: () => void; onDismi
 export function AuthGate({ children }: { children: ReactNode }) {
   const auth = useAuth();
   const incoming = useIncomingApproval();
+  const deleted = useSyncExternalStore(deletedAccount.subscribe, deletedAccount.get);
+  const checking = useSyncExternalStore(accountCheck.subscribe, accountCheck.get);
+  /** Where the sign-up or sign-in the person chose on the deleted-account screen opens. */
+  const [leaveTo, setLeaveTo] = useState<AuthScreen>("landing");
   if (!auth) return <>{children}</>;
+  // The account was deleted: nothing else opens until the person has chosen what to do with this browser's copy.
+  if (deleted) {
+    return (
+      <DeletedAccountScreen
+        account={deleted}
+        services={auth.services}
+        onLeave={(to) => {
+          setLeaveTo(to);
+          deletedAccount.set(null);
+        }}
+      />
+    );
+  }
   if (auth.status === "loading") return null;
+  // A 401 just ended the session and the status check is under way: nothing of the landing shows until it answers.
+  if (checking && auth.status === "landing") return <CheckingAccount />;
   if (auth.status === "landing") {
     return (
       <>
         {auth.problem && <p className="err" role="alert" style={{ position: "fixed", top: "var(--sp-8)", left: "var(--sp-16)", right: "var(--sp-16)", zIndex: 60 }}>{auth.problem}</p>}
-        <AuthScreens start="landing" />
+        <AuthScreens start={leaveTo} />
       </>
     );
   }

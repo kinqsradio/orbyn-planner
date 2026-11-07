@@ -54,6 +54,19 @@ async function deleteDatabase(name: string): Promise<void> {
   });
 }
 
+/**
+ * Whether this browser still holds a database for the account. A browser that cannot list databases is taken to hold one, so the
+ * answer errs toward offering the export rather than hiding a copy.
+ */
+export async function accountPlannerExists(accountId: string): Promise<boolean> {
+  if (typeof indexedDB === "undefined" || typeof indexedDB.databases !== "function") return true;
+  try {
+    return (await indexedDB.databases()).some((d) => d.name === accountDb(accountId));
+  } catch {
+    return true;
+  }
+}
+
 /** Closes an account's planner and deletes its database from this browser: its records and its outbox. */
 export async function removeAccountPlanner(accountId: string): Promise<void> {
   closePlanner(accountId);
