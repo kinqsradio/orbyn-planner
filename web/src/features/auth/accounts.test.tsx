@@ -1008,7 +1008,7 @@ describe("signing out", () => {
     const ask = screen.getByRole("dialog", { name: "Sign out" });
     expect(ask).toHaveTextContent("Remove this account’s planner from this browser?");
     expect(ask).toHaveTextContent("It stays on this browser unencrypted.");
-    expect(within(ask).getByRole("button", { name: "Cancel" })).toHaveFocus(); // the safe choice is the default: Enter must not remove the planner
+    await waitFor(() => expect(within(ask).getByRole("button", { name: "Cancel" })).toHaveFocus()); // the safe choice is the default: Enter must not remove the planner (focus moves in just after the dialog appears)
     expect(within(ask).getByRole("button", { name: "Remove" })).not.toHaveFocus();
     await userEvent.click(within(ask).getByRole("button", { name: "Keep on this browser" }));
     expect(await screen.findByRole("heading", { name: /Your tasks and calendar/ })).toBeInTheDocument();

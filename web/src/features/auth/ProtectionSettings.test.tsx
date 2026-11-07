@@ -35,7 +35,8 @@ describe("the protection card", () => {
     const dialog = await screen.findByRole("dialog", { name: "Confirm your protection level" });
     expect(dialog).toHaveTextContent("Your account uses Standard protection: data is encrypted on your devices, and Orbyn keeps a recovery copy of the keys.");
     expect(within(dialog).getByText("Set on").parentElement).toHaveTextContent("MacBook Air · 3 Nov");
-    expect(within(dialog).getByRole("button", { name: "Not now" })).toHaveFocus(); // the safe choice has focus
+    // Focus moves in when the dialog's effects have run, which is just after it appears: wait for it, not for the first paint.
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Not now" })).toHaveFocus()); // the safe choice has focus
     await userEvent.click(within(dialog).getByRole("button", { name: "Not now" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(await card()).toHaveTextContent("Confirming");
