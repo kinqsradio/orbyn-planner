@@ -2,7 +2,7 @@ import { useNow } from "../../app/clock";
 import { useUi } from "../../app/ui";
 import { formatTime, parseDue } from "../../lib/dates";
 import { usePlanner } from "../../store/context";
-import { shownTags, TagChip } from "./TagChips";
+import { shownTags, TagChip, tagLabels } from "./TagChips";
 import type { Task } from "../../store/types";
 import { dueText, needsAction } from "./selectors";
 import { useComplete } from "./useComplete";
@@ -43,6 +43,7 @@ export function TaskRow({ task, layout = "tasks", extra }: { task: Task; layout?
   const { open } = useTaskActions(task);
   const now = useNow();
   const chips = shownTags(task, tags);
+  const labels = tagLabels(tags);
   const list = lists.find((l) => l.id === task.listId);
   const due = (
     <span className={needsAction(task, now) ? "due amber" : "due"}>{task.done && layout === "list" ? "Done" : dueText(task, now)}</span>
@@ -60,7 +61,7 @@ export function TaskRow({ task, layout = "tasks", extra }: { task: Task; layout?
       <span><Check task={task} /></span>
       <span className="ttwrap">
         <button type="button" className="tt link-btn" onClick={open}>{task.title}</button>
-        {chips.map((t) => <TagChip key={t.id} tag={t} />)}
+        {chips.map((t) => <TagChip key={t.id} tag={t} label={labels.get(t.id)} />)}
       </span>
       {layout === "tasks" && (
         <>

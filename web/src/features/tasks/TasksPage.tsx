@@ -8,6 +8,7 @@ import { formatDue } from "../../lib/dates";
 import { usePlanner, useStore } from "../../store/context";
 import { describeParse, parseQuickAdd } from "./quickAdd";
 import { DUE_FILTERS, activeTasks, groupTasks, isOpen, matchesDue, sortByDue, type DueFilter } from "./selectors";
+import { tagLabels } from "./TagChips";
 import { Swatch, TaskRow, useTaskActions } from "./TaskRow";
 import type { Task } from "../../store/types";
 
@@ -135,7 +136,7 @@ export function TasksPage() {
             <select value={liveTags.some((t) => t.id === tagId) ? tagId : ""} onChange={(e) => setTagId(e.target.value)}>
               <option value="">Any tag</option>
               {liveTags.map((t) => (
-                <option key={t.id} value={t.id}>{t.name}</option>
+                <option key={t.id} value={t.id}>{tagLabels(tags).get(t.id) ?? t.name}</option>
               ))}
             </select>
           </label>

@@ -1,20 +1,32 @@
 import { useState } from "react";
 import { usePlanner, useStore } from "../../store/context";
-import { LIST_COLOURS, type Tag } from "../../store/types";
-import { TAG_COLOUR_NAMES } from "../tasks/TagChips";
+import { DuplicateTagName, LIST_COLOURS, type Tag } from "../../store/types";
+import { TAG_COLOUR_NAMES, tagLabels } from "../tasks/TagChips";
 import { Swatch } from "../tasks/TaskRow";
 
-function TagRow({ tag }: { tag: Tag }) {
+function TagRow({ tag, label }: { tag: Tag; label: string }) {
   const store = useStore();
   const [name, setName] = useState(tag.name);
+  const [error, setError] = useState<string | null>(null);
   const save = () => {
     const next = name.trim();
+    setError(null);
     if (!next) setName(tag.name);
-    else if (next !== tag.name) store.updateTag(tag.id, { name: next });
+    else if (next !== tag.name) {
+      try {
+        store.updateTag(tag.id, { name: next });
+      } catch (e) {
+        if (!(e instanceof DuplicateTagName)) throw e;
+        setError(e.message);
+        setName(tag.name);
+      }
+    }
   };
   return (
-    <div className="kv" style={{ height: 44, gap: 10 }}>
+    <div className="kv" style={{ minHeight: 44, gap: 10, flexWrap: "wrap" }}>
       <input className="inp" aria-label={`Name of tag ${tag.name}`} value={name} onChange={(e) => setName(e.target.value)} onBlur={save} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
+      {label !== tag.name && <span className="t3 small">shown as {label}</span>}
+      {error && <span className="err" role="alert">{error}</span>}
       <div role="radiogroup" aria-label={`Colour of ${tag.name}`} className="colours">
         {LIST_COLOURS.map((c) => (
           <button key={c} type="button" role="radio" aria-checked={tag.colour === c} aria-label={TAG_COLOUR_NAMES[c]} className="colour-btn" onClick={() => store.updateTag(tag.id, { colour: c })}>
@@ -36,11 +48,20 @@ export function TagsSettings() {
   const deleted = tags.filter((t) => t.deletedAt !== null);
   const uses = (id: string) => tasks.filter((t) => t.deletedAt === null && t.tags.includes(id)).length;
 
+  const [addError, setAddError] = useState<string | null>(null);
+  const labels = tagLabels(tags);
+
   const add = () => {
     const next = name.trim();
     if (!next) return;
-    store.addTag(next, LIST_COLOURS[tags.length % LIST_COLOURS.length]!);
-    setName("");
+    try {
+      store.addTag(next, LIST_COLOURS[tags.length % LIST_COLOURS.length]!);
+      setName("");
+      setAddError(null);
+    } catch (e) {
+      if (!(e instanceof DuplicateTagName)) throw e;
+      setAddError(e.message);
+    }
   };
 
   return (
@@ -48,12 +69,13 @@ export function TagsSettings() {
       <div className="bh"><b>Your tags</b><span></span></div>
       <div className="card" style={{ gap: 0, padding: "0 14px" }}>
         {live.length === 0 && <div className="kv" style={{ height: 44 }}><span className="t3">No tags yet.</span></div>}
-        {live.map((t) => <TagRow key={t.id} tag={t} />)}
+        {live.map((t) => <TagRow key={t.id} tag={t} label={labels.get(t.id) ?? t.name} />)}
       </div>
       <div className="ctl" style={{ display: "flex", gap: 8 }}>
-        <input className="inp" aria-label="New tag name" placeholder="New tag" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} />
+        <input className="inp" aria-label="New tag name" placeholder="New tag" value={name} onChange={(e) => { setName(e.target.value); setAddError(null); }} onKeyDown={(e) => e.key === "Enter" && add()} />
         <button type="button" className="btn" onClick={add}>Add tag</button>
       </div>
+      {addError && <span className="err" role="alert">{addError}</span>}
       {deleted.length > 0 && (
         <>
           <div className="bh"><b>Deleted tags</b><span></span></div>

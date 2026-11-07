@@ -15,7 +15,7 @@ import { allowedScopes, editTaskRepeat, undoableTasks, type RepeatEdit } from ".
 import { LIST_COLOURS, PRIORITIES, type Task } from "../../store/types";
 import { ScopeDialog } from "../calendar/ScopeDialog";
 import { RepeatPicker } from "./RepeatPicker";
-import { shownTags, TagChip } from "./TagChips";
+import { shownTags, TagChip, tagLabels } from "./TagChips";
 import { TASK_REMINDERS } from "./reminder";
 import { needsAction } from "./selectors";
 import { useComplete } from "./useComplete";
@@ -196,13 +196,13 @@ function Panel({ task }: { task: Task }) {
         <span id="task-tags-label">Tags</span>
         <b className="ctl tagrow" role="group" aria-labelledby="task-tags-label">
           {shownTags(task, tags).map((t) => (
-            <TagChip key={t.id} tag={t} onRemove={() => store.setTaskTag(task.id, t.id, false)} />
+            <TagChip key={t.id} tag={t} label={tagLabels(tags).get(t.id)} onRemove={() => store.setTaskTag(task.id, t.id, false)} />
           ))}
           {tags.some((t) => t.deletedAt === null && !task.tags.includes(t.id)) && (
             <select className="inp" aria-label="Add a tag" value="" onChange={(e) => e.target.value && store.setTaskTag(task.id, e.target.value, true)}>
               <option value="">Add a tag</option>
               {tags.filter((t) => t.deletedAt === null && !task.tags.includes(t.id)).map((t) => (
-                <option key={t.id} value={t.id}>{t.name}</option>
+                <option key={t.id} value={t.id}>{tagLabels(tags).get(t.id) ?? t.name}</option>
               ))}
             </select>
           )}

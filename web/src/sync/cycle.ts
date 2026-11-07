@@ -12,7 +12,7 @@ import type { ZoneList } from "../generated/ZoneList";
 import { refKey } from "../store/outbox";
 import { storedOf } from "../store/records";
 import type { OutboxEntry, PlannerStore, RecordType, RemoteChange } from "../store/types";
-import { acceptable, stampFields, valuesOf, zoneOf, type Accepted, type Applied, type Stamp, type StampedFields, type ZoneCheck } from "./mapping";
+import { acceptable, sanitizeFields, stampFields, valuesOf, zoneOf, type Accepted, type Applied, type Stamp, type StampedFields, type ZoneCheck } from "./mapping";
 import { pinnedTokens, type ZoneTokens } from "./tokens";
 
 /** Something that stops a sync with a reason the person can be told. */
@@ -157,6 +157,7 @@ export async function runCycle(
         rejected.push(id); // not what this zone may hold: quarantined, never applied
         continue;
       }
+      fields = sanitizeFields(type, fields);
       const key = refKey({ type, id });
       // An edit not yet staged is newer than anything the engine has: it stays on screen, and is staged next.
       const pending = outbox.get(key);

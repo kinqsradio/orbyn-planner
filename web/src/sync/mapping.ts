@@ -1,3 +1,4 @@
+import { validTagFields } from "../store/records";
 import type { RecordType } from "../store/types";
 
 /** A hybrid logical clock reading, as the engine writes it. */
@@ -119,3 +120,12 @@ export function valuesOf(fields: StampedFields): Record<string, unknown> {
   for (const [name, f] of Object.entries(fields)) if (name !== "_deleted") out[name] = f.value;
   return out;
 }
+
+/**
+ * A record's fields as they may be stored. A task keeps arriving even when it carries bad tag fields: those (a `tag:<id>` whose
+ * id isn't UUID-form, a value that isn't true or false, or more than 100 tags) are dropped, and the task is not quarantined.
+ */
+export function sanitizeFields(type: RecordType, fields: Record<string, unknown>): Record<string, unknown> {
+  return type === "task" ? validTagFields(fields) : fields;
+}
+
