@@ -34,7 +34,7 @@ describe("the protection card", () => {
     read.mockResolvedValue(report({ state: "provisional", seq: 0 }));
     const first = render(<ProtectionSettings />);
     const dialog = await screen.findByRole("dialog", { name: "Confirm your protection level" });
-    expect(dialog).toHaveTextContent("Your account uses Standard protection: data is encrypted on your devices, and Orbyn keeps a recovery copy of the keys.");
+    expect(dialog).toHaveTextContent("Your account uses Standard protection: data is encrypted on your devices, and only your trusted devices hold the keys; Standard’s recovery copy is Planned.");
     expect(within(dialog).getByText("Set on").parentElement).toHaveTextContent("MacBook Air · 3 Nov");
     // Focus moves in when the dialog's effects have run, which is just after it appears: wait for it, not for the first paint.
     await waitFor(() => expect(within(dialog).getByRole("button", { name: "Not now" })).toHaveFocus()); // the safe choice has focus
@@ -132,7 +132,7 @@ describe("the other cards", () => {
     cleanup();
     read.mockResolvedValue(report({}));
     render(<ProtectionSettings />);
-    expect(await card()).toHaveTextContent("With Standard, Orbyn keeps a recovery copy of your keys, so it can read your data. Advanced protection, planned, removes that copy.");
+    expect(await card()).toHaveTextContent("Right now only your trusted devices hold your keys, and Orbyn holds no copy of them. Standard’s recovery copy and account recovery are Planned, and so is Advanced protection.");
   });
 });
 

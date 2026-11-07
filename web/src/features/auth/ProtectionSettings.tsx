@@ -104,7 +104,7 @@ function ConfirmDialog({ report, changedNow, onClose, onNotNow, onDone, onConfli
           {!head ? (
             <>No device has set a protection level for this account yet. Confirming sets <b style={{ fontWeight: "var(--fw-medium)" }}>Standard protection.</b></>
           ) : level === "standard" ? (
-            <>Your account uses <b style={{ fontWeight: "var(--fw-medium)" }}>Standard protection</b>: data is encrypted on your devices, and Orbyn keeps a recovery copy of the keys. Confirming lets this browser check every later change.</>
+            <>Your account uses <b style={{ fontWeight: "var(--fw-medium)" }}>Standard protection</b>: data is encrypted on your devices, and only your trusted devices hold the keys; Standard’s recovery copy is Planned. Confirming lets this browser check every later change.</>
           ) : (
             <>Your account uses <b style={{ fontWeight: "var(--fw-medium)" }}>Advanced protection</b>: only your devices hold the keys. Confirming lets this browser check every later change.</>
           )}
@@ -272,7 +272,7 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
             <span className="t2 pv-text">
               Confirmed by your devices.
               {report.head && ` Last change ${day(secsOf(report.head))}${report.signer?.name ? ` on ${report.signer.name}` : ""}.`}
-              {report.level === "standard" && <><br /><span className="t3">With Standard, Orbyn keeps a recovery copy of your keys, so it can read your data. Advanced protection, planned, removes that copy.</span></>}
+              {report.level === "standard" && <><br /><span className="t3">Right now only your trusted devices hold your keys, and Orbyn holds no copy of them. Standard’s recovery copy and account recovery are Planned, and so is Advanced protection.</span></>}
             </span>
           </>
         ) : kind === "confirming" ? (
