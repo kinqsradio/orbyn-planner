@@ -83,8 +83,8 @@ function applyTaskFields(task: Task, raw: Fields): Task {
     if (k.startsWith(TAG_PREFIX)) {
       const id = k.slice(TAG_PREFIX.length);
       const rest = next.tags.filter((t) => t !== id);
-      // A tag beyond the cap is not taken on.
-      next = { ...next, tags: v === true && (rest.length < MAX_TAGS_PER_TASK || next.tags.includes(id)) ? [...rest, id].sort() : v === true ? next.tags : rest };
+      // The merged set, then the first 100 by id: exactly what reading the stored record gives, so a reload never changes which show.
+      next = { ...next, tags: (v === true ? [...rest, id] : rest).sort().slice(0, MAX_TAGS_PER_TASK) };
     } else if (k.startsWith(SKIP_PREFIX)) {
       if (!next.repeat) continue;
       const date = k.slice(SKIP_PREFIX.length);

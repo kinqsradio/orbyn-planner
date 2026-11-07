@@ -4,7 +4,7 @@ import { sanitizeFields, acceptable } from "../sync/mapping";
 import { tagLabels } from "../features/tasks/TagChips";
 import { LocalStore } from "./LocalStore";
 import { MemoryPersistence } from "./persistence";
-import { MAX_TAGS_PER_TASK, viewOf } from "./records";
+import { applyFields, MAX_TAGS_PER_TASK, viewOf } from "./records";
 import { DuplicateTagName, type Tag, type Task } from "./types";
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -12,15 +12,23 @@ const task = (fields: Record<string, unknown>) => ({ id: "t1", title: "Plan", li
 
 describe("tag fields are validated on read and on the way in", () => {
   const many = Object.fromEntries(Array.from({ length: 105 }, (_, i) => [`tag:${id(i + 1)}`, true]));
-  const cases: { name: string; fields: Record<string, unknown>; tags: string[] }[] = [
+  const base = Object.fromEntries(Array.from({ length: 100 }, (_, i) => [`tag:${id(i + 2)}`, true])); // ids 2..101
+  const cases: { name: string; fields: Record<string, unknown>; tags: string[]; base?: Record<string, unknown> }[] = [
     { name: "a UUID-form id with true is a tag", fields: { [`tag:${id(1)}`]: true }, tags: [id(1)] },
     { name: "false removes, and is kept for a valid id", fields: { [`tag:${id(1)}`]: false }, tags: [] },
     { name: "an id that isn't UUID-form is ignored", fields: { "tag:work": true, "tag:": true, "tag:../x": true, [`tag:${id(2)}`]: true }, tags: [id(2)] },
     { name: "a value that isn't true or false is ignored", fields: { [`tag:${id(1)}`]: "yes", [`tag:${id(2)}`]: 1, [`tag:${id(3)}`]: null }, tags: [] },
     { name: "more than 100 tags: the first 100 by id stay", fields: many, tags: Array.from({ length: MAX_TAGS_PER_TASK }, (_, i) => id(i + 1)) },
+    { name: "live apply keeps the same 100 as a reload: a new id that sorts first pushes the last one out", base, fields: { [`tag:${id(1)}`]: true }, tags: Array.from({ length: MAX_TAGS_PER_TASK }, (_, i) => id(i + 1)) },
   ];
 
-  it.each(cases)("$name", ({ fields, tags }) => {
+  it.each(cases)("$name", ({ fields, tags, base: before }) => {
+    if (before) {
+      const live = applyFields("task", viewOf("task", task(before) as never), fields) as unknown as Task;
+      expect(live.tags).toEqual(tags);
+      expect(live.tags).toEqual((viewOf("task", task({ ...before, ...fields }) as never) as unknown as Task).tags); // what a reload shows
+      return;
+    }
     // Read: the stored record gives only the trusted tags.
     expect((viewOf("task", task(fields) as never) as unknown as Task).tags).toEqual(tags);
     // In: fields from another device are cleaned, and the task is still accepted rather than quarantined.
