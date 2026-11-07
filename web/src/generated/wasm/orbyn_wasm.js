@@ -1177,6 +1177,55 @@ export class SyncEngine {
         }
     }
     /**
+     * Where to fetch the chain from (`GET /v1/keychain/protection?from=`): the verified head's
+     * sequence, or the one an approver vouched for, or 1.
+     * @returns {number}
+     */
+    protectionFrom() {
+        const ret = wasm.syncengine_protectionFrom(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * What this device knows about the protection level, as `{state, level}`: `verified` (the
+     * whole chain was walked to the server's head and nothing stopped it, from an anchor this
+     * device trusts: the only state in which Standard may be acted on, for escrow),
+     * `provisional` (a verified setting that may not be the newest: show it as a guess), or
+     * `unknown` (no level, and not Standard).
+     * @returns {string}
+     */
+    protectionLevel() {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16) >>> 0;
+            wasm.syncengine_protectionLevel(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+            var ptr1 = r0;
+            var len1 = r1;
+            if (r3) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(r2);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export3(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * The sequence of the newest verified setting, 0 for none.
+     * @returns {number}
+     */
+    protectionSeq() {
+        const ret = wasm.syncengine_protectionSeq(this.__wbg_ptr);
+        return ret;
+    }
+    /**
      * The zone's quarantined records, as `[{"record_id": ..., "reason": ...}]`
      * with the reason `missing_zone_key`, `open_failed` or `invalid_record`.
      * Never their bytes.
@@ -1245,6 +1294,52 @@ export class SyncEngine {
             return v3;
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * The body that signs `level` as the link after the server's newest link `head_json` (a
+     * `ProtectionLink`), even one this device could not verify: it moves the chain past a link
+     * signed by a removed device or a setting this device refused. The app must show the person
+     * the setting and ask before calling it, and never sign on its own.
+     * @param {string} level
+     * @param {string} head_json
+     * @param {number} now_secs
+     * @returns {string}
+     */
+    resignProtection(level, head_json, now_secs) {
+        let deferred5_0;
+        let deferred5_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16) >>> 0;
+            const val3 = +now_secs;
+            let ptr0, len0, ptr1, len1;
+            try {
+                ptr0 = passStringToWasm0(level, wasm.__wbindgen_export5, wasm.__wbindgen_export6);
+                len0 = WASM_VECTOR_LEN;
+                ptr1 = passStringToWasm0(head_json, wasm.__wbindgen_export5, wasm.__wbindgen_export6);
+                len1 = WASM_VECTOR_LEN;
+            } catch (e) {
+                if (ptr1) { wasm.__wbindgen_export3(ptr1, len1 * 1, 1); }
+                if (ptr0) { wasm.__wbindgen_export3(ptr0, len0 * 1, 1); }
+                throw e;
+            }
+            wasm.syncengine_resignProtection(retptr, this.__wbg_ptr, ptr0, len0, ptr1, len1, val3);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+            var ptr4 = r0;
+            var len4 = r1;
+            if (r3) {
+                ptr4 = 0; len4 = 0;
+                throw takeFromExternrefTable0(r2);
+            }
+            deferred5_0 = ptr4;
+            deferred5_1 = len4;
+            return getStringFromWasm0(ptr4, len4);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export3(deferred5_0, deferred5_1, 1);
         }
     }
     /**
@@ -1346,6 +1441,40 @@ export class SyncEngine {
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
             wasm.__wbindgen_export3(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
+     * The `SetProtection` body for `POST /v1/keychain/protection`: `level` (`standard` or
+     * `advanced`) as the next link of the chain this device verified, signed now.
+     * @param {string} level
+     * @param {number} now_secs
+     * @returns {string}
+     */
+    signProtection(level, now_secs) {
+        let deferred4_0;
+        let deferred4_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16) >>> 0;
+            const val2 = +now_secs;
+            const ptr0 = passStringToWasm0(level, wasm.__wbindgen_export5, wasm.__wbindgen_export6);
+            const len0 = WASM_VECTOR_LEN;
+            wasm.syncengine_signProtection(retptr, this.__wbg_ptr, ptr0, len0, val2);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+            var ptr3 = r0;
+            var len3 = r1;
+            if (r3) {
+                ptr3 = 0; len3 = 0;
+                throw takeFromExternrefTable0(r2);
+            }
+            deferred4_0 = ptr3;
+            deferred4_1 = len3;
+            return getStringFromWasm0(ptr3, len3);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export3(deferred4_0, deferred4_1, 1);
         }
     }
     /**
@@ -1788,6 +1917,52 @@ export class SyncEngine {
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
             wasm.__wbindgen_export3(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
+     * Checks a `ProtectionChain` (from `GET /v1/keychain/protection?from=` `protectionFrom()`,
+     * page by page, with its `more` flag) against the devices of `devices_json` this device
+     * verifies, and moves the verified head forward over every link a trusted device signed or
+     * committed to. Returns `{seq, state, level, stopped}`; `state` is `verified`, `provisional`
+     * or `unknown` (see `protectionLevel`). Throws `protection_rollback` or `protection_fork`,
+     * changing nothing.
+     * @param {string} chain_json
+     * @param {string} devices_json
+     * @returns {string}
+     */
+    verifyProtection(chain_json, devices_json) {
+        let deferred4_0;
+        let deferred4_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16) >>> 0;
+            let ptr0, len0, ptr1, len1;
+            try {
+                ptr0 = passStringToWasm0(chain_json, wasm.__wbindgen_export5, wasm.__wbindgen_export6);
+                len0 = WASM_VECTOR_LEN;
+                ptr1 = passStringToWasm0(devices_json, wasm.__wbindgen_export5, wasm.__wbindgen_export6);
+                len1 = WASM_VECTOR_LEN;
+            } catch (e) {
+                if (ptr1) { wasm.__wbindgen_export3(ptr1, len1 * 1, 1); }
+                if (ptr0) { wasm.__wbindgen_export3(ptr0, len0 * 1, 1); }
+                throw e;
+            }
+            wasm.syncengine_verifyProtection(retptr, this.__wbg_ptr, ptr0, len0, ptr1, len1);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+            var ptr3 = r0;
+            var len3 = r1;
+            if (r3) {
+                ptr3 = 0; len3 = 0;
+                throw takeFromExternrefTable0(r2);
+            }
+            deferred4_0 = ptr3;
+            deferred4_1 = len3;
+            return getStringFromWasm0(ptr3, len3);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export3(deferred4_0, deferred4_1, 1);
         }
     }
 }

@@ -204,6 +204,23 @@ export class SyncEngine {
      */
     pinDevice(device_id: string, signing_key: string, agreement_key: string): void;
     /**
+     * Where to fetch the chain from (`GET /v1/keychain/protection?from=`): the verified head's
+     * sequence, or the one an approver vouched for, or 1.
+     */
+    protectionFrom(): number;
+    /**
+     * What this device knows about the protection level, as `{state, level}`: `verified` (the
+     * whole chain was walked to the server's head and nothing stopped it, from an anchor this
+     * device trusts: the only state in which Standard may be acted on, for escrow),
+     * `provisional` (a verified setting that may not be the newest: show it as a guess), or
+     * `unknown` (no level, and not Standard).
+     */
+    protectionLevel(): string;
+    /**
+     * The sequence of the newest verified setting, 0 for none.
+     */
+    protectionSeq(): number;
+    /**
      * The zone's quarantined records, as `[{"record_id": ..., "reason": ...}]`
      * with the reason `missing_zone_key`, `open_failed` or `invalid_record`.
      * Never their bytes.
@@ -213,6 +230,13 @@ export class SyncEngine {
      * A live record as `{"record_type": ..., "fields": Fields}`, or `undefined`.
      */
     record(zone: string, record_id: string): string | undefined;
+    /**
+     * The body that signs `level` as the link after the server's newest link `head_json` (a
+     * `ProtectionLink`), even one this device could not verify: it moves the chain past a link
+     * signed by a removed device or a setting this device refused. The app must show the person
+     * the setting and ask before calling it, and never sign on its own.
+     */
+    resignProtection(level: string, head_json: string, now_secs: number): string;
     /**
      * An engine from a `snapshot` sealed under the same wrapping secret.
      */
@@ -226,6 +250,11 @@ export class SyncEngine {
      * returns its id. Send it with `envelopesFor`.
      */
     rotateZoneKey(zone: string): string;
+    /**
+     * The `SetProtection` body for `POST /v1/keychain/protection`: `level` (`standard` or
+     * `advanced`) as the next link of the chain this device verified, signed now.
+     */
+    signProtection(level: string, now_secs: number): string;
     /**
      * The `RemoveDevice` body that removes `device_json`, signed by this device.
      */
@@ -295,6 +324,15 @@ export class SyncEngine {
      * The device ids of `devices_json` this device verifies by approval chain.
      */
     verifyDevices(devices_json: string): string;
+    /**
+     * Checks a `ProtectionChain` (from `GET /v1/keychain/protection?from=` `protectionFrom()`,
+     * page by page, with its `more` flag) against the devices of `devices_json` this device
+     * verifies, and moves the verified head forward over every link a trusted device signed or
+     * committed to. Returns `{seq, state, level, stopped}`; `state` is `verified`, `provisional`
+     * or `unknown` (see `protectionLevel`). Throws `protection_rollback` or `protection_fork`,
+     * changing nothing.
+     */
+    verifyProtection(chain_json: string, devices_json: string): string;
 }
 
 /**
@@ -387,11 +425,16 @@ export interface InitOutput {
     readonly syncengine_item: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly syncengine_joinApproval: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly syncengine_pinDevice: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
+    readonly syncengine_protectionFrom: (a: number) => number;
+    readonly syncengine_protectionLevel: (a: number, b: number) => void;
+    readonly syncengine_protectionSeq: (a: number) => number;
     readonly syncengine_quarantined: (a: number, b: number, c: number, d: number) => void;
     readonly syncengine_record: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+    readonly syncengine_resignProtection: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly syncengine_restore: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly syncengine_retryQuarantined: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly syncengine_rotateZoneKey: (a: number, b: number, c: number, d: number) => void;
+    readonly syncengine_signProtection: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly syncengine_signRemoval: (a: number, b: number, c: number, d: number) => void;
     readonly syncengine_skippedFutureStamps: (a: number) => number;
     readonly syncengine_snapshot: (a: number, b: number, c: number, d: number) => void;
@@ -407,6 +450,7 @@ export interface InitOutput {
     readonly syncengine_uploadConflicted: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly syncengine_uploadSucceeded: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly syncengine_verifyDevices: (a: number, b: number, c: number, d: number) => void;
+    readonly syncengine_verifyProtection: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly __wbindgen_export: (a: number) => void;
     readonly __wbindgen_export2: () => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;
