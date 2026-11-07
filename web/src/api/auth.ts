@@ -1,7 +1,10 @@
 import type { ApiError } from "../generated/ApiError";
 import type { DeleteZone } from "../generated/DeleteZone";
 import type { KeyEnvelopeList } from "../generated/KeyEnvelopeList";
+import type { ProtectionChain } from "../generated/ProtectionChain";
+import type { ProtectionLink } from "../generated/ProtectionLink";
 import type { PutKeyEnvelopes } from "../generated/PutKeyEnvelopes";
+import type { SetProtection } from "../generated/SetProtection";
 import type { UploadChanges } from "../generated/UploadChanges";
 import type { UploadResult } from "../generated/UploadResult";
 import type { Zone } from "../generated/Zone";
@@ -47,6 +50,9 @@ const MESSAGES: Record<string, string> = {
   invalid_email_code: "That code didn’t work.",
   second_factor_required: "Enter the code from your authenticator app to finish signing in.",
   second_factor_failed: "That code didn’t work.",
+  protection_conflict: "Another device changed the protection level first. Check it, then try again.",
+  invalid_protection: "That protection setting isn’t valid.",
+  too_many_changes: "The protection level was changed too many times. Try again later.",
   device_proof_required: "This device couldn’t prove the request. Try again, and check that this device’s clock is right.",
   totp_already_enabled: "Two-factor is already on for this account.",
   totp_not_enabled: "Two-factor isn’t on for this account.",
@@ -161,6 +167,10 @@ export function createAuthApi(options: AuthApiOptions) {
     totpConfirm: (body: TotpConfirm) => call<TotpConfirmed>("POST", "/v1/accounts/totp/confirm", body, true, true),
     /** Turns two-factor off: the trusted device's signature alone, no code. */
     totpDisable: (body: TotpDisable) => call<void>("POST", "/v1/accounts/totp/disable", body, true, true),
+    /** Sets the protection level: this device's signature over the next link. 201 with the stored link; 409 `protection_conflict` carries the head in its body. */
+    setProtection: (body: SetProtection) => call<ProtectionLink>("POST", "/v1/keychain/protection", body, true),
+    /** The signed protection settings from sequence `from`, oldest first (a page of 100; `more` says to ask again). */
+    protectionChain: (from: number) => call<ProtectionChain>("GET", `/v1/keychain/protection?from=${from}`, undefined, true),
     /** Ends this device's session. */
     signOut: () => call<void>("DELETE", "/v1/sessions/current", undefined, true),
     /** Ends every session; a trusted device only. */

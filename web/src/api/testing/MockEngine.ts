@@ -1,6 +1,7 @@
 import type { ApprovalNonce } from "../../generated/ApprovalNonce";
 import type { ConfirmApproval } from "../../generated/ConfirmApproval";
 import type { CreateApproval } from "../../generated/CreateApproval";
+import type { ProtectionLink } from "../../generated/ProtectionLink";
 import type { PendingApproval } from "../../generated/PendingApproval";
 import type { Device } from "../../generated/Device";
 import type { LoginFinish } from "../../generated/LoginFinish";
@@ -8,6 +9,7 @@ import type { LoginStart } from "../../generated/LoginStart";
 import type { RegisterFinish } from "../../generated/RegisterFinish";
 import type { RegisterStart } from "../../generated/RegisterStart";
 import { decodeBytes, encodeBytes, utf8 } from "../bytes";
+import { PROTECTION_CONTEXT, PROTECTION_GENESIS, protectionHash, protectionMessage } from "./protectionFake";
 import {
   DEVICE_LOGIN_CONTEXT,
   DEVICE_REGISTER_CONTEXT,
@@ -40,6 +42,8 @@ interface Account {
   records?: MockRecords;
   /** Two-factor, as the engine keeps it: a pending or enabled secret and the unused recovery codes. */
   totp?: { enabled: boolean; recovery: string[] };
+  /** The signed protection settings, oldest first. */
+  protection?: ProtectionLink[];
 }
 /** The mock's one-time code: any other six digits are wrong. Recovery codes are `RECOV-0000N`. */
 export const MOCK_TOTP_CODE = "123456";
@@ -274,6 +278,29 @@ export function createMockEngine(now: () => number = () => Date.now()) {
     if (method === "DELETE" && path === "/v1/sessions/current") {
       for (const [t, s] of sessions) if (s.deviceId === device.id && authorization?.endsWith(t)) sessions.delete(t);
       return json(204, null);
+    }
+    if (path.startsWith("/v1/keychain/protection")) {
+      if (device.state !== "trusted") return fail(403, "device_not_trusted", "This device isn't trusted.");
+      const chain = (account.protection ??= []);
+      if (method === "GET") {
+        const from = Number(new URL(`http://x${path}`).searchParams.get("from") ?? 1);
+        return json(200, { links: chain.filter((l) => l.seq >= from).slice(0, 100), more: chain.filter((l) => l.seq >= from).length > 100 });
+      }
+      if (method === "POST") {
+        const b = body as { level: ProtectionLink["level"]; seq: number; prev: string; signed_at: number | bigint; device_signature: string };
+        const signedAt = Number(b.signed_at);
+        const verified =
+          Math.abs(now() / 1000 - signedAt) <= 300 &&
+          fakeVerify(decodeBytes(device.signing_key), PROTECTION_CONTEXT, protectionMessage(account.id, device.id, b.level, b.seq, b.prev, signedAt), decodeBytes(b.device_signature));
+        if (!verified) return fail(400, "invalid_signature", "The signature is not valid.");
+        const head = chain.at(-1);
+        if (b.seq !== (head?.seq ?? 0) + 1 || b.prev !== (head ? protectionHash(account.id, head) : PROTECTION_GENESIS)) {
+          return json(409, { code: "protection_conflict", message: "The setting does not follow the current one.", ...(head ? { head } : {}) });
+        }
+        const link: ProtectionLink = { level: b.level, seq: b.seq, prev: b.prev, signed_at: signedAt as unknown as bigint, signer_device_id: device.id, signature: b.device_signature };
+        chain.push(link);
+        return json(201, link);
+      }
     }
     if (path.startsWith("/v1/accounts/totp") && method === "POST") {
       if (device.state !== "trusted") return fail(403, "device_not_trusted", "This device isn't trusted.");

@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { realAuthCrypto } from "../api/testing/realModule";
 import { createMemoryKeyStore, type KeyStore } from "../api/keyStore";
-import { removeDevice, signIn, signOut } from "../auth/flows";
+import { readProtection, removeDevice, signIn, signOut } from "../auth/flows";
 import { signUpVerified } from "./testing/mailbox";
 import { ApproverController, DeviceController } from "../auth/pairing";
 import { createAuthServices, type AuthServices } from "../auth/services";
@@ -92,6 +92,13 @@ describe.skipIf(!engineUrl)("a real engine, the real module", () => {
 
     // The engine's saved state was written, sealed, after each action.
     expect(await d.keys.loadSnapshot()).not.toBeNull();
+
+    // The protection setting: sign-up signed Standard as sequence 1, the server holds exactly that, A reads it back as verified, and
+    // D (approved by A, which vouched for it) reads the same, verified on D's own device.
+    const chain = await a.services.api.protectionChain(1);
+    expect(chain.links.map((l) => [l.seq, l.level, l.signer_device_id])).toEqual([[1, "standard", first.deviceId]]);
+    expect(await readProtection(a.services, first)).toMatchObject({ state: "verified", level: "standard", seq: 1, stopped: null, problem: null });
+    expect(await readProtection(d.services, { ...second, deviceState: "trusted" })).toMatchObject({ state: "verified", level: "standard", seq: 1, stopped: null, problem: null });
 
     // A removes D with a signed removal; the server lists the removal with its sequence.
     await removeDevice(a.services, first, pending);

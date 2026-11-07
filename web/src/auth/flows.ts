@@ -1,9 +1,11 @@
 import { ApiFailure } from "../api/auth";
-import { isAuthFailed, type AuthCrypto, type DeviceKeys } from "../api/authCrypto";
+import { isAuthFailed, type ApprovalEngine, type AuthCrypto, type DeviceKeys } from "../api/authCrypto";
 import { decodeBytes, encodeBytes, utf8 } from "../api/bytes";
 import type { StoredSession } from "../api/keyStore";
 import type { Device } from "../generated/Device";
 import type { DeviceList } from "../generated/DeviceList";
+import type { ProtectionLevel } from "../generated/ProtectionLevel";
+import type { ProtectionLink } from "../generated/ProtectionLink";
 import type { NewDevice } from "../generated/NewDevice";
 import type { SecondFactorLogin } from "../generated/SecondFactorLogin";
 import type { SecondFactorRequired } from "../generated/SecondFactorRequired";
@@ -138,13 +140,107 @@ export async function signUp(services: AuthServices, input: { name: string; emai
 }
 
 /**
- * CALL SITE, NOT YET LIVE: right after a successful verification the first device must sign the account's protection setting as
- * Standard (sequence 1). The engine endpoint for that is not in the contract yet (Worker 2's next PR); until it is, this does nothing.
- * When it lands, sign the setting with this device's keys here (they are still open) and send it, before the planner opens.
+ * Right after a successful verification the first device signs the account's protection setting as Standard (sequence 1) and sends it,
+ * then verifies its own link. The keys are already saved, so the engine restores them like any later action. It never blocks the
+ * sign-up: if anything here fails (the network, a conflict), the account is made and Settings says the level "can't be confirmed on
+ * this device", with a way to confirm it. On a conflict (another device got there first) it fetches the head and verifies it: it never
+ * signs again on its own.
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function signStandardProtection(_services: AuthServices, _session: StoredSession): Promise<void> {
-  // TODO(protection-setting): sign and send "Standard, seq 1" once the engine's contract exists.
+async function signStandardProtection(services: AuthServices, session: StoredSession): Promise<void> {
+  try {
+    await services.engine.run(session, async (engine) => {
+      const devices = await services.api.devices();
+      engine.verifyDevices(devices);
+      try {
+        const link = await services.api.setProtection(engine.protection.sign("standard", Math.floor(services.now() / 1000)));
+        engine.protection.verify({ links: [link], more: false }, devices);
+      } catch (e) {
+        if (!(e instanceof ApiFailure && e.code === "protection_conflict")) throw e;
+        await walkProtection(services, engine, devices);
+      }
+    });
+  } catch {
+    // Not fatal: see above.
+  }
+}
+
+/** What this device knows about the account's protection level after reading the server's chain, for Settings. */
+export interface ProtectionReport {
+  /** The newest verified setting's sequence, 0 for none. */
+  seq: number;
+  state: "verified" | "provisional" | "unknown";
+  level: ProtectionLevel | null;
+  /** Why the walk stopped before the server's head, if it did (the engine's reason). */
+  stopped: string | null;
+  /** The chain broke the engine's rules: the server showed an older setting than this device verified (`rollback`), or another one at a verified sequence (`fork`). */
+  problem: "rollback" | "fork" | null;
+  /** The server's newest setting, verified or not: what "Confirm protection level" signs after. */
+  head: ProtectionLink | null;
+  /** The device that signed the head, if it is still a device of the account (`name`), and whether that is this one. */
+  signer: { id: string; name: string | null; thisDevice: boolean } | null;
+  /** The head was signed by another device after the setting this device had verified before this read: "Protection was changed on …". */
+  changedBy: { id: string; name: string | null } | null;
+}
+
+/** Walks the server's chain page by page into the engine. Throws the engine's `protection_rollback` or `protection_fork`. */
+async function walkProtection(services: AuthServices, engine: ApprovalEngine, devices: DeviceList): Promise<{ head: ProtectionLink | null }> {
+  let from = engine.protection.from();
+  let head: ProtectionLink | null = null;
+  for (let page = 0; page < 100; page++) {
+    const chain = await services.api.protectionChain(from);
+    head = chain.links.at(-1) ?? head;
+    engine.protection.verify(chain, devices);
+    if (!chain.more || chain.links.length === 0) break;
+    from = chain.links[chain.links.length - 1]!.seq + 1;
+  }
+  return { head };
+}
+
+/** Reads the server's protection chain and verifies it on this device. Never signs anything. */
+export async function readProtection(services: AuthServices, session: StoredSession): Promise<ProtectionReport> {
+  const devices = await services.api.devices();
+  return services.engine.run(session, async (engine) => {
+    engine.verifyDevices(devices);
+    const before = engine.protection.level();
+    let head: ProtectionLink | null = null;
+    let problem: ProtectionReport["problem"] = null;
+    try {
+      head = (await walkProtection(services, engine, devices)).head;
+    } catch (e) {
+      const code = e instanceof Error ? e.message.split(":")[0] : "";
+      if (code === "protection_rollback") problem = "rollback";
+      else if (code === "protection_fork") problem = "fork";
+      else throw e;
+    }
+    const now = engine.protection.level();
+    const signerDevice = head ? devices.devices.find((d) => d.id === head!.signer_device_id) : undefined;
+    const signer = head ? { id: head.signer_device_id, name: signerDevice?.name ?? null, thisDevice: head.signer_device_id === session.deviceId } : null;
+    return {
+      seq: now.seq,
+      state: now.state,
+      level: now.level ?? null,
+      stopped: now.stopped ?? null,
+      problem,
+      head,
+      signer,
+      changedBy: signer && !signer.thisDevice && before.seq > 0 && head!.seq > before.seq ? { id: signer.id, name: signer.name } : null,
+    };
+  });
+}
+
+/**
+ * Signs `level` after the server's newest setting, even one this device could not verify, and sends it. Only for a level the person
+ * has just chosen on a screen that says what it does: nothing calls this on its own. On a conflict it re-reads the chain and says so.
+ */
+export async function confirmProtection(services: AuthServices, session: StoredSession, level: ProtectionLevel, head: ProtectionLink | null): Promise<void> {
+  const devices = await services.api.devices();
+  await services.engine.run(session, async (engine) => {
+    engine.verifyDevices(devices);
+    const now = Math.floor(services.now() / 1000);
+    const body = head ? engine.protection.resign(level, head, now) : engine.protection.sign(level, now);
+    const link = await services.api.setProtection(body);
+    engine.protection.verify({ links: [link], more: false }, devices);
+  });
 }
 
 /** This browser holds the keys of another account. Signing in to this one would remove them, so the person must agree first. */

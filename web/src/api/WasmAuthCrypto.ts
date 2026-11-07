@@ -2,8 +2,10 @@ import type { ApprovalNonce } from "../generated/ApprovalNonce";
 import type { ConfirmApproval } from "../generated/ConfirmApproval";
 import type { CreateApproval } from "../generated/CreateApproval";
 import type { PendingApproval } from "../generated/PendingApproval";
+import type { ProtectionLevel } from "../generated/ProtectionLevel";
+import type { SetProtection } from "../generated/SetProtection";
 import type { RemoveDevice } from "../generated/RemoveDevice";
-import type { ApprovalEngine, ApproverPairing, AuthCrypto, DeviceKeys, DevicePairing, PendingLogin, PendingRegistration } from "./authCrypto";
+import type { ApprovalEngine, ApproverPairing, AuthCrypto, DeviceKeys, DevicePairing, PendingLogin, PendingRegistration, ProtectionView } from "./authCrypto";
 
 /** `ApproverSession` in orbyn-wasm. */
 export interface WasmApproverSession {
@@ -48,6 +50,12 @@ export interface WasmSyncEngine {
   pinDevice(deviceId: string, signingKey: string, agreementKey: string): void;
   verifyDevices(devicesJson: string): string;
   signRemoval(deviceJson: string): string;
+  signProtection(level: string, nowSecs: number): string;
+  resignProtection(level: string, headJson: string, nowSecs: number): string;
+  verifyProtection(chainJson: string, devicesJson: string): string;
+  protectionFrom(): number;
+  protectionLevel(): string;
+  protectionSeq(): number;
   snapshot(wrapSecret: Uint8Array): Uint8Array;
   startApproval(deviceJson: string, nowSecs: number): WasmApproverSession;
   confirmApproval(session: WasmApproverSession, devicesJson: string): string;
@@ -118,6 +126,13 @@ function wasmApprovals(engine: WasmSyncEngine): ApprovalEngine {
     snapshot: (wrapSecret) => engine.snapshot(wrapSecret),
     verifyDevices: (devices) => JSON.parse(engine.verifyDevices(JSON.stringify(devices))) as string[],
     signRemoval: (target) => JSON.parse(engine.signRemoval(JSON.stringify(target))) as RemoveDevice,
+    protection: {
+      sign: (level, nowSecs) => JSON.parse(engine.signProtection(level, nowSecs)) as SetProtection,
+      resign: (level, head, nowSecs) => JSON.parse(engine.resignProtection(level, JSON.stringify(head), nowSecs)) as SetProtection,
+      verify: (chain, devices) => JSON.parse(engine.verifyProtection(JSON.stringify(chain), JSON.stringify(devices))) as ProtectionView,
+      from: () => engine.protectionFrom(),
+      level: () => ({ ...(JSON.parse(engine.protectionLevel()) as { state: ProtectionView["state"]; level?: ProtectionLevel }), seq: engine.protectionSeq() }),
+    },
     startApproval: (target, nowSecs) => {
       const inner = engine.startApproval(JSON.stringify(target), nowSecs);
       const pairing: ApproverPairing = {

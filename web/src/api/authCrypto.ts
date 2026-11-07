@@ -13,6 +13,10 @@ import type { CreateApproval } from "../generated/CreateApproval";
 import type { Device } from "../generated/Device";
 import type { DeviceList } from "../generated/DeviceList";
 import type { PendingApproval } from "../generated/PendingApproval";
+import type { ProtectionChain } from "../generated/ProtectionChain";
+import type { ProtectionLevel } from "../generated/ProtectionLevel";
+import type { ProtectionLink } from "../generated/ProtectionLink";
+import type { SetProtection } from "../generated/SetProtection";
 import type { RemoveDevice } from "../generated/RemoveDevice";
 
 /** Sign-up between its two requests. */
@@ -133,9 +137,41 @@ export interface SyncApi {
 }
 
 /** The approval functions of the sync engine for one device (orbyn-wasm's `SyncEngine`). */
+/**
+ * What this device knows about the protection level (see the engine's `docs/key-service.md`): `verified` (the chain was walked to the
+ * server's head from an anchor this device trusts: the only state to act on), `provisional` (a setting this device verified that may
+ * not be the newest: a guess) or `unknown` (no verified setting). `stopped` says why a walk ended before the head:
+ * `untrusted_signer`, `invalid_signature`, `gap` or `invalid`.
+ */
+export interface ProtectionView {
+  seq: number;
+  state: "verified" | "provisional" | "unknown";
+  level?: ProtectionLevel;
+  stopped?: "untrusted_signer" | "invalid_signature" | "gap" | "invalid" | null;
+}
+
+/** The signed protection setting, from this device's engine (orbyn-wasm's `SyncEngine`). */
+export interface ProtectionApi {
+  /** The `SetProtection` body that signs `level` as the next link of the chain this device verified, now. */
+  sign(level: ProtectionLevel, nowSecs: number): SetProtection;
+  /**
+   * The body that signs `level` after the server's newest link, even one this device could not verify. Only for a level the person
+   * has just chosen on a screen that shows what it does: never call it on its own.
+   */
+  resign(level: ProtectionLevel, head: ProtectionLink, nowSecs: number): SetProtection;
+  /** Checks a page of the server's chain against the devices this device verifies and moves the verified head forward. Throws `protection_rollback` or `protection_fork`. */
+  verify(chain: ProtectionChain, devices: DeviceList): ProtectionView;
+  /** Where to fetch the chain from (`?from=`). */
+  from(): number;
+  /** What this device knows now. */
+  level(): ProtectionView;
+}
+
 export interface ApprovalEngine {
   /** The record side; present with the real module. */
   readonly sync?: SyncApi;
+  /** The signed protection setting. */
+  readonly protection: ProtectionApi;
   /** Releases the module's memory for this engine. Its state must have been saved first. */
   free(): void;
   /** The engine's state sealed under the wrapping secret, for the key store. It holds who this device trusts and the removal sequence. */

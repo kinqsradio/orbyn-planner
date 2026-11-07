@@ -1,4 +1,6 @@
+import type { DeviceList } from "../../generated/DeviceList";
 import type { ApprovalEngine, ApproverPairing, AuthCrypto, DeviceKeys, DevicePairing, PendingLogin, PendingRegistration } from "../authCrypto";
+import { fakeProtection, type ProtectionState } from "./protectionFake";
 import { APPROVAL_CONTEXT, confirmMessage, fakeCommitment, fakeSas, pairingBytes, partsOfView, type PairingParts } from "./fakePairing";
 import { concat, decodeBytes, encodeBytes, utf8 } from "../bytes";
 import {
@@ -126,7 +128,7 @@ export class FakeAuthCrypto implements AuthCrypto {
   engine: AuthCrypto["engine"] = {
     create: (keys: DeviceKeys, accountId: string, deviceId: string): ApprovalEngine => fakeApprovals(keys, accountId, deviceId, { pinned: [deviceId], counted: 0 }),
     restore: (keys: DeviceKeys, sealed: Uint8Array, wrapSecret: Uint8Array): ApprovalEngine => {
-      let state: { accountId: string; deviceId: string; signing: string; pinned: string[]; counted: number };
+      let state: { accountId: string; deviceId: string; signing: string; pinned: string[]; counted: number; protection?: ProtectionState };
       const plain = fakeOpen(wrapSecret, "snapshot", sealed); // throws open_failed
       try {
         state = JSON.parse(new TextDecoder().decode(plain));
@@ -173,16 +175,19 @@ const random32 = () => Uint8Array.from({ length: 32 }, () => Math.floor(Math.ran
 const ten = 600;
 
 /** Approval functions with the same order and refusals as the engine's, over the stand-in hash. */
-function fakeApprovals(keys: DeviceKeys, accountId: string, deviceId: string, initial: { pinned: string[]; counted: number }): ApprovalEngine {
+function fakeApprovals(keys: DeviceKeys, accountId: string, deviceId: string, initial: { pinned: string[]; counted: number; protection?: ProtectionState }): ApprovalEngine {
+  const protection: ProtectionState = initial.protection ?? { head: null, complete: false };
   /** What this engine has counted: removals seen in a verified list, and the devices it pins. */
   let counted = initial.counted;
   const pinned = new Set<string>(initial.pinned);
-  return {
+  const verifiedIds = (list: DeviceList) => engine.verifyDevices(list);
+  const engine: ApprovalEngine = {
+    protection: fakeProtection(keys, accountId, deviceId, protection, verifiedIds),
     free() {
       fakeFreed.engine += 1;
     },
     snapshot(wrapSecret) {
-      const state = { accountId, deviceId, signing: keys.signingKey(), pinned: [...pinned], counted };
+      const state = { accountId, deviceId, signing: keys.signingKey(), pinned: [...pinned], counted, protection };
       return fakeSeal(wrapSecret, "snapshot", utf8(JSON.stringify(state)));
     },
     verifyDevices(list) {
@@ -280,4 +285,5 @@ function fakeApprovals(keys: DeviceKeys, accountId: string, deviceId: string, in
       return sas;
     },
   };
+  return engine;
 }

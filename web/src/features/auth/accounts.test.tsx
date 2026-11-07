@@ -9,7 +9,7 @@ import { cryptoLoad, ensureRealAuthCrypto, loadRealAuthCrypto, resetCryptoLoad, 
 import { createMemoryKeyStore, type KeyStore } from "../../api/keyStore";
 import { FakeAuthCrypto } from "../../api/testing/FakeAuthCrypto";
 import { createMockEngine, MOCK_TOTP_CODE, type MockEngine } from "../../api/testing/MockEngine";
-import { confirmTotp, enrolTotp, signOut } from "../../auth/flows";
+import { confirmProtection, confirmTotp, enrolTotp, readProtection, signIn, signOut } from "../../auth/flows";
 import { signedUp } from "../../auth/testing/signedUp";
 import { createAuthServices, type AuthServices } from "../../auth/services";
 import { deviceName } from "../../auth/deviceName";
@@ -939,6 +939,72 @@ describe("two-factor", () => {
     await userEvent.click(screen.getByRole("button", { name: "Continue" }));
     await waitFor(() => expect(second.tokens.getSession()).not.toBeNull());
     expect(screen.queryByRole("form", { name: "Two-factor code" })).not.toBeInTheDocument();
+  });
+});
+
+describe("the protection level", () => {
+  async function privacy() {
+    const auth = services();
+    await mount(auth, "/settings");
+    await fillSignUp();
+    await screen.findByRole("navigation", { name: "Primary" });
+    await userEvent.click(await screen.findByRole("button", { name: "Privacy" }));
+    return auth;
+  }
+
+  it("shows Standard, verified from the chain, and says plainly that Orbyn can read Standard data", async () => {
+    await privacy();
+    const card = await screen.findByLabelText("Protection");
+    expect(await within(card).findByText("Standard protection")).toBeInTheDocument();
+    expect(card).toHaveTextContent("Orbyn can help you recover your account if you lose every device.");
+    expect(card).toHaveTextContent("Orbyn can read your data");
+    expect(within(card).getByRole("button", { name: "Coming later" })).toBeDisabled(); // Advanced is shown, and off
+    expect(engine.accounts.get("sam@example.com")!.protection).toHaveLength(1); // signed once, at sign-up
+  });
+
+  it("says it can’t be confirmed, and why, when the first signing failed; Confirm signs only the level the person picks", async () => {
+    engine.refuseNext("/v1/keychain/protection", 500, "internal", "Refused.", 1);
+    await privacy();
+    const card = await screen.findByLabelText("Protection");
+    expect(await within(card).findByText("Your protection level can’t be confirmed on this device")).toBeInTheDocument();
+    expect(card).toHaveTextContent("No setting has been signed yet.");
+    expect(engine.accounts.get("sam@example.com")!.protection ?? []).toHaveLength(0); // nothing signed it on its own
+
+    await userEvent.click(within(card).getByRole("button", { name: "Confirm protection level" }));
+    const dialog = screen.getByRole("dialog", { name: "Confirm protection level" });
+    const sign = within(dialog).getByRole("button", { name: "Sign this setting" });
+    expect(sign).toBeDisabled(); // no level picked yet
+    expect(within(dialog).getByRole("radio", { name: /Advanced/ })).toBeDisabled();
+    await userEvent.click(within(dialog).getByRole("radio", { name: /Standard/ }));
+    await userEvent.click(sign);
+    await waitFor(() => expect(engine.accounts.get("sam@example.com")!.protection).toHaveLength(1));
+    expect(await within(await screen.findByLabelText("Protection")).findByText("Standard protection")).toBeInTheDocument();
+  });
+
+  it("says when another device changed the level since this device last saw it, until dismissed", async () => {
+    const first = await privacy();
+    const session = first.tokens.getSession()!;
+    await screen.findByText("Standard protection");
+    // Another trusted device signs the next setting.
+    const second = services();
+    const sessionB = await signIn(second, SAM);
+    const account = engine.accounts.get("sam@example.com")!;
+    const phone = account.devices.find((d) => d.id === sessionB.deviceId)!;
+    phone.state = "trusted";
+    phone.approved_by = session.deviceId;
+    phone.approval_signature = "approved";
+    await second.tokens.set({ ...sessionB, deviceState: "trusted" });
+    const trusted = { ...sessionB, deviceState: "trusted" as const };
+    await readProtection(second, trusted);
+    await confirmProtection(second, trusted, "standard", account.protection![0]!);
+    expect(account.protection).toHaveLength(2);
+    // The first device reads it again when Settings opens.
+    await userEvent.click(await screen.findByRole("button", { name: "Account" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Privacy" }));
+    const note = await screen.findByText(/Protection was changed on/);
+    expect(note).toHaveTextContent(phone.name);
+    await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByText(/Protection was changed on/)).toBeNull();
   });
 });
 

@@ -256,3 +256,29 @@ describe("the two-way pairing, without a server", () => {
     expect(code(() => d.finishApproval(sd, { ...done, signature: encodeBytes(new Uint8Array(64)) }, undefined, NOW))).toBe("mismatch");
   });
 });
+
+describe("the protection setting through the adapter", () => {
+  const ACCOUNT = "0f8fad5b-d9cb-469f-a165-70867728950e";
+  const DEVICE = "1b4e28ba-2fa1-41d2-883f-0016d3cca427";
+
+  it("the first device signs Standard as sequence 1 and verifies its own link", () => {
+    const keys = crypto.deviceKeys.create();
+    const engine = crypto.engine.create(keys, ACCOUNT, DEVICE);
+    expect(engine.protection.level()).toEqual({ seq: 0, state: "unknown" });
+    expect(engine.protection.from()).toBe(1);
+    const body = engine.protection.sign("standard", 1_794_000_000);
+    expect(body).toMatchObject({ level: "standard", seq: 1 });
+    expect(decodeBytes(body.prev)).toEqual(new Uint8Array(32)); // the first link names no earlier one
+    const list = {
+      devices: [{ id: DEVICE, name: "Laptop", platform: "web", state: "trusted", signing_key: keys.signingKey(), agreement_key: keys.agreementKey(), created_at: "2026-11-07T10:00:00Z", approved_by: null, approval_signature: null, current: true }],
+      removals: [],
+    } as never;
+    const link = { level: body.level, seq: body.seq, prev: body.prev, signed_at: body.signed_at, signer_device_id: DEVICE, signature: body.device_signature };
+    const view = engine.protection.verify({ links: [link], more: false }, list);
+    expect(view).toMatchObject({ seq: 1, state: "verified", level: "standard" });
+    expect(engine.protection.level()).toMatchObject({ seq: 1, state: "verified", level: "standard" });
+    expect(engine.protection.from()).toBe(1);
+    engine.free();
+    keys.free();
+  });
+});

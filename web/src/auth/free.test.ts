@@ -63,7 +63,8 @@ describe("the module's memory is given back", () => {
     const services = createAuthServices({ fetch: engine.fetch, baseUrl: "http://e.test", keys, crypto: () => crypto, wrapSecret: async () => new Uint8Array(32).fill(2) });
     const before = fakeFreed.keys;
     await signedUp(engine, services, { name: "S", email: "s@example.com", password: "correct horse battery" });
-    expect(fakeFreed.keys).toBe(before + 1);
+    // The keys the sign-up held, and the copy the engine opened to sign the protection setting right after.
+    expect(fakeFreed.keys).toBe(before + 2);
     await keys.clearSession();
     await services.tokens.clear();
     const mid = fakeFreed.keys;

@@ -1,3 +1,4 @@
+import { ProtectionSettings } from "../auth/ProtectionSettings";
 import { useState } from "react";
 import { CHOICES, chooseTheme, readStoredChoice, type ThemeChoice } from "../../app/theme";
 import { usePrefs } from "../../app/prefs";
@@ -104,7 +105,10 @@ export function SettingsPage() {
               </span>
             </>
           ) : category === "Privacy" ? (
-            <ExportSettings />
+            <>
+              <ProtectionSettings />
+              <ExportSettings />
+            </>
           ) : category === "Tags" ? (
             <TagsSettings />
           ) : (
