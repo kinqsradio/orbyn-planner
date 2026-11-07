@@ -106,7 +106,12 @@ export function createAuthApi(options: AuthApiOptions) {
   const base = () => options.baseUrl ?? engineUrl();
   const doFetch = () => options.fetch ?? fetch;
 
-  async function call<T>(method: string, path: string, body?: unknown, authed = false): Promise<T> {
+  /**
+   * `keepSession`: this call can be answered 401 with `second_factor_failed` or `device_proof_required`, which are about the request
+   * (a wrong code, a signature the engine wouldn't take), not about the session, so they don't end it. Only the three two-factor
+   * calls say so; on any other call every 401 ends the session.
+   */
+  async function call<T>(method: string, path: string, body?: unknown, authed = false, keepSession = false): Promise<T> {
     const headers: Record<string, string> = {};
     if (body !== undefined) headers["content-type"] = "application/json";
     const token = options.token();
@@ -130,9 +135,9 @@ export function createAuthApi(options: AuthApiOptions) {
       // Not our JSON (a proxy's page, say): fall back to the status.
     }
     const code = typeof error.code === "string" ? error.code : response.status === 401 ? "unauthorized" : response.status >= 500 ? "internal" : "invalid_request";
-    // A 401 on a signed-in call ends the session, except the two answers that are about a request, not the session: a wrong code
-    // and a missing device signature.
-    if (authed && response.status === 401 && code !== "second_factor_failed" && code !== "device_proof_required") options.onUnauthorized();
+    // A 401 on a signed-in call ends the session, except for the two-factor calls' own two answers (see `keepSession`).
+    const aboutTheRequest = keepSession && (code === "second_factor_failed" || code === "device_proof_required");
+    if (authed && response.status === 401 && !aboutTheRequest) options.onUnauthorized();
     const retry = Number(response.headers.get("retry-after"));
     throw new ApiFailure(code, response.status, plainMessage(code), error.message ?? "", error, Number.isFinite(retry) && retry > 0 ? retry : null);
   }
@@ -151,11 +156,11 @@ export function createAuthApi(options: AuthApiOptions) {
     /** The second step of a sign-in the engine answered `second_factor_required`: exactly one of a code and a recovery code. */
     loginSecondFactor: (body: SecondFactorLogin) => call<SessionCreated>("POST", "/v1/sessions/login/second-factor", body),
     /** Two-factor, from a trusted device that signs the request: a new secret, pending until confirmed. Shown once. */
-    totpEnrol: (body: TotpEnrol) => call<TotpEnrolment>("POST", "/v1/accounts/totp", body, true),
+    totpEnrol: (body: TotpEnrol) => call<TotpEnrolment>("POST", "/v1/accounts/totp", body, true, true),
     /** A current code from the pending secret turns two-factor on; answers ten recovery codes, shown once. */
-    totpConfirm: (body: TotpConfirm) => call<TotpConfirmed>("POST", "/v1/accounts/totp/confirm", body, true),
+    totpConfirm: (body: TotpConfirm) => call<TotpConfirmed>("POST", "/v1/accounts/totp/confirm", body, true, true),
     /** Turns two-factor off: the trusted device's signature alone, no code. */
-    totpDisable: (body: TotpDisable) => call<void>("POST", "/v1/accounts/totp/disable", body, true),
+    totpDisable: (body: TotpDisable) => call<void>("POST", "/v1/accounts/totp/disable", body, true, true),
     /** Ends this device's session. */
     signOut: () => call<void>("DELETE", "/v1/sessions/current", undefined, true),
     /** Ends every session; a trusted device only. */

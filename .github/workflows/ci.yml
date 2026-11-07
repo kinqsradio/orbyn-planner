@@ -103,6 +103,9 @@ jobs:
     name: End to end
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      # The engine's compose file plus a mailbox for the sign-up code (see .github/e2e-mail.compose.yaml).
+      COMPOSE_FILE: compose.yaml:${{ github.workspace }}/.github/e2e-mail.compose.yaml
     defaults:
       run:
         working-directory: web
@@ -139,7 +142,7 @@ jobs:
           echo "::add-mask::$setup"
           [ -n "$setup" ] || { echo "auth-setup produced nothing"; exit 1; }
           [ "$(printf '%s\n' "$setup" | wc -l)" -eq 1 ] || { echo "auth-setup printed more than one line"; exit 1; }
-          ORBYN_AUTH_SETUP="$setup" docker compose up -d postgres migrate server worker
+          ORBYN_AUTH_SETUP="$setup" docker compose up -d postgres migrate server worker mailpit
           docker compose exec -T postgres psql -U orbyn -d orbyn -c "delete from auth_attempts"
           for _ in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:8080/health; then exit 0; fi
@@ -151,6 +154,7 @@ jobs:
         run: npx vitest run src/e2e
         env:
           ORBYN_E2E_ENGINE: http://127.0.0.1:8080
+          ORBYN_E2E_MAIL: http://127.0.0.1:8025
       - name: Compose logs
         if: failure()
         working-directory: engine

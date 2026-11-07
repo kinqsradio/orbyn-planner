@@ -46,6 +46,7 @@ function CodesStep({ codes, onDone }: { codes: string[]; onDone: () => void }) {
         <button type="button" className="ghost" onClick={() => void download()}>Download .txt</button>
       </div>
       {note && <p className="t3 small" role="status">{note}</p>}
+      <p className="t3 small">Copied codes stay on your clipboard until you copy something else.</p>
       <label className="small" style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <input type="checkbox" checked={saved} onChange={(e) => setSaved(e.target.checked)} />
         I’ve saved these codes

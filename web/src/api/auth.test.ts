@@ -22,6 +22,24 @@ describe("the account calls", () => {
     expect(list![1]).toMatchObject({ method: "GET", headers: { authorization: "Bearer tok" } });
   });
 
+  it("a 401 ends the session on every call, except that the three two-factor calls keep it for a wrong code or a refused signature", async () => {
+    const answers = ["second_factor_failed", "device_proof_required"] as const;
+    for (const code of answers) {
+      const { client, onUnauthorized } = api(() => error(401, code));
+      await client.totpEnrol({ device_signature: null, signed_at: null }).catch(() => undefined);
+      await client.totpConfirm({ code: "1", device_signature: null, signed_at: null }).catch(() => undefined);
+      await client.totpDisable({ device_signature: null, signed_at: null }).catch(() => undefined);
+      expect(onUnauthorized).not.toHaveBeenCalled();
+      // Any other signed-in call answered the same way means the session is over.
+      await client.devices().catch(() => undefined);
+      expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    }
+    // And the two-factor calls still end it for a real 401.
+    const { client, onUnauthorized } = api(() => error(401, "unauthorized"));
+    await client.totpDisable({ device_signature: null, signed_at: null }).catch(() => undefined);
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
   it("uses the routes of the engine for every call", async () => {
     const { client, fetchMock } = api(() => new Response(JSON.stringify({}), { status: 200 }));
     await client.registerFinish({} as never);

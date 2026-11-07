@@ -1,0 +1,16 @@
+# Added to the engine's compose file for the end-to-end job: a mailbox the worker sends to (Mailpit), so the tests can read the
+# six-digit code a sign-up mails. Sign-up needs it: no account exists until the code is entered.
+services:
+  mailpit:
+    image: axllent/mailpit@sha256:757f22b56c1da03570afdb3d259effe5091018008a81bbedc8158cee7e16fdbc # v1.29
+    ports:
+      - "127.0.0.1:8025:8025"
+  worker:
+    environment:
+      # The worker opens the queued message with the same setup as the server.
+      ORBYN_AUTH_SETUP: ${ORBYN_AUTH_SETUP:-}
+      ORBYN_SMTP_URL: smtp://mailpit:1025
+      ORBYN_MAIL_FROM: Orbyn <no-reply@example.com>
+    depends_on:
+      mailpit:
+        condition: service_started

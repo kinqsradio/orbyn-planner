@@ -895,6 +895,7 @@ describe("two-factor", () => {
 
     const list = await screen.findByRole("list", { name: "Recovery codes" });
     expect(within(list).getAllByRole("listitem")).toHaveLength(10);
+    expect(screen.getByText("Copied codes stay on your clipboard until you copy something else.")).toBeInTheDocument();
     const written: string[] = [];
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (t: string) => void written.push(t) } });
     await userEvent.click(screen.getByRole("button", { name: "Copy" }));
