@@ -5,6 +5,7 @@ description = "The desktop shell of Orbyn Planner: a window around the web build
 edition = "2024"
 rust-version = "1.90"
 publish = false
+license-file = "../../LICENSE"
 
 # Its own workspace: nothing else builds this, and it builds nothing else.
 [workspace]
