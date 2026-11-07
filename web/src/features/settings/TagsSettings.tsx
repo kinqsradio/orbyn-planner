@@ -23,7 +23,7 @@ function TagRow({ tag, label }: { tag: Tag; label: string }) {
     }
   };
   return (
-    <div className="kv" style={{ minHeight: 44, gap: 10, flexWrap: "wrap" }}>
+    <div className="kv" style={{ minHeight: "var(--sp-44)", gap: "var(--sp-10)", flexWrap: "wrap" }}>
       <input className="inp" aria-label={`Name of tag ${tag.name}`} value={name} onChange={(e) => setName(e.target.value)} onBlur={save} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
       {label !== tag.name && <span className="t3 small">shown as {label}</span>}
       {error && <span className="err" role="alert">{error}</span>}
@@ -34,7 +34,7 @@ function TagRow({ tag, label }: { tag: Tag; label: string }) {
           </button>
         ))}
       </div>
-      <button type="button" className="ghost danger" aria-label={`Delete tag ${tag.name}`} onClick={() => store.deleteTag(tag.id)}>Delete</button>
+      <button type="button" className="ghost red" aria-label={`Delete tag ${tag.name}`} onClick={() => store.deleteTag(tag.id)}>Delete</button>
     </div>
   );
 }
@@ -67,11 +67,11 @@ export function TagsSettings() {
   return (
     <>
       <div className="bh"><b>Your tags</b><span></span></div>
-      <div className="card" style={{ gap: 0, padding: "0 14px" }}>
-        {live.length === 0 && <div className="kv" style={{ height: 44 }}><span className="t3">No tags yet.</span></div>}
+      <div className="card" style={{ gap: 0, padding: "0 var(--sp-14)" }}>
+        {live.length === 0 && <div className="kv" style={{ height: "var(--sp-44)" }}><span className="t3">No tags yet.</span></div>}
         {live.map((t) => <TagRow key={t.id} tag={t} label={labels.get(t.id) ?? t.name} />)}
       </div>
-      <div className="ctl" style={{ display: "flex", gap: 8 }}>
+      <div className="ctl" style={{ display: "flex", gap: "var(--sp-8)" }}>
         <input className="inp" aria-label="New tag name" placeholder="New tag" value={name} onChange={(e) => { setName(e.target.value); setAddError(null); }} onKeyDown={(e) => e.key === "Enter" && add()} />
         <button type="button" className="btn" onClick={add}>Add tag</button>
       </div>
@@ -79,15 +79,15 @@ export function TagsSettings() {
       {deleted.length > 0 && (
         <>
           <div className="bh"><b>Deleted tags</b><span></span></div>
-          <div className="card" style={{ gap: 0, padding: "0 14px" }}>
+          <div className="card" style={{ gap: 0, padding: "0 var(--sp-14)" }}>
             {deleted.map((t) => (
-              <div key={t.id} className="kv" style={{ height: 44 }}>
+              <div key={t.id} className="kv" style={{ height: "var(--sp-44)" }}>
                 <span><Swatch colour={t.colour} /> {t.name} <span className="t3">· on {uses(t.id)} {uses(t.id) === 1 ? "task" : "tasks"}</span></span>
                 <button type="button" className="ghost" aria-label={`Restore tag ${t.name}`} onClick={() => store.restoreTag(t.id)}>Restore</button>
               </div>
             ))}
           </div>
-          <span className="t3" style={{ fontSize: 12.5 }}>A deleted tag is hidden everywhere. Its tasks keep it, so restoring brings it back. It is removed for good after 30 days.</span>
+          <span className="t3" style={{ fontSize: "var(--fs-12-5)" }}>A deleted tag is hidden everywhere. Its tasks keep it, so restoring brings it back. It is removed for good after 30 days.</span>
         </>
       )}
     </>

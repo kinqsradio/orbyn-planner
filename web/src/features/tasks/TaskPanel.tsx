@@ -169,7 +169,7 @@ function Panel({ task }: { task: Task }) {
 
       <div className="kv">
         <span>Due</span>
-        <b className="ctl" style={needsAction(task, now) ? { color: "var(--amber)" } : undefined}>
+        <b className="ctl" style={needsAction(task, now) ? { color: "var(--amber-text)" } : undefined}>
           <input className="inp" type="date" aria-label="Due date" value={dayValue} onChange={(e) => setDue(e.target.value, timeValue)} />
           <input className="inp" type="time" aria-label="Due time" value={timeValue} onChange={(e) => setDue(dayValue, e.target.value)} />
         </b>
@@ -360,7 +360,7 @@ function Panel({ task }: { task: Task }) {
       )}
 
       <div className="tp-foot">
-        <button type="button" className="ghost danger" onClick={remove}>Delete</button>
+        <button type="button" className="ghost red" onClick={remove}>Delete</button>
         <button type="button" className="btn" onClick={() => complete(task, !task.done)}>
           {task.done ? "Mark not done" : "Complete"}
         </button>

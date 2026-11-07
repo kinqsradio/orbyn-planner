@@ -9,7 +9,7 @@ import { Swatch } from "../tasks/TaskRow";
 import { ProjectDialog } from "./ProjectDialog";
 import { projectStats } from "./stats";
 
-const COLS = "minmax(0,1.4fr) minmax(0,1.2fr) 110px 120px";
+const COLS = "minmax(0,1.4fr) minmax(0,1.2fr) var(--sp-110) var(--sp-120)";
 
 export function ProjectsPage() {
   const { projects, tasks } = usePlanner();
@@ -56,7 +56,7 @@ export function ProjectsPage() {
           </button>
         </EmptyState>
       ) : shown.length === 0 ? (
-        <p className="quiet note" style={{ padding: "0 28px" }}>{show === "done" ? "No finished projects." : "No projects match."}</p>
+        <p className="quiet note" style={{ padding: "0 var(--sp-28)" }}>{show === "done" ? "No finished projects." : "No projects match."}</p>
       ) : (
         <div className="tbl-wrap">
           <ul className="tbl">
@@ -75,7 +75,7 @@ export function ProjectsPage() {
                     </button>
                   </span>
                   <span className="clip">{stats.next?.title ?? <span className="t3">Nothing open</span>}</span>
-                  <span style={act ? { color: "var(--amber)", fontWeight: 500 } : undefined}>{p.goal ? formatDue(p.goal, now) : <span className="t3">No date</span>}</span>
+                  <span style={act ? { color: "var(--amber-text)", fontWeight: "var(--fw-medium)" } : undefined}>{p.goal ? formatDue(p.goal, now) : <span className="t3">No date</span>}</span>
                   <span>
                     <div className="meter" role="progressbar" aria-label={`${p.name}: ${stats.done} of ${stats.total} tasks`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={stats.percent}>
                       <i style={{ width: `${stats.percent}%` }} />

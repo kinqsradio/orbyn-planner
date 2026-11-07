@@ -61,7 +61,7 @@ export function NewTaskDialog() {
   return (
     <Portal>
     <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && ui.closeNewTask()}>
-      <div ref={ref} className="authcard" style={{ width: 480 }} role="dialog" aria-modal="true" aria-label="New task" tabIndex={-1}>
+      <div ref={ref} className="authcard" style={{ width: "var(--sp-480)" }} role="dialog" aria-modal="true" aria-label="New task" tabIndex={-1}>
         <b className="card-title">New task</b>
         <form
           className="form"

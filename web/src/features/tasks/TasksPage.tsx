@@ -114,7 +114,7 @@ export function TasksPage() {
             </button>
           ))}
         </div>
-        <span style={{ width: 12 }} />
+        <span style={{ width: "var(--sp-12)" }} />
         <div role="radiogroup" aria-label="Due date" className="pills">
           {DUE_FILTERS.map((f) => (
             <button key={f.id} type="button" role="radio" aria-checked={due === f.id} className="pill" onClick={() => setDue(f.id)}>
@@ -156,13 +156,13 @@ export function TasksPage() {
       ) : view === "list" ? (
         <div className="tbl-wrap">
           <ul className="tbl">
-            <li className="tr h" aria-hidden="true" style={{ gridTemplateColumns: "22px minmax(0,1fr) 120px 110px 70px" }}>
+            <li className="tr h" aria-hidden="true" style={{ gridTemplateColumns: "var(--sp-22) minmax(0,1fr) var(--sp-120) var(--sp-110) var(--sp-70)" }}>
               <span /><span>Task</span><span>List</span><span>Due</span><span>Priority</span>
             </li>
           </ul>
           {groups.map((g) => (
             <section key={g.key} aria-label={g.label}>
-              <div className="bh" style={{ padding: "8px 4px 4px" }}>
+              <div className="bh" style={{ padding: "var(--sp-8) var(--sp-4) var(--sp-4)" }}>
                 <b className={g.amber ? "amber" : undefined}>{g.label}</b>
                 <span>{g.tasks.length}</span>
               </div>

@@ -196,7 +196,7 @@ function Panel({ occ }: { occ: Occurrence }) {
 
       {saveError && <p className="err" role="alert">{saveError}</p>}
       <div className="tp-foot">
-        {!locked && <button type="button" className="ghost danger" onClick={() => (event.repeat ? setAsk("delete") : remove("all"))}>Delete</button>}
+        {!locked && <button type="button" className="ghost red" onClick={() => (event.repeat ? setAsk("delete") : remove("all"))}>Delete</button>}
         <button type="button" className="ghost" onClick={duplicate}>Duplicate</button>
         {!locked && (
           <button type="button" className="btn" disabled={invalid} onClick={() => (event.repeat ? setAsk("save") : save("all"))}>

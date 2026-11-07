@@ -24,8 +24,8 @@ export function StrandedZones({ only }: { only?: "list" }) {
   const zones = (sync?.stranded ?? []).filter((z) => !only || z.startsWith(`${only}:`));
   if (sync?.needsApproval) {
     return (
-      <div className="card" role="alert" style={{ gap: 6 }}>
-        <b style={{ fontWeight: 500 }}>{NEEDS_APPROVAL}</b>
+      <div className="card" role="alert" style={{ gap: "var(--sp-6)" }}>
+        <b style={{ fontWeight: "var(--fw-medium)" }}>{NEEDS_APPROVAL}</b>
         <span className="t3 small">Nothing is lost: your changes here are kept and are sent once it is approved.</span>
       </div>
     );
@@ -51,12 +51,12 @@ export function StrandedZones({ only }: { only?: "list" }) {
       {zones.map((zone) => {
         const kind = KIND[zone.slice(0, zone.indexOf(":"))] ?? "item";
         return (
-          <div key={zone} className="card" role="alert" style={{ gap: 6 }}>
-            <b style={{ fontWeight: 500 }}>This {kind} can’t be opened on any of your devices.</b>
+          <div key={zone} className="card" role="alert" style={{ gap: "var(--sp-6)" }}>
+            <b style={{ fontWeight: "var(--fw-medium)" }}>This {kind} can’t be opened on any of your devices.</b>
             <span className="t3 small">The key was only on a device that is gone, so what is in it can’t be read. Removing it deletes it for your account.</span>
             {failed === zone && <span className="err" role="status">Couldn’t remove it. Try again.</span>}
             <div>
-              <button type="button" className="ghost danger" disabled={busy === zone} onClick={() => setAsking(zone)}>Remove it</button>
+              <button type="button" className="ghost red" disabled={busy === zone} onClick={() => setAsking(zone)}>Remove it</button>
             </div>
           </div>
         );
@@ -67,7 +67,7 @@ export function StrandedZones({ only }: { only?: "list" }) {
           <p className="t3 small">Only do this if no other device of yours is signed in.</p>
           <div className="dialog-actions">
             <button type="button" className="ghost" data-autofocus onClick={() => setAsking(null)}>Cancel</button>
-            <button type="button" className="btn danger" onClick={() => void remove(asking)}>Delete</button>
+            <button type="button" className="danger" onClick={() => void remove(asking)}>Delete</button>
           </div>
         </Modal>
       )}

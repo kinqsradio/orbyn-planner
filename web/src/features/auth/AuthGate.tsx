@@ -49,8 +49,8 @@ function useIncomingApproval() {
 /** A passive notice: it joins nothing and sends nothing until the person agrees. */
 function RepairNotice({ onApprove, onDismiss }: { onApprove: () => void; onDismiss: () => void }) {
   return (
-    <aside className="card" role="status" aria-label="Approval request" style={{ position: "fixed", top: 12, right: 12, zIndex: 60, maxWidth: 320, gap: 8 }}>
-      <b style={{ fontWeight: 500 }}>Another device asked to approve this one again</b>
+    <aside className="card" role="status" aria-label="Approval request" style={{ position: "fixed", top: "var(--sp-12)", right: "var(--sp-12)", zIndex: 60, maxWidth: "var(--sp-320)", gap: "var(--sp-8)" }}>
+      <b style={{ fontWeight: "var(--fw-medium)" }}>Another device asked to approve this one again</b>
       <span className="t3 small">It no longer trusts this device. If you started that, approve it here and compare the digits on both.</span>
       <div className="dialog-actions">
         <button type="button" className="ghost" onClick={onDismiss}>Dismiss</button>
@@ -69,7 +69,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   if (auth.status === "landing") {
     return (
       <>
-        {auth.problem && <p className="err" role="alert" style={{ position: "fixed", top: 8, left: 16, right: 16, zIndex: 60 }}>{auth.problem}</p>}
+        {auth.problem && <p className="err" role="alert" style={{ position: "fixed", top: "var(--sp-8)", left: "var(--sp-16)", right: "var(--sp-16)", zIndex: 60 }}>{auth.problem}</p>}
         <AuthScreens start="landing" />
       </>
     );

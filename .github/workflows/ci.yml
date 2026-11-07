@@ -135,6 +135,7 @@ jobs:
           fi
       - if: env.RUN != 'true'
         run: echo "No web change in this pull request."
+        working-directory: .
       - if: env.RUN == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - if: env.RUN == 'true'
@@ -187,6 +188,7 @@ jobs:
           fi
       - if: env.RUN != 'true'
         run: echo "No web change in this pull request."
+        working-directory: .
       - if: env.RUN == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - if: env.RUN == 'true'
@@ -279,6 +281,7 @@ jobs:
           fi
       - if: env.RUN != 'true'
         run: echo "No web change in this pull request."
+        working-directory: .
       - if: env.RUN == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - if: env.RUN == 'true'
@@ -397,6 +400,7 @@ jobs:
       - if: env.RUN != 'true'
         shell: bash
         run: echo "No desktop change in this pull request; main and the nightly run both systems."
+        working-directory: .
       - if: env.RUN == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - if: env.RUN == 'true'

@@ -69,17 +69,17 @@ function ConfirmDialog({ report, onClose, onDone, onConflict }: { report: Protec
         <b className="card-title">Confirm your protection level</b>
         <p className="t3 small">{reasonOf(report)} Choose the level you want. This device signs it, and every device of your account will check that signature.</p>
         <div className="form" style={{ width: "auto" }} role="radiogroup" aria-label="Protection level">
-          <label style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+          <label style={{ display: "flex", gap: "var(--sp-8)", alignItems: "flex-start" }}>
             <input type="radio" name="level" checked={level === "standard"} onChange={() => setLevel("standard")} />
             <span>
-              <b style={{ fontWeight: 500 }}>Standard</b>
+              <b style={{ fontWeight: "var(--fw-medium)" }}>Standard</b>
               <span className="t3 small" style={{ display: "block" }}>Orbyn holds a key that can open your planner so it can help you recover your account. Orbyn can read your data.</span>
             </span>
           </label>
-          <label style={{ display: "flex", gap: 8, alignItems: "flex-start", opacity: 0.6 }}>
+          <label style={{ display: "flex", gap: "var(--sp-8)", alignItems: "flex-start", opacity: 0.6 }}>
             <input type="radio" name="level" disabled />
             <span>
-              <b style={{ fontWeight: 500 }}>Advanced</b>
+              <b style={{ fontWeight: "var(--fw-medium)" }}>Advanced</b>
               <span className="t3 small" style={{ display: "block" }}>Coming later.</span>
             </span>
           </label>
@@ -162,7 +162,7 @@ export function ProtectionSettings() {
   return (
     <>
       <div className="bh"><b>Protection</b><span></span></div>
-      <div className="card" style={{ gap: 8, padding: "12px 14px" }} aria-label="Protection">
+      <div className="card" style={{ gap: "var(--sp-8)", padding: "var(--sp-12) var(--sp-14)" }} aria-label="Protection">
         {error ? (
           <>
             <span className="err" role="alert">{error}</span>
@@ -172,17 +172,17 @@ export function ProtectionSettings() {
           <span className="t3">Checking…</span>
         ) : verified && report.level === "standard" ? (
           <>
-            <b style={{ fontWeight: 500 }}>Standard protection</b>
+            <b style={{ fontWeight: "var(--fw-medium)" }}>Standard protection</b>
             <span className="t3 small">Orbyn can help you recover your account if you lose every device. To make that possible, Orbyn holds a key that can open your planner, so under Standard Orbyn can read your data.</span>
           </>
         ) : verified && report.level === "advanced" ? (
           <>
-            <b style={{ fontWeight: 500 }}>Advanced protection</b>
+            <b style={{ fontWeight: "var(--fw-medium)" }}>Advanced protection</b>
             <span className="t3 small">Only your own devices can open your planner. Orbyn can’t read it, and can’t help you recover it if you lose every device.</span>
           </>
         ) : (
           <>
-            <b style={{ fontWeight: 500 }}>Your protection level can’t be confirmed on this device</b>
+            <b style={{ fontWeight: "var(--fw-medium)" }}>Your protection level can’t be confirmed on this device</b>
             <span className="t3 small">{reasonOf(report)}</span>
             {report.state === "provisional" && report.level && (
               <span className="t3 small">The last setting this device verified is {report.level === "standard" ? "Standard" : "Advanced"}, but it may not be the newest, so nothing relies on it.</span>
@@ -191,7 +191,7 @@ export function ProtectionSettings() {
           </>
         )}
         {showChanged && changed && (
-          <div role="status" style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between" }}>
+          <div role="status" style={{ display: "flex", gap: "var(--sp-8)", alignItems: "center", justifyContent: "space-between" }}>
             <span className="t3 small">Protection was changed on {changed.name ?? "another device"}.</span>
             <button type="button" className="ghost" onClick={() => { writeSeen(accountId, changed!.seq); setDismissed(changed!.seq); }}>Dismiss</button>
           </div>

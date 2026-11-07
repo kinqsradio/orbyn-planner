@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { PHONE_MAX_PX } from "../styles/tokens";
 
 /** Follows a media query, so the answer changes when the window or device does. False where matchMedia does not exist. */
 export function useMediaQuery(query: string): boolean {
@@ -14,4 +15,4 @@ export function useMediaQuery(query: string): boolean {
   );
 }
 
-export const PHONE_QUERY = "(max-width: 767px)";
+export const PHONE_QUERY = `(max-width: ${PHONE_MAX_PX}px)`;

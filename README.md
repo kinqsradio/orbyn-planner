@@ -4,7 +4,7 @@ A simple planner for everyone: tasks, lists, projects, calendar and sharing. It 
 
 Status: early. Nothing here is released.
 
-The plan, the feature map and the phases are in the [Orbyn platform plan](https://claude.ai/artifact/BBhxZSmXRg1DawhLVRbsNc).
+The plan, the feature map and the phases are in the internal Orbyn Platform Plan.
 
 ## Layout
 

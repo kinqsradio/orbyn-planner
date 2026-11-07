@@ -110,7 +110,7 @@ export function ListsPage() {
         ))}
         {adding ? (
           <form
-            style={{ marginTop: 8 }}
+            style={{ marginTop: "var(--sp-8)" }}
             onSubmit={(e) => {
               e.preventDefault();
               create();
@@ -119,7 +119,7 @@ export function ListsPage() {
             <input className="field" aria-label="New list name" placeholder="List name" value={newName} autoFocus onChange={(e) => setNewName(e.target.value)} onBlur={create} />
           </form>
         ) : (
-          <button type="button" className="nav" style={{ marginTop: 8 }} disabled={!ready} onClick={() => setAdding(true)}>
+          <button type="button" className="nav" style={{ marginTop: "var(--sp-8)" }} disabled={!ready} onClick={() => setAdding(true)}>
             <Icon name="plus" small />
             New list
           </button>

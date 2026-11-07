@@ -33,7 +33,7 @@ export function CompletedPage() {
         ))}
       </div>
 
-      <div role="tabpanel" id="tab-panel" aria-labelledby={`tab-${tab}`} className="tbl-wrap" style={{ paddingTop: 8 }}>
+      <div role="tabpanel" id="tab-panel" aria-labelledby={`tab-${tab}`} className="tbl-wrap" style={{ paddingTop: "var(--sp-8)" }}>
         {tab === "completed" ? (
           completed.length === 0 ? (
             <p className="quiet note">Nothing completed yet. Tasks you finish will appear here.</p>
@@ -51,7 +51,7 @@ export function CompletedPage() {
             {deleted.map((t) => {
               const list = lists.find((l) => l.id === t.listId);
               return (
-                <li key={t.id} className="tr" style={{ gridTemplateColumns: "minmax(0,1fr) 140px 120px auto" }}>
+                <li key={t.id} className="tr" style={{ gridTemplateColumns: "minmax(0,1fr) var(--sp-140) var(--sp-120) auto" }}>
                   <span className="tt">{t.title}</span>
                   <span>
                     {list && (
@@ -71,7 +71,7 @@ export function CompletedPage() {
           </ul>
         )}
       </div>
-      <p className="note t3" style={{ padding: "14px 28px" }}>
+      <p className="note t3" style={{ padding: "var(--sp-14) var(--sp-28)" }}>
         Deleted items: {deleted.length} · kept for {RESTORE_DAYS} days, then removed for good.
       </p>
     </>

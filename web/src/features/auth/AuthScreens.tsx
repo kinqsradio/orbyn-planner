@@ -93,7 +93,7 @@ function CheckEmail({ pending, onBack, onDone }: { pending: PendingSignUp; onBac
   return (
     <form className="authcard" onSubmit={(e) => void verify(e)} aria-label="Check your email" noValidate>
       <h1 className="auth-title">Check your email</h1>
-      <p className="t3">We sent a 6-digit code to <b style={{ fontWeight: 500 }}>{pending.email}</b>. This code expires in 30 minutes.</p>
+      <p className="t3">We sent a 6-digit code to <b style={{ fontWeight: "var(--fw-medium)" }}>{pending.email}</b>. This code expires in 30 minutes.</p>
       <div className="form" style={{ width: "auto" }}>
         <label htmlFor="su-code">Code</label>
         <input id="su-code" className="field" inputMode="numeric" autoComplete="one-time-code" maxLength={7} placeholder="123456" value={code} onChange={(e) => setCode(e.target.value)} autoFocus />
@@ -322,11 +322,11 @@ function CantSignIn({ go }: { go: (s: AuthScreen) => void }) {
     { icon: "users", label: "Use a recovery key or contact", note: "Not available yet.", ready: false },
   ];
   return (
-    <div className="authcard" role="group" aria-label="Can’t sign in?" style={{ width: 420 }}>
+    <div className="authcard" role="group" aria-label="Can’t sign in?" style={{ width: "var(--sp-420)" }}>
       <h1 className="auth-title">Can’t sign in?</h1>
       <ul className="auth-options">
         {options.map((o) => (
-          <li key={o.label} className="nav" style={{ height: "auto", minHeight: 44, background: "var(--raise)", alignItems: "flex-start", padding: "10px 8px", opacity: o.ready ? 1 : 0.7 }}>
+          <li key={o.label} className="nav" style={{ height: "auto", minHeight: "var(--sp-44)", background: "var(--raise)", alignItems: "flex-start", padding: "var(--sp-10) var(--sp-8)", opacity: o.ready ? 1 : 0.7 }}>
             <Icon name={o.icon} small />
             <span>
               <span style={{ display: "block", color: "var(--t1)" }}>{o.label}</span>
