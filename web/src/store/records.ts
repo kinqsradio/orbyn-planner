@@ -15,26 +15,32 @@ import type { CalendarEvent, Project, ProjectSection, RecordType, Task } from ".
 type Fields = Record<string, unknown>;
 
 export const SECTION_PREFIX = "section.";
+/** A task carries a tag as the field `tag:<tagId>` (true; false once removed). */
+export const TAG_PREFIX = "tag:";
 
 // Tasks ------------------------------------------------------------------------------------------
 
 function taskToView(stored: Fields): Task {
   const skipped: string[] = [];
+  const tags: string[] = [];
   const rest: Fields = {};
   for (const [k, v] of Object.entries(stored)) {
     if (k.startsWith(SKIP_PREFIX)) {
       if (v === true) skipped.push(k.slice(SKIP_PREFIX.length));
-    } else rest[k] = v;
+    } else if (k.startsWith(TAG_PREFIX)) {
+      if (v === true) tags.push(k.slice(TAG_PREFIX.length));
+    } else if (k !== "tags") rest[k] = v;
   }
   const rule = rest.repeat as { start: string; repeat: Repeat } | null | undefined;
-  const task = { overrideOf: null, ...rest, repeat: rule ? { start: rule.start, repeat: rule.repeat, skipped: skipped.sort() } : null } as unknown as Task;
+  const task = { overrideOf: null, ...rest, tags: tags.sort(), repeat: rule ? { start: rule.start, repeat: rule.repeat, skipped: skipped.sort() } : null } as unknown as Task;
   return task;
 }
 
 function taskToStored(task: Task): Fields {
-  const { repeat, ...rest } = task;
+  const { repeat, tags, ...rest } = task;
   const out: Fields = { ...rest, repeat: repeat ? { start: repeat.start, repeat: repeat.repeat } : null };
   for (const d of repeat?.skipped ?? []) out[SKIP_PREFIX + d] = true;
+  for (const id of tags ?? []) out[TAG_PREFIX + id] = true;
   return out;
 }
 
@@ -46,7 +52,11 @@ function applyTaskFields(task: Task, fields: Fields): Task {
   }
   for (const [k, v] of Object.entries(fields)) {
     if (k === "repeat") continue;
-    if (k.startsWith(SKIP_PREFIX)) {
+    if (k.startsWith(TAG_PREFIX)) {
+      const id = k.slice(TAG_PREFIX.length);
+      const rest = next.tags.filter((t) => t !== id);
+      next = { ...next, tags: v === true ? [...rest, id].sort() : rest };
+    } else if (k.startsWith(SKIP_PREFIX)) {
       if (!next.repeat) continue;
       const date = k.slice(SKIP_PREFIX.length);
       const rest = next.repeat.skipped.filter((d) => d !== date);

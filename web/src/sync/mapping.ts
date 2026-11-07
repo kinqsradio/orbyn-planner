@@ -53,6 +53,9 @@ export function zoneOf(type: RecordType, record: { id: string; listId?: string; 
       return zoneName("calendar", record.id);
     case "event":
       return zoneName("calendar", record.calendarId ?? record.id);
+    case "tag":
+      // The account's tag definitions all live in the one settings zone.
+      return SETTINGS_ZONE;
   }
 }
 
@@ -63,10 +66,12 @@ export function zoneParts(zone: string): { kind: string; owner: string } {
 }
 
 /** The record types a zone may hold: its own record (the id is the zone owner's) and what lives inside it. */
-const ZONE_TYPES: Record<string, { owner: RecordType; inside: RecordType | null }> = {
+const ZONE_TYPES: Record<string, { owner: RecordType | null; inside: RecordType | null }> = {
   list: { owner: "list", inside: "task" },
   calendar: { owner: "calendar", inside: "event" },
   project: { owner: "project", inside: null },
+  // The account-level zone: tag definitions, and nothing else for now.
+  [SETTINGS_ZONE]: { owner: null, inside: "tag" },
 };
 
 /** Fields only a task or an event has: the record that is the zone itself never carries them. */
@@ -87,12 +92,13 @@ export function acceptable(zone: string, id: string, type: string | undefined, f
   const { kind, owner } = zoneParts(zone);
   const allowed = ZONE_TYPES[kind];
   if (!allowed || type === undefined) return null;
-  const isOwner = id === owner;
+  const isOwner = allowed.owner !== null && id === owner;
   if (isOwner ? type !== allowed.owner : type !== allowed.inside) return null;
   if (serverType !== undefined && serverType !== type) return null;
   if (fields) {
     if (type === "task" && fields.listId !== owner) return null;
     if (type === "event" && fields.calendarId !== owner) return null;
+    if (type === "tag" && (typeof fields.name !== "string" || OWNED_ONLY.some((name) => name in fields))) return null;
     if (isOwner && (typeof fields.name !== "string" || OWNED_ONLY.some((name) => name in fields))) return null;
   }
   return type as RecordType;

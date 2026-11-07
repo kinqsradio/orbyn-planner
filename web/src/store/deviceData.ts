@@ -5,11 +5,12 @@ import type { PlannerState } from "./types";
  * Whether the planner kept on this device alone holds anything the person made: any task, event or project,
  * or a list or calendar besides the Inbox and Personal that every planner starts with.
  */
-export function hasPlannerData(state: Pick<PlannerState, "tasks" | "events" | "projects" | "lists" | "calendars">): boolean {
+export function hasPlannerData(state: Pick<PlannerState, "tasks" | "events" | "projects" | "lists" | "calendars" | "tags">): boolean {
   return (
     state.tasks.length > 0 ||
     state.events.length > 0 ||
     state.projects.length > 0 ||
+    state.tags.length > 0 ||
     state.lists.some((l) => l.id !== INBOX_ID) ||
     state.calendars.some((c) => c.id !== PERSONAL_CALENDAR_ID)
   );

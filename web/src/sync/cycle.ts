@@ -127,7 +127,7 @@ export async function runCycle(
   /** The type of the local record with this id that belongs to the zone, if there is one. */
   function localTypeOf(zone: string, id: string): string | undefined {
     const s = store.getState();
-    for (const [type, list] of [["task", s.tasks], ["list", s.lists], ["event", s.events], ["calendar", s.calendars], ["project", s.projects]] as const) {
+    for (const [type, list] of [["task", s.tasks], ["list", s.lists], ["event", s.events], ["calendar", s.calendars], ["project", s.projects], ["tag", s.tags]] as const) {
       const found = (list as readonly { id: string; listId?: string; calendarId?: string }[]).find((r) => r.id === id);
       if (found && zoneOf(type, found) === zone) return type;
     }
@@ -502,7 +502,7 @@ export async function runCycle(
   async function dropZone(zone: string): Promise<void> {
     const mine: { type: RecordType; id: string }[] = [];
     const s = store.getState();
-    for (const [type, list] of [["task", s.tasks], ["list", s.lists], ["event", s.events], ["calendar", s.calendars], ["project", s.projects]] as const) {
+    for (const [type, list] of [["task", s.tasks], ["list", s.lists], ["event", s.events], ["calendar", s.calendars], ["project", s.projects], ["tag", s.tags]] as const) {
       for (const r of list as readonly { id: string; listId?: string; calendarId?: string; isInbox?: boolean; kind?: { type: string } }[]) {
         // The inbox and the personal calendar are the planner's own: they stay, and make their zone again.
         if (r.isInbox || (type === "calendar" && r.kind?.type === "local" && r.id === zone.slice(zone.indexOf(":") + 1))) continue;
@@ -570,7 +570,7 @@ export async function runCycle(
 /** A device whose approval changed gets the keys again at most this often (unless an approval completed on this device). */
 const RESEND_EVERY_MS = 10 * 60 * 1000;
 
-const STORE_KEY = { task: "tasks", list: "lists", event: "events", calendar: "calendars", project: "projects" } as const satisfies Record<RecordType, string>;
+const STORE_KEY = { task: "tasks", list: "lists", event: "events", calendar: "calendars", project: "projects", tag: "tags" } as const satisfies Record<RecordType, string>;
 
 function hasCode(error: unknown, code: string): boolean {
   return error instanceof Error && error.message.startsWith(`${code}:`);

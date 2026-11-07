@@ -77,16 +77,18 @@ function BoardCard({ task }: { task: Task }) {
 }
 
 export function TasksPage() {
-  const { tasks, lists } = usePlanner();
+  const { tasks, lists, tags } = usePlanner();
   const ui = useUi();
   const now = useNow();
   const [view, setView] = useState<View>("list");
   const [due, setDue] = useState<DueFilter>("any");
   const [listId, setListId] = useState("");
+  const [tagId, setTagId] = useState("");
+  const liveTags = tags.filter((t) => t.deletedAt === null);
 
   const shown = useMemo(
-    () => activeTasks(tasks, now).filter((t) => matchesDue(t, due, now) && (listId === "" || t.listId === listId)),
-    [tasks, now, due, listId],
+    () => activeTasks(tasks, now).filter((t) => matchesDue(t, due, now) && (listId === "" || t.listId === listId) && (tagId === "" || t.tags.includes(tagId))),
+    [tasks, now, due, listId, tagId],
   );
   const groups = useMemo(() => groupTasks(shown, now), [shown, now]);
   const openCount = tasks.filter(isOpen).length;
@@ -127,6 +129,17 @@ export function TasksPage() {
             ))}
           </select>
         </label>
+        {liveTags.length > 0 && (
+          <label className="pill select-pill">
+            <span className="visually-hidden">Tag</span>
+            <select value={liveTags.some((t) => t.id === tagId) ? tagId : ""} onChange={(e) => setTagId(e.target.value)}>
+              <option value="">Any tag</option>
+              {liveTags.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          </label>
+        )}
         <button type="button" className="pill" style={{ marginLeft: "auto" }} onClick={ui.openSearch}>
           <Icon name="search" small />
           Search tasks
