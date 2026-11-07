@@ -79,7 +79,7 @@ Accounts, device keys and the sync engine's saved state run on orbyn-engine's `o
 
 `src/e2e/engine.e2e.test.ts` signs up, signs in on a second device, pairs with the digits compared by the test, removes a device, and checks a cancel and a refusal, all against a real engine with the real module. It runs only when `ORBYN_E2E_ENGINE` is set.
 
-The **End to end** job in `.github/workflows/ci.yml` runs it on every pull request, as a check like the others (`timeout-minutes: 20`). It checks out `kinqsradio/orbyn-engine` at the commit in `web/src/generated/wasm/manifest.json` (refused unless it is 40 hex characters, as in the Wasm package job), so the engine under test is the one the committed module was built from. It then:
+The **End to end** job in `.github/workflows/ci.yml` runs it on every pull request, as a check like the others (`timeout-minutes: 20`). It checks out `orbyn-dev/orbyn-engine` at the commit in `web/src/generated/wasm/manifest.json` (refused unless it is 40 hex characters, as in the Wasm package job), so the engine under test is the one the committed module was built from. It then:
 
 1. builds the engine's Docker image (`docker compose build`);
 2. removes any volume (`docker compose down --volumes`), so the database is made fresh for the run, and makes `ORBYN_AUTH_SETUP` with `orbyn auth-setup` inside the image (masked in the log);

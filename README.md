@@ -1,6 +1,6 @@
 # Orbyn Planner
 
-A simple planner for everyone: tasks, lists, projects, calendar and sharing. It runs on the web, desktop and phone from one React and TypeScript UI in the Orbyn house style, on top of [orbyn-engine](https://github.com/kinqsradio/orbyn-engine).
+A simple planner for everyone: tasks, lists, projects, calendar and sharing. It runs on the web, desktop and phone from one React and TypeScript UI in the Orbyn house style, on top of [orbyn-engine](https://github.com/orbyn-dev/orbyn-engine).
 
 Status: early. Nothing here is released.
 
