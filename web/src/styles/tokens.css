@@ -68,6 +68,8 @@
   --sans: "Geist Variable", "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
   --fw-regular: 400; --fw-medium: 500;
+  /* The body text's line height (as `.sheet` sets it). */
+  --lh-body: 1.45;
   --ls-title: -.015em; --ls-heading: -.02em; --ls-code: .12em;
 }
 

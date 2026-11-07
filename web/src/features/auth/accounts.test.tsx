@@ -110,7 +110,7 @@ async function fillSignIn(email = SAM.email, password = SAM.password) {
   await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
 }
 
-const todayShown = () => screen.findByRole("heading", { name: "Nothing planned yet" });
+const todayShown = () => screen.findByRole("heading", { name: "Nothing planned today" });
 const openAccount = async () => {
   await userEvent.click(await screen.findByRole("button", { name: "Account" }));
 };
@@ -163,7 +163,7 @@ describe("the public pages", () => {
     await fillSignUp();
     expect(await screen.findByRole("alert")).toHaveTextContent(`${SIGN_IN_UNAVAILABLE}.`);
     expect(engine.calls).toEqual([]);
-    expect(screen.queryByRole("heading", { name: "Nothing planned yet" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Nothing planned today" })).not.toBeInTheDocument();
   });
 });
 
@@ -244,7 +244,7 @@ describe("sign in", () => {
     await fillSignIn(SAM.email, "wrong wrong wrong");
     expect(await screen.findByRole("alert")).toHaveTextContent("That email and password don’t match.");
     expect(engine.calls.some((c) => c.path === "/v1/sessions/login/finish")).toBe(false);
-    expect(screen.queryByRole("heading", { name: "Nothing planned yet" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Nothing planned today" })).not.toBeInTheDocument();
   });
 
   it("the sign-in screen has no way to cancel a deletion: that is the banner's and the email's job", async () => {
@@ -423,7 +423,7 @@ describe("adding a device", () => {
     expect(await within(dialog).findByText(/is trusted/)).toBeInTheDocument();
     expect(await onDevice.findByText("This device is trusted.")).toBeInTheDocument();
     await userEvent.click(onDevice.getByRole("button", { name: "Continue" }));
-    expect(await onDevice.findByRole("heading", { name: "Nothing planned yet" })).toBeInTheDocument();
+    expect(await onDevice.findByRole("heading", { name: "Nothing planned today" })).toBeInTheDocument();
     expect(b.tokens.getSession()?.deviceState).toBe("trusted");
     expect((await b.keys.loadSession())?.deviceState).toBe("trusted");
     void a;
@@ -434,7 +434,7 @@ describe("adding a device", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "They match" }));
     await userEvent.click(onDevice.getByRole("button", { name: "They match" }));
     await userEvent.click(await onDevice.findByRole("button", { name: "Continue" }));
-    await onDevice.findByRole("heading", { name: "Nothing planned yet" });
+    await onDevice.findByRole("heading", { name: "Nothing planned today" });
     const sealed = await b.keys.loadSnapshot();
     expect(sealed).not.toBeNull();
     onA.unmount();
@@ -647,7 +647,7 @@ describe("keys the browser will not store", () => {
     expect(done).toHaveTextContent("This browser still can’t keep them, so you’ll sign in again here next time.");
     expect(within(done).getByRole("button", { name: "Sign out of this browser" })).toBeInTheDocument();
     await userEvent.click(within(done).getByRole("button", { name: "Continue" }));
-    expect(await within(onA.root).findByRole("heading", { name: "Nothing planned yet" })).toBeInTheDocument();
+    expect(await within(onA.root).findByRole("heading", { name: "Nothing planned today" })).toBeInTheDocument();
     expect(a.keys.inMemory).toBe(true);
     onB.unmount();
     onA.unmount();
@@ -1082,7 +1082,7 @@ describe("removing a device and approving one again", () => {
     // C sees a passive notice over its planner.
     const notice = await screen.findByRole("status", { name: "Approval request" });
     expect(notice).toHaveTextContent("Another device asked to approve this one again");
-    expect(await device.findByRole("heading", { name: "Nothing planned yet" })).toBeInTheDocument();
+    expect(await device.findByRole("heading", { name: "Nothing planned today" })).toBeInTheDocument();
     expect(device.queryByRole("heading", { name: "Approve this device again" })).not.toBeInTheDocument();
     // Time passes: still nothing joined, no nonce sent, and the trusted device is still waiting for it.
     await new Promise((r) => setTimeout(r, 150));
@@ -1098,7 +1098,7 @@ describe("removing a device and approving one again", () => {
     await userEvent.click(device.getByRole("button", { name: "They match" }));
     expect(await device.findByText("This device is trusted.")).toBeInTheDocument();
     await userEvent.click(device.getByRole("button", { name: "Continue" }));
-    expect(await device.findByRole("heading", { name: "Nothing planned yet" })).toBeInTheDocument();
+    expect(await device.findByRole("heading", { name: "Nothing planned today" })).toBeInTheDocument();
     // The server's record of how the device was approved is replaced by this approval.
     expect(account.devices.find((d) => d.name === "Old phone")).toMatchObject({ state: "trusted", approval_signature: expect.any(String) });
   });

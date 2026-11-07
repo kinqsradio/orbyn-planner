@@ -150,8 +150,12 @@ export function useSubscriptionRefresh(now: () => number = Date.now): void {
   const store = useStore();
   const { calendars, ready } = usePlanner();
   const latest = useRef(calendars);
+  // The clock is read through a ref: a new function on every render (an inline `() => Date.now()`) must not restart the effect below,
+  // or a feed that is stale by that clock is read again after each of its own updates, and the page renders without end.
+  const clock = useRef(now);
   useEffect(() => {
     latest.current = calendars;
+    clock.current = now;
   });
 
   useEffect(() => {
@@ -160,12 +164,12 @@ export function useSubscriptionRefresh(now: () => number = Date.now): void {
       for (const c of latest.current) {
         if (c.kind.type !== "subscribed") continue;
         const last = c.kind.lastRefreshed ? new Date(c.kind.lastRefreshed).getTime() : 0;
-        if (onlyStale && now() - last < REFRESH_MS) continue;
+        if (onlyStale && clock.current() - last < REFRESH_MS) continue;
         void refreshCalendar(store, c);
       }
     };
     run(true);
     const timer = setInterval(() => run(false), REFRESH_MS);
     return () => clearInterval(timer);
-  }, [store, ready, now]);
+  }, [store, ready]);
 }
