@@ -1,9 +1,12 @@
+import { browserStorage } from "../lib/browserStorage";
 import type { ProtectionReport } from "./flows";
 
 /** What the Privacy screen remembers, per account, in this browser: the "changed on another device" notice, the last setting this device confirmed, and a "Not now". */
 export const seenKey = (accountId: string) => `orbyn-planner.protection-changed.${accountId}`;
 export const changedKey = (accountId: string) => `orbyn-planner.protection-changed-by.${accountId}`;
 const confirmedKey = (accountId: string) => `orbyn-planner.protection-confirmed.${accountId}`;
+/** What the Notifications list has marked read, per account. */
+export const readKey = (accountId: string) => `orbyn-planner.notifications-read.${accountId}`;
 const skippedKey = (accountId: string) => `orbyn-planner.protection-skipped.${accountId}`;
 
 /** The setting this device last verified, for "last confirmed 3 Nov" when it can no longer say what the server has. */
@@ -16,7 +19,7 @@ export interface ConfirmedSetting {
 
 function read<T>(key: string): T | null {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = browserStorage.get(key);
     return raw ? (JSON.parse(raw) as T) : null;
   } catch {
     return null;
@@ -24,7 +27,7 @@ function read<T>(key: string): T | null {
 }
 function write(key: string, value: unknown) {
   try {
-    localStorage.setItem(key, JSON.stringify(value));
+    browserStorage.set(key, JSON.stringify(value));
   } catch {
     // Not remembered across visits; the screen still works.
   }
@@ -39,14 +42,14 @@ export const writeSkipped = (accountId: string, seq: number) => write(skippedKey
 /** The "changed on another device" notice outlives the screen until it is dismissed: it is kept for the sequence it was about. */
 export function readSeen(accountId: string): number {
   try {
-    return Number(localStorage.getItem(seenKey(accountId)) ?? 0) || 0;
+    return Number(browserStorage.get(seenKey(accountId)) ?? 0) || 0;
   } catch {
     return 0;
   }
 }
 export function writeSeen(accountId: string, seq: number) {
   try {
-    localStorage.setItem(seenKey(accountId), String(seq));
+    browserStorage.set(seenKey(accountId), String(seq));
   } catch {
     // Not remembered across visits; fine.
   }
@@ -68,7 +71,7 @@ export function pendingChange(accountId: string, report: ProtectionReport | null
 /** Signing out removes what these kept: the account id in the key names and another device's name in a value. */
 export function forgetProtectionNotice(accountId: string): void {
   try {
-    for (const key of [seenKey(accountId), changedKey(accountId), confirmedKey(accountId), skippedKey(accountId)]) localStorage.removeItem(key);
+    for (const key of [seenKey(accountId), changedKey(accountId), confirmedKey(accountId), skippedKey(accountId), readKey(accountId)]) browserStorage.remove(key);
   } catch {
     // Storage is unavailable, so nothing was kept.
   }

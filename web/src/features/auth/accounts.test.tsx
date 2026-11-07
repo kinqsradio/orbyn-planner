@@ -574,7 +574,7 @@ describe("adding a device", () => {
 describe("keys the browser will not store", () => {
   it("the tab holds the account in memory only, and a device approved from it gets the keys", async () => {
     const keysA = createMemoryKeyStore();
-    keysA.saveKeys = () => Promise.reject(new Error("quota"));
+    keysA.replaceDevice = () => Promise.reject(new Error("quota"));
     const keysB = createMemoryKeyStore();
     const a = services(keysA);
     const b = services(keysB);
@@ -609,6 +609,8 @@ describe("keys the browser will not store", () => {
     expect(within(dialog).getByTestId("fingerprint").textContent).toMatch(/^[0-9A-F]{4}( [0-9A-F]{4}){3}$/);
     expect((await within(onB.root).findByTestId("approval-code")).textContent).toBe(sasA);
     await userEvent.click(within(dialog).getByRole("button", { name: "They match" }));
+    expect(await within(dialog).findByText("You said the digits and fingerprint match.")).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "They match" })).toBeNull(); // replaced by the waiting line
     await userEvent.click(within(onB.root).getByRole("button", { name: "They match" }));
     await userEvent.click(await within(onB.root).findByRole("button", { name: "Continue" }));
     expect(b.tokens.getSession()?.deviceState).toBe("trusted");
@@ -626,11 +628,92 @@ describe("keys the browser will not store", () => {
     onA.unmount();
   });
 
+  it("the approve dialog warns before They match, says what was confirmed after it, and tells the person when the other device never answers", async () => {
+    const keysA = createMemoryKeyStore();
+    keysA.replaceDevice = () => Promise.reject(new Error("quota"));
+    const a = services(keysA);
+    const b = services(createMemoryKeyStore());
+    const first = await mount(a);
+    await fillSignUp();
+    await screen.findByRole("alert", { name: "Account created, keys not saved" });
+    first.unmount();
+    const second = await mount(b);
+    await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
+    await fillSignIn();
+    await screen.findByRole("heading", { name: "Approve this device" });
+    second.unmount();
+
+    await mount(a);
+    await userEvent.click(await screen.findByRole("button", { name: "Approve another device from this tab" }));
+    const dialog = await screen.findByRole("dialog", { name: "Approve another device" });
+    await mount(b); // the other device shows its digits, then never confirms
+    await within(dialog).findByTestId("approval-code");
+    expect(dialog).toHaveTextContent("Only continue if both match exactly. If they don’t, press Cancel: someone else may be trying to add a device.");
+    nowMs += 11 * 60_000; // the approval runs out
+    await userEvent.click(within(dialog).getByRole("button", { name: "They match" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Your other device didn’t answer in 10 minutes. Nothing was shared.");
+    expect(within(dialog).queryByRole("button", { name: "They match" })).toBeNull();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Start again" })); // a new approval
+    expect(within(dialog).queryByRole("alert")).toBeNull();
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+  });
+
+  it.each([
+    ["Cancel", async (dialog: HTMLElement) => userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))],
+    ["Escape", async (dialog: HTMLElement) => { dialog.focus(); await userEvent.keyboard("{Escape}"); }],
+    ["a click outside", async (dialog: HTMLElement) => userEvent.pointer({ keys: "[MouseLeft]", target: dialog.parentElement! })],
+  ])("closing the approve dialog with %s closes the approval on the server", async (_how, close) => {
+    const keysA = createMemoryKeyStore();
+    keysA.replaceDevice = () => Promise.reject(new Error("quota"));
+    const a = services(keysA);
+    const b = services(createMemoryKeyStore());
+    const first = await mount(a);
+    await fillSignUp();
+    await screen.findByRole("alert", { name: "Account created, keys not saved" });
+    first.unmount();
+    const second = await mount(b);
+    await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
+    await fillSignIn();
+    await screen.findByRole("heading", { name: "Approve this device" });
+    second.unmount();
+    await mount(a);
+    await userEvent.click(await screen.findByRole("button", { name: "Approve another device from this tab" }));
+    const dialog = await screen.findByRole("dialog", { name: "Approve another device" });
+    await waitFor(() => expect(engine.calls.some((c) => c.method === "POST" && c.path === "/v1/devices/approvals")).toBe(true));
+    await close(dialog);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Approve another device" })).toBeNull());
+    await waitFor(() => expect(engine.calls.some((c) => c.method === "POST" && c.path.endsWith("/cancel"))).toBe(true));
+  });
+
+  it("with two devices waiting the person chooses which to approve: nothing is picked, and the device's name, kind and time show", async () => {
+    const keysA = createMemoryKeyStore();
+    keysA.replaceDevice = () => Promise.reject(new Error("quota"));
+    const a = services(keysA);
+    const first = await mount(a);
+    await fillSignUp();
+    await screen.findByRole("alert", { name: "Account created, keys not saved" });
+    first.unmount();
+    for (const keys of [createMemoryKeyStore(), createMemoryKeyStore()]) {
+      const view = await mount(services(keys));
+      await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
+      await fillSignIn();
+      await screen.findByRole("heading", { name: "Approve this device" });
+      view.unmount();
+    }
+    await mount(a);
+    await userEvent.click(await screen.findByRole("button", { name: "Approve another device from this tab" }));
+    const dialog = await screen.findByRole("dialog", { name: "Approve another device" });
+    const list = await within(dialog).findByRole("list", { name: "Devices" });
+    await waitFor(() => expect(within(list).getAllByRole("listitem")).toHaveLength(2));
+    expect(engine.calls.some((c) => c.method === "POST" && c.path === "/v1/devices/approvals")).toBe(false); // none was picked for them
+    await userEvent.click(within(list).getAllByRole("button", { name: /^Approve / })[1]!);
+    expect(await within(dialog).findByText("Kind")).toBeInTheDocument();
+    expect(within(dialog).getByText("When")).toBeInTheDocument();
+  });
+
   it("Try saving again moves the account into storage once it works, and the planner opens", async () => {
     const keysA = createMemoryKeyStore();
-    const save = keysA.saveKeys.bind(keysA);
     const replace = keysA.replaceDevice.bind(keysA);
-    keysA.saveKeys = () => Promise.reject(new Error("quota"));
     keysA.replaceDevice = () => Promise.reject(new Error("quota"));
     const a = services(keysA);
     await mount(a);
@@ -642,7 +725,6 @@ describe("keys the browser will not store", () => {
     // The second refusal says so, and approving another device becomes the main button.
     expect(await screen.findByText("Still couldn’t save. This browser may not allow it. Approve another device from this tab instead.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Approve another device from this tab" })).toHaveClass("btn");
-    keysA.saveKeys = save;
     keysA.replaceDevice = replace;
     await userEvent.click(screen.getByRole("button", { name: "Try saving again" }));
     await todayShown();
@@ -653,7 +735,7 @@ describe("keys the browser will not store", () => {
 
   it("signing out lets the held keys go", async () => {
     const keysA = createMemoryKeyStore();
-    keysA.saveKeys = () => Promise.reject(new Error("quota"));
+    keysA.replaceDevice = () => Promise.reject(new Error("quota"));
     const a = services(keysA);
     await mount(a);
     await fillSignUp();
@@ -999,6 +1081,28 @@ describe("email verification at sign-up", () => {
     expect(screen.getByLabelText("Code").closest("form")!.querySelectorAll(".cbox")).toHaveLength(6);
   });
 
+  it("the password is not kept in the page once the code is awaited", async () => {
+    await toCodeStep();
+    expect((document.getElementById("su-password") as HTMLInputElement).value).toBe(""); // the form is still mounted, hidden
+    expect(document.body.innerHTML).not.toContain(SAM.password);
+  });
+
+  it("a browser that can't even hold the keys in memory says so before anything is created", async () => {
+    const keys = createMemoryKeyStore();
+    const a = createAuthServices({ fetch: engine.fetch, baseUrl: "http://engine.test", keys, crypto: () => crypto, now: () => nowMs, poll: FAST_POLL, wrapSecret: () => Promise.reject(new Error("no crypto")) });
+    await mount(a);
+    await userEvent.click(await screen.findByRole("button", { name: "Get started" }));
+    await userEvent.type(screen.getByLabelText("Name"), SAM.name);
+    await userEvent.type(screen.getByLabelText("Email"), SAM.email);
+    await userEvent.type(screen.getByLabelText("Password"), SAM.password);
+    await userEvent.click(screen.getByRole("button", { name: "Create account" }));
+    const card = await screen.findByRole("alert", { name: "This browser can’t create an Orbyn account" });
+    expect(card).toHaveTextContent("Orbyn has to keep your encryption keys, and this browser won’t store them or hold them in memory. Nothing was created.");
+    expect(within(card).getByRole("button", { name: "Copy this page’s address" })).toBeInTheDocument();
+    expect(within(card).queryByRole("button", { name: /again|retry/i })).toBeNull(); // retrying can't help
+    expect(engine.calls.filter((c) => c.path.startsWith("/v1/accounts"))).toHaveLength(0); // nothing reached the engine
+  });
+
   it("Change email starts over, and the abandoned sign-up leaves nothing behind", async () => {
     const { keys } = await toCodeStep();
     await userEvent.click(screen.getByRole("button", { name: "Change email" }));
@@ -1159,22 +1263,20 @@ describe("the protection level", () => {
     expect(screen.queryByText(/Protection was changed to/)).toBeNull(); // a fork names no device
   });
 
-  it("a conflict in Confirm shows the new setting with a blue line naming the device, and the person confirms again, after the new head", async () => {
+  it("a conflict in Confirm reads the chain again: a setting this browser can't verify shows Can't confirm and is never signed again", async () => {
     engine.refuseNext("/v1/keychain/protection", 500, "internal", "Refused.", 1);
     await privacy();
     const card = await screen.findByLabelText("Protection");
     await userEvent.click(await within(card).findByRole("button", { name: "Choose" }));
     const dialog = screen.getByRole("dialog", { name: "Confirm your protection level" });
-    // Another device signs sequence 1 first.
+    // Another device signs sequence 1 first, with a signature this browser cannot check.
     const account = engine.accounts.get("sam@example.com")!;
     const other = account.devices[0]!;
     account.protection = [{ level: "standard", seq: 1, prev: PROTECTION_GENESIS, signed_at: Math.floor(nowMs / 1000) as unknown as bigint, signer_device_id: other.id, signature: "not-checked-here" }];
     await userEvent.click(within(dialog).getByRole("button", { name: "Set Standard protection" }));
-    expect(await within(dialog).findByText(/Protection was just changed on/)).toBeInTheDocument();
-    expect(account.protection).toHaveLength(1);
-    await userEvent.click(within(dialog).getByRole("button", { name: "Confirm" }));
-    await waitFor(() => expect(account.protection).toHaveLength(2));
-    expect(account.protection![1]!.seq).toBe(2); // after the new head, not a second try at sequence 1
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(await within(await screen.findByLabelText("Protection")).findByText("Can’t confirm")).toBeInTheDocument();
+    expect(account.protection).toHaveLength(1); // nothing was signed after the stale head
   });
 
   it("says when another device changed the level since this device last saw it, until dismissed", async () => {

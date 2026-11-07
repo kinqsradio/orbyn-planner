@@ -4,6 +4,7 @@ import { useAuth } from "../../auth/AuthProvider";
 import { confirmTotp, disableTotp, enrolTotp } from "../../auth/flows";
 import { saveFile } from "../export/save";
 import { useUi } from "../../app/ui";
+import { TOAST_BRIEF_MS } from "../../styles/tokens";
 import { Modal } from "../../components/Modal";
 import { describeError } from "./AuthScreens";
 import { QrCode } from "./QrCode";
@@ -15,9 +16,6 @@ const digits = (value: string) => value.replace(/\D/g, "").slice(0, 6);
 export const recoveryFile = (codes: readonly string[]) =>
   `Orbyn Planner recovery codes\n\nEach code works once, in place of a code from your authenticator app. Keep them somewhere safe.\n\n${codes.join("\n")}\n`;
 
-/** How long the note after copying the codes stays. */
-export const CODES_COPIED_MS = 8_000;
-
 function CodesStep({ codes, onDone }: { codes: string[]; onDone: () => void }) {
   const ui = useUi();
   const [saved, setSaved] = useState(false);
@@ -26,7 +24,7 @@ function CodesStep({ codes, onDone }: { codes: string[]; onDone: () => void }) {
     try {
       await navigator.clipboard.writeText(codes.join("\n"));
       // Said once, as a toast, and the clipboard is left alone: the person is told to copy something else themselves.
-      ui.showToast("Copied. Paste them somewhere safe, then copy something else so they don’t stay on your clipboard.", undefined, { ms: CODES_COPIED_MS });
+      ui.showToast("Copied. Paste them somewhere safe, then copy something else so they don’t stay on your clipboard.", undefined, { ms: TOAST_BRIEF_MS });
     } catch {
       setNote("Couldn’t copy. Select the codes and copy them, or download them.");
     }

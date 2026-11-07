@@ -14,9 +14,9 @@ import { removeDevice, verifiedDevices } from "../../auth/flows";
 import { ApproverController } from "../../auth/pairing";
 import { describeError } from "./AuthScreens";
 
-const PLATFORMS: Record<Device["platform"], string> = { web: "Web", ios: "iPhone or iPad", android: "Android", macos: "Mac", windows: "Windows", linux: "Linux" };
+export const PLATFORMS: Record<Device["platform"], string> = { web: "Web", ios: "iPhone or iPad", android: "Android", macos: "Mac", windows: "Windows", linux: "Linux" };
 
-function when(iso: string): string {
+export function when(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }

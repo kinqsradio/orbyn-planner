@@ -9,9 +9,8 @@ import { ProtectionSettings } from "./ProtectionSettings";
 const read = vi.fn<() => Promise<ProtectionReport>>();
 const confirm = vi.fn();
 vi.mock("../../auth/flows", () => ({ readProtection: () => read(), confirmProtection: (...args: unknown[]) => confirm(...args) }));
-vi.mock("../../auth/AuthProvider", () => ({
-  useAuth: () => ({ services: {}, session: { accountId: "acct-1", deviceState: "trusted", deviceId: "d1" } }),
-}));
+const auth = vi.hoisted(() => ({ services: {}, session: { accountId: "acct-1", deviceState: "trusted", deviceId: "d1" } })); // one object: a new one each render would read the chain again each render
+vi.mock("../../auth/AuthProvider", () => ({ useAuth: () => auth }));
 
 const link = (seq: number, signedAt: number): ProtectionLink => ({ level: "standard", seq, prev: "p", signed_at: BigInt(signedAt), signer_device_id: "d2", signature: "s" });
 const secs = (iso: string) => Math.floor(new Date(iso).getTime() / 1000);
@@ -88,7 +87,7 @@ describe("the protection card", () => {
   });
 
   it("a change signed by a device this one doesn't know says so, with Review devices first", async () => {
-    read.mockResolvedValue(report({ state: "provisional", stopped: "untrusted_signer", signer: null }));
+    read.mockResolvedValue(report({ state: "provisional", stopped: "untrusted_signer", signer: { id: "d9", name: "Old Mac", thisDevice: false } }));
     const review = vi.fn();
     render(<ProtectionSettings onReviewDevices={review} />);
     const c = await card();
@@ -176,5 +175,48 @@ describe("loading, errors and busy buttons", () => {
     expect(dialog).toHaveTextContent("No device has set a protection level for this account yet. Confirming sets Standard protection.");
     expect(within(dialog).queryByText("Set on")).toBeNull();
     expect(within(dialog).getByRole("button", { name: "Set Standard protection" })).toBeInTheDocument();
+  });
+});
+
+describe("a conflict in Confirm", () => {
+  const stale = () => report({ state: "provisional", seq: 0 });
+  const conflict = async () => {
+    confirm.mockRejectedValueOnce(new ApiFailure("protection_conflict", 409, "Another device changed the protection level first."));
+    render(<ProtectionSettings />);
+    await userEvent.click(await screen.findByRole("button", { name: "Confirm" }));
+  };
+
+  it.each([
+    ["a fork", report({ problem: "fork", state: "provisional" }), "The server showed two different settings."],
+    ["a rollback", report({ problem: "rollback", state: "provisional" }), "The server showed an older setting than this browser has already confirmed."],
+    ["an unknown signer", report({ state: "provisional", stopped: "untrusted_signer" }), "The latest change is signed by a device this browser doesn’t know."],
+  ])("after %s the dialog closes and the card says Can’t confirm", async (_name, next, line) => {
+    read.mockResolvedValueOnce(stale());
+    read.mockResolvedValue(next);
+    await conflict();
+    expect(await screen.findByText(line, { exact: false })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(confirm).toHaveBeenCalledTimes(1); // the stale head is not signed again
+  });
+
+  it("if the read fails the error card shows and the dialog closes", async () => {
+    read.mockResolvedValueOnce(stale());
+    read.mockRejectedValue(new Error("down"));
+    await conflict();
+    expect(await screen.findByText("Couldn’t check protection")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(confirm).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("a signer the account doesn't list", () => {
+  it("has its own card with Review devices first, and the matching reason in Details", async () => {
+    read.mockResolvedValue(report({ state: "provisional", stopped: "untrusted_signer", signer: { id: "d9", name: null, thisDevice: false } }));
+    const review = vi.fn();
+    render(<ProtectionSettings onReviewDevices={review} />);
+    const c = await card();
+    expect(await within(c).findByText("The latest change is signed by a device this account doesn’t list. This browser keeps the setting it last confirmed.")).toBeInTheDocument();
+    await userEvent.click(within(c).getByRole("button", { name: "Details" }));
+    expect(screen.getByRole("dialog", { name: "Protection details" })).toHaveTextContent("ReasonSigned by a device this account doesn’t list");
   });
 });

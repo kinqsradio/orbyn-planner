@@ -71,18 +71,24 @@ export interface PendingSignUp {
   verify(code: string): Promise<StoredSession>;
   /** Asks for a new code (the engine allows three an hour and answers the same whatever happens). */
   resend(): Promise<void>;
-  /** After `verify` failed with `keys_not_saved`: tries to save the keys again, for the same account. Resolves with the session. */
-  retrySave(): Promise<StoredSession>;
   /** Lets go of the keys: the sign-up is simply gone. */
   cancel(): void;
 }
 
 /** The account was made, but this browser could not keep the device's keys: signing in again is the way on. */
+/** Nothing was created: this browser cannot make the secret the keys are sealed under, so a sign-up cannot start here. */
+export const NO_MEMORY = "This browser can’t hold the keys of an Orbyn account.";
 export const KEYS_NOT_SAVED = "Account created, but this browser couldn’t save its keys. Sign in with your email and password to continue.";
 
 /** Starts a sign-up: the password steps and the device's first signature, then the engine sends a code to the address. */
 export async function signUp(services: AuthServices, input: { name: string; email: string; password: string }): Promise<PendingSignUp> {
   const crypto = services.crypto(); // refuses before anything is sent when sign-in is not in this build
+  // Before anything is created: if this browser cannot even hold the keys in memory, say so while nothing exists yet.
+  try {
+    (await services.freshWrap()).secret.fill(0);
+  } catch {
+    throw new ApiFailure("no_memory", 0, NO_MEMORY);
+  }
   let keys: DeviceKeys | null = null;
   let held = false;
   try {
@@ -148,13 +154,14 @@ export async function signUp(services: AuthServices, input: { name: string; emai
         // Only now is there an account and a session, so only now are the keys kept.
         const keep = async (): Promise<StoredSession> => {
           try {
-            const wrap = await services.wrapSecret();
+            // All or nothing: the keys, the wrapping key they are sealed under and the identity go in one transaction, so a refusal
+            // leaves nothing in storage.
+            const wrap = await services.freshWrap();
             try {
-              await services.keys.saveKeys(mine.export(wrap));
+              await services.keys.replaceDevice({ keys: mine.export(wrap.secret), wrapKey: wrap.key, identity: { accountId: created.account_id, deviceId: created.device_id, email } });
             } finally {
-              wrap.fill(0);
+              wrap.secret.fill(0);
             }
-            await services.keys.saveIdentity({ accountId: created.account_id, deviceId: created.device_id, email });
           } catch {
             // The account exists now, so this is not "that code didn't work": say what happened.
             throw new ApiFailure("keys_not_saved", 0, KEYS_NOT_SAVED);
@@ -165,10 +172,6 @@ export async function signUp(services: AuthServices, input: { name: string; emai
           return session;
         };
         keepKeys = keep;
-        return finish();
-      },
-      retrySave: () => {
-        if (!keepKeys || released) throw new ApiFailure("keys_not_saved", 0, KEYS_NOT_SAVED);
         return finish();
       },
       resend: () => services.api.emailResend({ signup_id: waiting.signup_id }),

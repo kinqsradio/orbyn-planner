@@ -51,7 +51,6 @@ function CheckEmail({ pending, onBack, onDone }: { pending: PendingSignUp; onBac
   const [resends, setResends] = useState<number[]>([]);
   const [, tick] = useState(0);
   const [engineLimited, setEngineLimited] = useState(false);
-  const [keysFailed, setKeysFailed] = useState(false);
 
   // Leaving this screen lets the sign-up go: its keys were only ever in memory. React's development check unmounts and mounts a
   // screen at once to test this very cleanup, so the sign-up is let go only if no mount follows straight after.
@@ -88,9 +87,7 @@ function CheckEmail({ pending, onBack, onDone }: { pending: PendingSignUp; onBac
       await pending.verify(digits);
       onDone();
     } catch (e) {
-      if (e instanceof ApiFailure && e.code === "keys_not_saved") {
-        setKeysFailed(true);
-      } else if (e instanceof ApiFailure && e.code === "invalid_email_code") {
+      if (e instanceof ApiFailure && e.code === "invalid_email_code") {
         // A wrong, an expired and a made-up code are one answer; "Send a new code" is always there.
         setWrong(true);
         setError("That code isn’t right. Use the code in the newest email.");
@@ -116,32 +113,6 @@ function CheckEmail({ pending, onBack, onDone }: { pending: PendingSignUp; onBac
       else setError(describeError(e));
     }
   };
-
-  const retrySave = async () => {
-    setBusy(true);
-    try {
-      await pending.retrySave();
-      onDone();
-    } catch {
-      // Still not saved: the same screen stays, and Try saving again can be pressed once more.
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (keysFailed) {
-    return (
-      <div className="authcard" role="alert" aria-label="Account created, keys not saved">
-        <Icon name="alert" />
-        <h1 className="auth-title">Your account is ready, but this browser couldn’t save its keys</h1>
-        <p className="t2">Your keys exist only in this tab right now. Keep it open until they’re saved.</p>
-        <p className="t3 small">This usually happens in a private window, or when the browser blocks or is out of site storage.</p>
-        <div className="pv-line">
-          <button type="button" className="btn lg" disabled={busy} onClick={() => void retrySave()}>{busy ? "Saving…" : "Try saving again"}</button>
-        </div>
-      </div>
-    );
-  }
 
   const seconds = `${Math.floor(wait / 60)}:${String(wait % 60).padStart(2, "0")}`;
   return (
@@ -191,6 +162,31 @@ function CheckEmail({ pending, onBack, onDone }: { pending: PendingSignUp; onBac
   );
 }
 
+/** Sign-up on a browser that can neither store the keys nor hold them in memory (WebAssembly or WebCrypto off, say). Nothing was created. */
+function NoMemory() {
+  return (
+    <div className="authcard keys-card" role="alert" aria-label="This browser can’t create an Orbyn account">
+      <span className="pv-red"><Icon name="alert" size={22} /></span>
+      <h1 className="keys-title">This browser can’t create an Orbyn account</h1>
+      <span className="t2">Orbyn has to keep your encryption keys, and this browser won’t store them or hold them in memory. Nothing was created.</span>
+      <span className="t3 pv-text">This often means WebAssembly is turned off or blocked. Try another browser, or turn off any setting that blocks it.</span>
+      <div className="pv-stack">
+        <button
+          type="button"
+          className="ghost lg"
+          onClick={() => {
+            void navigator.clipboard?.writeText(window.location.href).catch(() => undefined);
+          }}
+        >
+          <Icon name="copy" small />
+          Copy this page’s address
+        </button>
+      </div>
+      <span className="t4 small">Your email wasn’t verified or saved, so you can start again in another browser.</span>
+    </div>
+  );
+}
+
 function SignUp({ go }: { go: (s: AuthScreen) => void }) {
   const auth = useAuth()!;
   const [name, setName] = useState("");
@@ -200,6 +196,8 @@ function SignUp({ go }: { go: (s: AuthScreen) => void }) {
   const [error, setError] = useState<string | null>(null);
   /** Set once the engine has sent a code: the sign-up waits for it. */
   const [pending, setPending] = useState<PendingSignUp | null>(null);
+  /** This browser can't hold the keys at all, so nothing was created. */
+  const [noMemory, setNoMemory] = useState(false);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -209,27 +207,19 @@ function SignUp({ go }: { go: (s: AuthScreen) => void }) {
       setPending(await signUp(auth.services, { name, email, password }));
       setPassword(""); // the sign-up is waiting for its code: the password is not needed again, and is not kept in the page
     } catch (e) {
-      setError(describeError(e));
+      if (e instanceof ApiFailure && e.code === "no_memory") setNoMemory(true);
+      else setError(describeError(e));
     } finally {
       setBusy(false);
     }
   };
 
-  if (pending) {
-    return (
-      <CheckEmail
-        pending={pending}
-        onBack={() => {
-          setPending(null);
-          setPassword("");
-        }}
-        onDone={auth.closeAuth}
-      />
-    );
-  }
-
+  if (noMemory) return <NoMemory />;
   return (
-    <form className="authcard" onSubmit={submit} aria-label="Create your account" noValidate>
+    <>
+    {pending && <CheckEmail pending={pending} onBack={() => setPending(null)} onDone={auth.closeAuth} />}
+    {/* Kept while the code is awaited, so "Change email" finds the name and email as they were; the password is cleared as soon as it is sent. */}
+    <form className="authcard" onSubmit={submit} aria-label="Create your account" noValidate hidden={pending !== null}>
       <h1 className="auth-title">Create your account</h1>
       <div className="form" style={{ width: "auto" }}>
         <label htmlFor="su-name">Name</label>
@@ -252,6 +242,7 @@ function SignUp({ go }: { go: (s: AuthScreen) => void }) {
         {auth.overlay ? "Back to the planner" : "Use without an account"}
       </button>
     </form>
+    </>
   );
 }
 

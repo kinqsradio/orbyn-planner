@@ -4,18 +4,33 @@ import { useAuth } from "../../auth/AuthProvider";
 import { BusyButton } from "../../components/BusyButton";
 import { Icon } from "../../components/Icon";
 import { Modal } from "../../components/Modal";
+import { motionMs } from "../../styles/tokens";
 import { ApproverController } from "../../auth/pairing";
-import { groupCode } from "./AccountSettings";
+import { PLATFORMS, groupCode, when } from "./AccountSettings";
 
 /** The steps with this device's side of the approval: digits to match, the key fingerprint, and what it is waiting for. */
 function ApprovalSteps({ device, onClose, onApproved }: { device: Device; onClose: () => void; onApproved: (device: Device) => void }) {
   const auth = useAuth()!;
-  const controller = useMemo(() => new ApproverController(auth.services, auth.session!, device), [auth.services, auth.session, device]);
+  const [attempt, setAttempt] = useState(0);
+  const controller = useMemo(() => {
+    void attempt; // Start again is a new approval
+    return new ApproverController(auth.services, auth.session!, device);
+  }, [auth.services, auth.session, device, attempt]);
   const state = useSyncExternalStore(controller.subscribe, controller.getState);
-  const waiting = useAfter(state.phase !== "compare" && state.phase !== "closed" && state.phase !== "done");
+  // The digits and the fingerprint stay on screen after They match, and after a timeout, as the frames show them.
+  const [compared, setCompared] = useState<{ sas: string; fingerprint: string } | null>(null);
+  if (state.phase === "compare" && compared?.sas !== state.sas) setCompared({ sas: state.sas, fingerprint: state.fingerprint });
+  const said = state.phase === "confirming" || state.phase === "finishing";
+  const waitingFirst = useAfter(state.phase === "starting" || state.phase === "waiting");
+  const waitingLast = useAfter(said);
   useEffect(() => {
     void controller.start();
-    return () => controller.dispose();
+    return () => {
+      // Closing in any way (Cancel, Escape, a click outside) ends the approval on the server too, unless it already ended.
+      const phase = controller.getState().phase;
+      if (phase !== "done" && phase !== "closed") void controller.cancel();
+      controller.dispose();
+    };
   }, [controller]);
   useEffect(() => {
     if (state.phase === "done") onApproved(device);
@@ -24,6 +39,7 @@ function ApprovalSteps({ device, onClose, onApproved }: { device: Device; onClos
     if (state.phase !== "done" && state.phase !== "closed") void controller.cancel();
     onClose();
   };
+  const shown = state.phase === "compare" || said || state.phase === "closed" ? state : null;
   return (
     <>
       <ol className="steps numbered">
@@ -32,23 +48,36 @@ function ApprovalSteps({ device, onClose, onApproved }: { device: Device; onClos
           <span className="mono t3">2</span>
           <div>
             <span className="t2">Check the 6 digits match.</span>
-            {state.phase === "compare" && <div className="card mono code-card" data-testid="approval-code" aria-label={`Code ${state.sas.split("").join(" ")}`}>{groupCode(state.sas)}</div>}
+            {compared && <div className="card mono code-card" data-testid="approval-code" aria-label={`Code ${compared.sas.split("").join(" ")}`}>{groupCode(compared.sas)}</div>}
           </div>
         </li>
         <li>
           <span className="mono t3">3</span>
           <div>
             <span className="t2">Compare the key fingerprint.</span>
-            {state.phase === "compare" && <div className="mono fingerprint" data-testid="fingerprint">{state.fingerprint}</div>}
+            {compared && <div className="mono fingerprint" data-testid="fingerprint">{compared.fingerprint}</div>}
           </div>
         </li>
       </ol>
-      {state.phase === "closed" && <p className="err" role="alert">{state.message}</p>}
+      {state.phase === "compare" && <span className="t3 pv-text">Only continue if both match exactly. If they don’t, press Cancel: someone else may be trying to add a device.</span>}
+      {said && <span className="t3 pv-text pv-said"><span className="pv-ok"><Icon name="check2" small /></span>You said the digits and fingerprint match.</span>}
+      {state.phase === "closed" && state.reason !== "cancelled" && (
+        <span className="pv-text pv-timeout" role="alert">
+          <Icon name="alert" small />
+          {state.reason === "expired" || state.reason === "closed" ? "Your other device didn’t answer in 10 minutes. Nothing was shared." : state.message}
+        </span>
+      )}
       <div className="pv-waitrow">
-        {waiting && <div className="pv-loading t3" role="status"><span className="spin blue" aria-hidden="true" />Waiting for your other device…</div>}
+        {(waitingFirst || (said && waitingLast)) && (
+          <div className="pv-loading t3" role="status">
+            <span className="spin blue" aria-hidden="true" />
+            {said ? "Waiting for your other device to finish…" : "Waiting for your other device…"}
+          </div>
+        )}
         <span className="pv-end">
           <button type="button" className="ghost" data-autofocus onClick={cancel}>Cancel</button>
-          {state.phase === "compare" && <button type="button" className="btn" onClick={() => void controller.confirm()}>They match</button>}
+          {shown?.phase === "compare" && <button type="button" className="btn" onClick={() => void controller.confirm()}>They match</button>}
+          {shown?.phase === "closed" && shown.reason !== "cancelled" && <button type="button" className="btn" onClick={() => { setCompared(null); setAttempt((n) => n + 1); }}>Start again</button>}
         </span>
       </div>
     </>
@@ -58,12 +87,16 @@ function ApprovalSteps({ device, onClose, onApproved }: { device: Device; onClos
 /** Approve another device from this tab: waits for a new device to sign in, then walks through the digits and the key fingerprint. */
 function ApproveFromTab({ onClose, onApproved }: { onClose: () => void; onApproved: (device: Device) => void }) {
   const { services } = useAuth()!;
+  /** Every device waiting for approval; the person chooses, nothing is picked for them. */
+  const [waiting, setWaiting] = useState<Device[]>([]);
   const [device, setDevice] = useState<Device | null>(null);
+  // Exactly one device waiting is the one; with several the person chooses. Once one is shown, another arriving does not replace it.
+  if (!device && waiting.length === 1) setDevice(waiting[0]!);
   useEffect(() => {
     let live = true;
     const load = () =>
       services.api.devices().then(
-        (list) => live && setDevice((was) => was ?? list.devices.find((d) => d.state === "pending") ?? null),
+        (list) => live && setWaiting(list.devices.filter((d) => d.state === "pending")),
         () => undefined,
       );
     void load();
@@ -77,7 +110,27 @@ function ApproveFromTab({ onClose, onApproved }: { onClose: () => void; onApprov
     <Modal label="Approve another device" onClose={onClose}>
       <b className="card-title">Approve another device</b>
       {device ? (
-        <ApprovalSteps device={device} onClose={onClose} onApproved={onApproved} />
+        <>
+          <div className="kv"><span>Device</span><b>{device.name}</b></div>
+          <div className="kv"><span>Kind</span><b>{PLATFORMS[device.platform]}</b></div>
+          <div className="kv"><span>When</span><b>{when(device.created_at)}</b></div>
+          <ApprovalSteps device={device} onClose={onClose} onApproved={onApproved} />
+        </>
+      ) : waiting.length > 0 ? (
+        <>
+          <span className="t2">Which device is it?</span>
+          <ul className="card" style={{ gap: 0, padding: "0 var(--sp-14)" }} aria-label="Devices">
+            {waiting.map((d) => (
+              <li key={d.id} className="kv" style={{ minHeight: "var(--sp-44)" }}>
+                <span>{d.name} · {PLATFORMS[d.platform]} · {when(d.created_at)}</span>
+                <button type="button" className="ghost" aria-label={`Approve ${d.name}`} onClick={() => setDevice(d)}>Approve</button>
+              </li>
+            ))}
+          </ul>
+          <div className="pv-waitrow">
+            <span className="pv-end"><button type="button" className="ghost" data-autofocus onClick={onClose}>Cancel</button></span>
+          </div>
+        </>
       ) : (
         <>
           <ol className="steps numbered">
@@ -101,12 +154,12 @@ function Waiting() {
   return late ? <div className="pv-loading t3" role="status"><span className="spin blue" aria-hidden="true" />Waiting for your other device…</div> : null;
 }
 
-/** True once `active` has been true for 400 ms. */
+/** True once `active` has been true for the wait (400 ms). */
 function useAfter(active: boolean): boolean {
   const [done, setDone] = useState(false);
   useEffect(() => {
     if (!active) return;
-    const timer = setTimeout(() => setDone(true), 400);
+    const timer = setTimeout(() => setDone(true), motionMs("wait"));
     return () => {
       clearTimeout(timer);
       setDone(false);
@@ -141,7 +194,7 @@ export function KeysNotSaved() {
     return (
       <div className="public">
         <div className="authcard keys-card" role="status" aria-label="Keys approved">
-          <Icon name="check" size={22} />
+          <span className="pv-ok"><Icon name="check2" size={22} /></span>
           <h2 className="keys-title">Your keys are on {approvedOn} now.</h2>
           <span className="t2">This browser still can’t keep them, so you’ll sign in again here next time.</span>
           <div className="pv-stack">

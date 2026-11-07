@@ -1,7 +1,6 @@
 import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 
-/** The busy look shows only after this long: a quick answer never flashes a spinner. */
-export const BUSY_AFTER_MS = 400;
+import { motionMs } from "../styles/tokens";
 
 /**
  * A button that says what it is doing: while `busy` it is disabled at once, and after 400 ms a small spinner and the busy label show
@@ -11,7 +10,7 @@ export function BusyButton({ busy, idle, working, disabled, ...rest }: { busy: b
   const [late, setLate] = useState(false);
   useEffect(() => {
     if (!busy) return;
-    const timer = setTimeout(() => setLate(true), BUSY_AFTER_MS);
+    const timer = setTimeout(() => setLate(true), motionMs("wait")); // a quick answer never flashes a spinner
     return () => {
       clearTimeout(timer);
       setLate(false);

@@ -8,6 +8,7 @@ import { BusyButton } from "../../components/BusyButton";
 import { Icon } from "../../components/Icon";
 import { Modal } from "../../components/Modal";
 import { MONTHS, formatTime } from "../../lib/dates";
+import { motionMs } from "../../styles/tokens";
 import { describeError } from "./AuthScreens";
 
 const KEEPS = "This browser keeps the setting it last confirmed";
@@ -17,6 +18,7 @@ const REASON_LINES = {
   rollback: { reason: "The server showed an older setting", line: `The server showed an older setting than this browser has already confirmed. ${KEEPS} until a trusted device confirms it again.` },
   fork: { reason: "The server showed two different settings", line: `The server showed two different settings. ${KEEPS} until a trusted device confirms it again.` },
   unknownDevice: { reason: "Signed by a device this one doesn’t know", line: `The latest change is signed by a device this browser doesn’t know. ${KEEPS}.` },
+  unlisted: { reason: "Signed by a device this account doesn’t list", line: `The latest change is signed by a device this account doesn’t list. ${KEEPS}.` },
   badSignature: { reason: "A signature doesn’t check out", line: `The latest change has a signature that doesn’t check out. ${KEEPS}.` },
   gap: { reason: "Some changes are missing", line: `Some changes are missing between the setting this browser confirmed and the newest one. ${KEEPS}.` },
   invalid: { reason: "A change this device can’t read", line: `One of the changes isn’t in a form this browser can read. ${KEEPS}.` },
@@ -27,7 +29,8 @@ type Kind = "verified" | "confirming" | "unset" | keyof typeof REASON_LINES;
 function kindOf(report: ProtectionReport): Kind {
   if (report.problem === "rollback") return "rollback";
   if (report.problem === "fork") return "fork";
-  if (report.stopped === "untrusted_signer") return "unknownDevice";
+  // A signer the account doesn't list at all, or one it lists that this browser doesn't know.
+  if (report.stopped === "untrusted_signer") return report.signer?.name ? "unknownDevice" : "unlisted";
   if (report.stopped === "invalid_signature") return "badSignature";
   if (report.stopped === "gap") return "gap";
   if (report.stopped === "invalid") return "invalid";
@@ -37,20 +40,17 @@ function kindOf(report: ProtectionReport): Kind {
   return "unset";
 }
 
-/** A loading state shows only after this long. */
-const LOADING_AFTER_MS = 400;
-
-/** True once `active` has been true for `ms`. */
-function useAfter(active: boolean, ms: number): boolean {
+/** True once `active` has been true for the wait (400 ms): a loading state shows only after it. */
+function useAfter(active: boolean): boolean {
   const [done, setDone] = useState(false);
   useEffect(() => {
     if (!active) return;
-    const timer = setTimeout(() => setDone(true), ms);
+    const timer = setTimeout(() => setDone(true), motionMs("wait"));
     return () => {
       clearTimeout(timer);
       setDone(false);
     };
-  }, [active, ms]);
+  }, [active]);
   return active && done;
 }
 
@@ -127,7 +127,8 @@ function DetailsDialog({ report, kind, confirmed, onClose }: { report: Protectio
   if (report.head) {
     rows.push(["Newest setting on the server", `${levelName(report.head.level)} · change ${report.head.seq}`]);
     const at = new Date(secsOf(report.head) * 1000);
-    rows.push(["Signed by", `${report.signer?.name ?? "A device this account doesn’t list"} · ${at.getDate()} ${MONTHS[at.getMonth()]!.slice(0, 3)} ${formatTime(at)}`]);
+    // A signer the account doesn't list has no name to show: the reason says so.
+    if (report.signer?.name) rows.push(["Signed by", `${report.signer.name} · ${at.getDate()} ${MONTHS[at.getMonth()]!.slice(0, 3)} ${formatTime(at)}`]);
   }
   if (confirmed) rows.push(["Last confirmed on this browser", `${levelName(confirmed.level)} · change ${confirmed.seq} · ${day(confirmed.at)}`]);
   const copy = () => void navigator.clipboard?.writeText(rows.map(([k, v]) => `${k}: ${v}`).join("\n")).catch(() => undefined);
@@ -168,7 +169,7 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
   const [skipped, setSkipped] = useState(0);
   const session = auth?.session ?? null;
   const services = auth?.services;
-  const slow = useAfter(report === null && error === null, LOADING_AFTER_MS);
+  const slow = useAfter(report === null && error === null);
   const trusted = session?.deviceState === "trusted";
 
   /** Takes what the engine verified; a change by another device is remembered until the person dismisses it. */
@@ -296,7 +297,7 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
             </div>
             <span className="t2 pv-text">{REASON_LINES[problemKind!].line}</span>
             <div className="pv-line">
-              {kind === "unknownDevice" ? (
+              {kind === "unknownDevice" || kind === "unlisted" ? (
                 <button type="button" className="btn sm" onClick={onReviewDevices}>Review devices</button>
               ) : (
                 <span className="pv-line"><Icon name="laptop" small />Open Orbyn on a trusted device to fix this.</span>
@@ -334,9 +335,19 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
             void load(); // the setting is now confirmed here: the card shows it
           }}
           onConflict={() => {
-            // The setting on the screen is now the other device's: named in the blue line. The dialog stays open whatever the refresh shows.
-            setChoosing(true);
-            void load().then((next) => next && setChangedNow(next.signer?.name ?? "another device"));
+            // Read the chain again, and offer Confirm again only if the new state allows it: after a fork, a rollback or an unknown
+            // signer the card says Can't confirm, and if the read fails the error card shows. The stale setting is never signed again.
+            void load().then((next) => {
+              const kind = next ? kindOf(next) : null;
+              if (next && (kind === "confirming" || kind === "unset")) {
+                setChoosing(true);
+                setChangedNow(next.signer?.name ?? "another device");
+              } else {
+                setChoosing(false);
+                setConfirmOpen(false);
+                setChangedNow(null);
+              }
+            });
           }}
         />
       )}

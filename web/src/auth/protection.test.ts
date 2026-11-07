@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiFailure } from "../api/auth";
-import { createMemoryKeyStore } from "../api/keyStore";
+import { createMemoryKeyStore, emptySyncState, type KeyStore } from "../api/keyStore";
 import { FakeAuthCrypto } from "../api/testing/FakeAuthCrypto";
 import { createMockEngine, type MockEngine } from "../api/testing/MockEngine";
 import { confirmProtection, readProtection, signIn, signUp } from "./flows";
@@ -83,7 +83,7 @@ describe("the signed protection setting", () => {
   it("when storage refuses the keys after the code is right, the account is kept in memory only and nothing reaches storage", async () => {
     const engine = createMockEngine();
     const keys = createMemoryKeyStore();
-    keys.saveKeys = () => Promise.reject(new Error("quota"));
+    keys.replaceDevice = () => Promise.reject(new Error("quota"));
     const a = createAuthServices({ fetch: engine.fetch, baseUrl: "http://e.test", keys, crypto: () => crypto, wrapSecret: async () => new Uint8Array(32).fill(4) });
     const pending = await signUp(a, SAM);
     const session = await pending.verify(engine.emailCode(pending.signupId)!);
@@ -99,17 +99,86 @@ describe("the signed protection setting", () => {
   it("moving the held account to storage works once storage does, and the code is not used twice", async () => {
     const engine = createMockEngine();
     const keys = createMemoryKeyStore();
-    const save = keys.saveKeys.bind(keys);
-    keys.saveKeys = () => Promise.reject(new Error("quota"));
+    const save = keys.replaceDevice.bind(keys);
+    keys.replaceDevice = () => Promise.reject(new Error("quota"));
     const a = createAuthServices({ fetch: engine.fetch, baseUrl: "http://e.test", keys, crypto: () => crypto, wrapSecret: async () => new Uint8Array(32).fill(4) });
     const pending = await signUp(a, SAM);
     await pending.verify(engine.emailCode(pending.signupId)!);
-    keys.saveKeys = save;
+    keys.replaceDevice = save;
     await a.keys.moveToStorage();
     expect(a.keys.inMemory).toBe(false);
     expect(await keys.loadKeys()).not.toBeNull();
     expect((await keys.loadSession())?.deviceState).toBe("trusted");
     expect(engine.calls.filter((c) => c.path === "/v1/accounts/email/verify")).toHaveLength(1);
+  });
+
+  const nothingStored = async (keys: KeyStore) => {
+    expect(await keys.loadKeys()).toBeNull();
+    expect(await keys.loadIdentity()).toBeNull();
+    expect(await keys.loadWrapKey()).toBeNull();
+    expect(await keys.loadSession()).toBeNull();
+  };
+
+  it("a failure at making the wrapping secret stops the sign-up before anything is created", async () => {
+    const engine = createMockEngine();
+    const keys = createMemoryKeyStore();
+    const a = createAuthServices({ fetch: engine.fetch, baseUrl: "http://e.test", keys, crypto: () => crypto, wrapSecret: () => Promise.reject(new Error("no crypto")) });
+    await expect(signUp(a, SAM)).rejects.toMatchObject({ code: "no_memory" });
+    expect(engine.calls).toHaveLength(0); // nothing reached the engine
+    await nothingStored(keys);
+  });
+
+  it("a failure at writing the keys, the wrapping key and the identity leaves nothing in storage", async () => {
+    const engine = createMockEngine();
+    const keys = createMemoryKeyStore();
+    keys.replaceDevice = () => Promise.reject(new Error("quota"));
+    const a = createAuthServices({ fetch: engine.fetch, baseUrl: "http://e.test", keys, crypto: () => crypto, wrapSecret: async () => new Uint8Array(32).fill(4) });
+    const pending = await signUp(a, SAM);
+    await pending.verify(engine.emailCode(pending.signupId)!);
+    await nothingStored(keys);
+  });
+
+  it("signing out of a held account also removes whatever a refused write left in storage", async () => {
+    const engine = createMockEngine();
+    const keys = createMemoryKeyStore();
+    keys.replaceDevice = () => Promise.reject(new Error("quota"));
+    const a = createAuthServices({ fetch: engine.fetch, baseUrl: "http://e.test", keys, crypto: () => crypto, wrapSecret: async () => new Uint8Array(32).fill(4) });
+    const pending = await signUp(a, SAM);
+    await pending.verify(engine.emailCode(pending.signupId)!);
+    expect(a.keys.inMemory).toBe(true);
+    await keys.saveKeys(new Uint8Array([1, 2, 3])); // a partial write that got through
+    await a.engine.forget();
+    expect(a.keys.inMemory).toBe(false);
+    await nothingStored(keys);
+  });
+
+  it("moving a held account to storage is one write: a refusal leaves nothing, and a success carries the sync state, the quarantine, the engine state and the session", async () => {
+    const engine = createMockEngine();
+    const keys = createMemoryKeyStore();
+    const replace = keys.replaceDevice.bind(keys);
+    keys.replaceDevice = () => Promise.reject(new Error("quota"));
+    const a = createAuthServices({ fetch: engine.fetch, baseUrl: "http://e.test", keys, crypto: () => crypto, wrapSecret: async () => new Uint8Array(32).fill(4), lock: async <T,>(fn: () => Promise<T>) => fn() });
+    const pending = await signUp(a, SAM);
+    await pending.verify(engine.emailCode(pending.signupId)!);
+    // Held in memory: a zone made, its key sent to one device, a sealed snapshot and an unreadable one kept.
+    await a.keys.saveSyncState({ ...emptySyncState(), made: { zone: true }, keysSent: { zone: "d1" } });
+    await a.keys.saveSnapshot(new Uint8Array([9, 9]));
+    await a.keys.quarantineSnapshot(new Uint8Array([7]));
+    await expect(a.keys.moveToStorage()).rejects.toThrow();
+    expect(a.keys.inMemory).toBe(true);
+    await nothingStored(keys);
+    expect(await keys.loadSnapshot()).toBeNull();
+    expect(await keys.loadSyncState()).toBeNull();
+
+    keys.replaceDevice = replace;
+    await a.keys.moveToStorage();
+    expect(a.keys.inMemory).toBe(false);
+    expect(await keys.loadKeys()).not.toBeNull();
+    expect((await keys.loadSyncState())?.made).toEqual({ zone: true });
+    expect((await keys.loadSyncState())?.keysSent).toEqual({ zone: "d1" });
+    expect(await keys.loadSnapshot()).toEqual(new Uint8Array([9, 9]));
+    expect(await keys.loadQuarantine()).toEqual([new Uint8Array([7])]);
+    expect((await keys.loadSession())?.deviceState).toBe("trusted");
   });
 
   it("a second device, once approved, reads the setting the first signed as verified", async () => {

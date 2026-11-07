@@ -40,20 +40,20 @@ export function NotificationsPage() {
   return (
     <>
       <PageHeader title="Notifications" sub={unread > 0 ? `${unread} unread` : "All caught up"}>
-        {unread > 0 && <button type="button" className="ghost" onClick={markAllRead}>Mark all as read</button>}
+        <button type="button" className="ghost" disabled={unread === 0} onClick={markAllRead}>Mark all as read</button>
       </PageHeader>
       <div className="pad">
         {reminders.length > 0 && (
           <>
-            <div className="bh"><b>Reminders</b><span>{reminders.length}</span></div>
-            <ul>
+            <div className="bh" style={{ paddingTop: 0 }}><b>Reminders</b><span>{reminders.length}</span></div>
+            <ul className="notif-list">
               {reminders.map((r) => (
                 <li className="row notif-row" key={r.id}>
                   <span className={isRead(r.id) ? "dot none" : "dot amber"} aria-label={isRead(r.id) ? undefined : "Unread"} />
-                  <span className="what">“{r.title}” is due at {formatTime(r.dueAt)}</span>
+                  <span className="what">{r.text}</span>
                   <button
                     type="button"
-                    className="ghost sm"
+                    className="ghost"
                     onClick={() => {
                       markRead(r.id);
                       ui.openTask(r.taskId);
@@ -68,8 +68,8 @@ export function NotificationsPage() {
         )}
         {protection && (
           <>
-            <div className="bh"><b>Earlier</b><span></span></div>
-            <ul>
+            <div className="bh" style={reminders.length === 0 ? { paddingTop: 0 } : undefined}><b>Earlier</b><span></span></div>
+            <ul className="notif-list">
               <li className="row notif-row">
                 <Icon name="shield" small />
                 <button

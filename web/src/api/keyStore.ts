@@ -105,10 +105,24 @@ export interface KeyStore {
    * to store) and identity are written. If anything fails, nothing changes: the old device is as it was,
    * with no moment in which there are keys but no identity. The session is not touched.
    */
-  replaceDevice(next: { keys: Uint8Array; wrapKey: CryptoKey | null; identity: DeviceIdentity }): Promise<void>;
+  replaceDevice(next: ReplacementDevice): Promise<void>;
   loadSession(): Promise<StoredSession | null>;
   saveSession(session: StoredSession): Promise<void>;
   clearSession(): Promise<void>;
+}
+
+/**
+ * What `replaceDevice` writes. The engine's snapshot, the sync state, the quarantine and the session are carried over in the same
+ * transaction when given (a device moving out of memory), and cleared when not; the session is left alone unless `session` is given.
+ */
+export interface ReplacementDevice {
+  keys: Uint8Array;
+  wrapKey: CryptoKey | null;
+  identity: DeviceIdentity;
+  snapshot?: Uint8Array | null;
+  sync?: SyncState | null;
+  quarantine?: Uint8Array[];
+  session?: StoredSession | null;
 }
 
 const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
@@ -224,7 +238,7 @@ export function createIdbKeyStore(factory: IDBFactory = indexedDB): KeyStore {
     },
     replaceDevice: async (next) => {
       const database = await open();
-      const names = [...database.objectStoreNames].filter((n) => n !== "session");
+      const names = [...database.objectStoreNames].filter((n) => n !== "session" || next.session !== undefined);
       const tx = database.transaction(names, "readwrite");
       const done = new Promise<void>((resolve, reject) => {
         tx.oncomplete = () => resolve();
@@ -235,6 +249,10 @@ export function createIdbKeyStore(factory: IDBFactory = indexedDB): KeyStore {
         tx.objectStore("device").put(next.keys, "current");
         if (next.wrapKey) tx.objectStore("wrap").put(next.wrapKey, "current");
         tx.objectStore("identity").put(next.identity, "current");
+        if (next.snapshot) tx.objectStore("snapshot").put(next.snapshot, "current");
+        if (next.sync) tx.objectStore("sync").put(next.sync, "current");
+        next.quarantine?.forEach((blob, i) => tx.objectStore("quarantine").put(blob, i + 1));
+        if (next.session) tx.objectStore("session").put(next.session, "current");
       } catch (error) {
         tx.abort(); // nothing written so far stays
         await done.catch(() => undefined);
@@ -299,11 +317,13 @@ export function createMemoryKeyStore(): KeyStore {
     loadQuarantine: async () => [...quarantined],
     replaceDevice: async (next) => {
       keys = next.keys;
-      snapshot = null;
+      snapshot = next.snapshot ?? null;
       wrap = next.wrapKey;
       identity = next.identity;
-      sync = null;
+      sync = next.sync ?? null;
       quarantined.length = 0;
+      quarantined.push(...(next.quarantine ?? []));
+      if (next.session !== undefined) session = next.session;
     },
     clearDevice: async () => {
       keys = null;
@@ -337,7 +357,7 @@ export interface FallbackKeyStore extends KeyStore {
  * this tab can still run), and move them into storage later if storage starts to work. Memory is gone when the tab closes, and
  * `clearDevice` (signing out) clears it and goes back to storage.
  */
-export function withMemoryFallback(real: KeyStore): FallbackKeyStore {
+export function withMemoryFallback(real: KeyStore, lock?: <T>(fn: () => Promise<T>) => Promise<T>): FallbackKeyStore {
   const memory = createMemoryKeyStore();
   let held = false;
   const listeners = new Set<() => void>();
@@ -357,15 +377,22 @@ export function withMemoryFallback(real: KeyStore): FallbackKeyStore {
     },
     holdInMemory: () => set(true),
     moveToStorage: async () => {
-      const keys = await memory.loadKeys();
-      const identity = await memory.loadIdentity();
-      const wrapKey = await memory.loadWrapKey();
-      if (!keys || !identity) throw new Error("nothing_held");
-      await real.replaceDevice({ keys, wrapKey, identity });
-      const snapshot = await memory.loadSnapshot();
-      if (snapshot) await real.saveSnapshot(snapshot);
-      const session = await memory.loadSession();
-      if (session) await real.saveSession(session);
+      // Under the engine's lock, so no action is half-way through while the device is carried over; one transaction, so a refusal
+      // leaves nothing written and the tab stays in memory.
+      await (lock ?? ((fn) => fn()))(async () => {
+        const keys = await memory.loadKeys();
+        const identity = await memory.loadIdentity();
+        if (!keys || !identity) throw new Error("nothing_held");
+        await real.replaceDevice({
+          keys,
+          wrapKey: await memory.loadWrapKey(),
+          identity,
+          snapshot: await memory.loadSnapshot(),
+          sync: await memory.loadSyncState(),
+          quarantine: await memory.loadQuarantine(),
+          session: await memory.loadSession(),
+        });
+      });
       await memory.clearDevice();
       await memory.clearSession();
       set(false);
@@ -375,6 +402,9 @@ export function withMemoryFallback(real: KeyStore): FallbackKeyStore {
         await memory.clearDevice();
         await memory.clearSession();
         set(false);
+        // Whatever a refused write left in storage goes too.
+        await real.clearDevice().catch(() => undefined);
+        await real.clearSession().catch(() => undefined);
       } else await real.clearDevice();
     },
   };

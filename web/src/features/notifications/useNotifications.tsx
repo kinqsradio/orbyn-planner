@@ -1,31 +1,49 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNow } from "../../app/clock";
 import { useAuth } from "../../auth/AuthProvider";
 import { readProtection } from "../../auth/flows";
-import { pendingChange, recordReport } from "../../auth/protectionNotice";
-import { parseDue } from "../../lib/dates";
+import { pendingChange, readKey, recordReport } from "../../auth/protectionNotice";
+import { browserStorage } from "../../lib/browserStorage";
+import { MONTHS, WEEKDAYS, addDays, formatTime, parseDue, startOfDay } from "../../lib/dates";
 import { usePlanner } from "../../store/context";
 import { reminderTime } from "../reminders/schedule";
 
-const READ_KEY = "orbyn-planner.notifications-read";
 const KEEP = 200;
 
-function loadRead(): string[] {
+function loadRead(accountId: string): string[] {
   try {
-    const raw = localStorage.getItem(READ_KEY);
+    const raw = browserStorage.get(readKey(accountId));
     return raw ? (JSON.parse(raw) as string[]) : [];
   } catch {
     return [];
   }
 }
 
-/** A reminder whose time has come for a task with a due time that is still open. */
+/** A reminder whose time has come for a task that is still open, with a time or a date alone. */
 export interface DueReminder {
   id: string;
   taskId: string;
-  title: string;
-  /** The due time, as "HH:mm" for the row. */
-  dueAt: Date;
+  /** The row's words: "Send the launch brief is due at 12:00", "Pay rent is due today", "Pay rent was due yesterday". */
+  text: string;
+  /** For ordering: the reminder's moment. */
+  at: Date;
+}
+
+/** "tomorrow", or "Monday 9 November". */
+const dayWords = (day: Date, today: Date) => {
+  if (day.getTime() === addDays(today, 1).getTime()) return "tomorrow";
+  if (day.getTime() === addDays(today, -1).getTime()) return "yesterday";
+  return `${WEEKDAYS[day.getDay()]} ${day.getDate()} ${MONTHS[day.getMonth()]}`;
+};
+
+/** A task's due, in words. A time is shown only for a timed task due today; a date alone never shows one. */
+export function dueWords(title: string, due: string, now: Date): string {
+  const { date, hasTime } = parseDue(due);
+  const today = startOfDay(now);
+  const day = startOfDay(date);
+  if (day.getTime() < today.getTime()) return `${title} was due ${dayWords(day, today)}`;
+  if (day.getTime() === today.getTime()) return hasTime ? `${title} is due at ${formatTime(date)}` : `${title} is due today`;
+  return `${title} is due ${dayWords(day, today)}`;
 }
 
 export interface Notifications {
@@ -49,11 +67,14 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   const { tasks } = usePlanner();
   const now = useNow();
   const auth = useAuth();
-  const [read, setRead] = useState<string[]>(loadRead);
   const [protection, setProtection] = useState<ReturnType<typeof pendingChange>>(null);
   const session = auth?.session ?? null;
   const services = auth?.services;
   const trusted = session?.deviceState === "trusted";
+  // What was read is kept per account, so one account's marks never show for another.
+  const accountKey = session?.accountId ?? "device";
+  const [readState, setReadState] = useState<{ account: string; ids: string[] }>(() => ({ account: accountKey, ids: loadRead(accountKey) }));
+  const read = readState.account === accountKey ? readState.ids : loadRead(accountKey);
 
   useEffect(() => {
     if (!trusted || !services || !session) return;
@@ -74,22 +95,23 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     const out: DueReminder[] = [];
     for (const task of tasks) {
       const at = reminderTime(task);
-      if (!at || at.getTime() > now.getTime() || !task.due || !parseDue(task.due).hasTime) continue;
-      out.push({ id: `reminder:${task.id}|${at.getTime()}`, taskId: task.id, title: task.title, dueAt: parseDue(task.due).date });
+      if (!at || at.getTime() > now.getTime() || !task.due) continue;
+      out.push({ id: `reminder:${task.id}|${at.getTime()}`, taskId: task.id, text: dueWords(task.title, task.due, now), at });
     }
-    return out.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime());
+    // Newest first, as the frame lists them.
+    return out.sort((a, b) => b.at.getTime() - a.at.getTime());
   }, [tasks, now]);
 
   const save = (next: string[]) => {
     const kept = next.slice(-KEEP);
-    setRead(kept);
+    setReadState({ account: accountKey, ids: kept });
     try {
-      localStorage.setItem(READ_KEY, JSON.stringify(kept));
+      browserStorage.set(readKey(accountKey), JSON.stringify(kept));
     } catch {
       // Read marks last for this visit only.
     }
   };
-  const markRead = useCallback((id: string) => save(read.includes(id) ? read : [...read, id]), [read]);
+  const markRead = (id: string) => save(read.includes(id) ? read : [...read, id]);
   const ids = [...reminders.map((r) => r.id), ...(protection ? [protectionId(protection.seq)] : [])];
   const value: Notifications = {
     reminders,

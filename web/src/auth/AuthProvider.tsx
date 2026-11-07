@@ -3,6 +3,7 @@ import type { StoredSession } from "../api/keyStore";
 import { setSessionToken } from "../api/session";
 import { closePlanner, removeAccountPlanner } from "../store/planners";
 import { signOut as signOutFlow } from "./flows";
+import { setMemoryOnly } from "../lib/browserStorage";
 import { forgetProtectionNotice } from "./protectionNotice";
 import type { AuthServices } from "./services";
 
@@ -74,6 +75,12 @@ export function AuthProvider({ services, children }: { services: AuthServices | 
       live = false;
     };
   }, [services]);
+
+  // While the keys are held in this tab's memory only, nothing the account screens remember reaches storage either.
+  useEffect(() => {
+    setMemoryOnly(keysInMemory);
+    return () => setMemoryOnly(false);
+  }, [keysInMemory]);
 
   // Another tab signed out: this one drops its session too.
   useEffect(() => {

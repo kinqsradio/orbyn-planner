@@ -15,7 +15,8 @@ import { NewTaskDialog } from "../features/tasks/NewTaskDialog";
 import { TaskPanel } from "../features/tasks/TaskPanel";
 import { dueCount } from "../features/tasks/selectors";
 import { TasksPage } from "../features/tasks/TasksPage";
-import { plannerFor } from "../store/planners";
+import { memoryPlannerFor, plannerFor } from "../store/planners";
+import { MemoryOnlyGuard } from "../features/auth/MemoryOnlyGuard";
 import { StoreProvider, usePlanner } from "../store/context";
 import type { PlannerStore } from "../store/types";
 import { Toast } from "../components/Toast";
@@ -199,10 +200,12 @@ export function App({ store, auth }: { store?: PlannerStore; auth?: AuthServices
 function PlannerStores({ fixed, children }: { fixed?: PlannerStore; children: ReactNode }) {
   const auth = useAuth();
   const accountId = auth?.status === "signedIn" && auth.session ? auth.session.accountId : null;
-  const store = useMemo(() => fixed ?? plannerFor(accountId), [fixed, accountId]);
+  const memoryOnly = auth?.keysInMemory === true && accountId !== null;
+  const store = useMemo(() => fixed ?? (memoryOnly && accountId ? memoryPlannerFor(accountId) : plannerFor(accountId)), [fixed, accountId, memoryOnly]);
   return (
-    <StoreProvider key={fixed ? "fixed" : (accountId ?? "device")} store={store}>
-      {!fixed && accountId && <DeviceDataOffer accountId={accountId} />}
+    <StoreProvider key={fixed ? "fixed" : memoryOnly ? `memory-${accountId}` : (accountId ?? "device")} store={store}>
+      {!fixed && accountId && !memoryOnly && <DeviceDataOffer accountId={accountId} />}
+      {memoryOnly && <MemoryOnlyGuard />}
       {children}
     </StoreProvider>
   );

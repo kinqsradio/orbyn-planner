@@ -3,7 +3,7 @@ import { requireAuthCrypto, type AuthCrypto } from "../api/authCrypto";
 import { defaultKeyStore, withMemoryFallback, type FallbackKeyStore, type KeyStore } from "../api/keyStore";
 import { TokenStore } from "../api/tokenStore";
 import { freshWrapSecret, wrapSecretFrom } from "../api/wrapSecret";
-import { createEngineHost, type EngineHost, type Lock } from "./engineHost";
+import { browserLock, createEngineHost, type EngineHost, type Lock } from "./engineHost";
 
 /** Everything the account screens use, so tests can swap the network, the storage and the crypto. */
 export interface AuthServices {
@@ -50,7 +50,7 @@ export interface AuthServiceOptions {
 }
 
 export function createAuthServices(options: AuthServiceOptions = {}): AuthServices {
-  const keys = withMemoryFallback(options.keys ?? defaultKeyStore());
+  const keys = withMemoryFallback(options.keys ?? defaultKeyStore(), options.lock ?? browserLock);
   const tokens = new TokenStore(keys);
   const api = createAuthApi({
     fetch: options.fetch,

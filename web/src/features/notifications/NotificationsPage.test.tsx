@@ -5,7 +5,7 @@ import { takeSettingsTarget } from "../../app/settingsTarget";
 import type { ProtectionReport } from "../../auth/flows";
 import type { Task } from "../../store/types";
 import { NotificationsPage } from "./NotificationsPage";
-import { NotificationsProvider, useNotifications } from "./useNotifications";
+import { NotificationsProvider, dueWords, useNotifications } from "./useNotifications";
 
 const read = vi.fn<() => Promise<ProtectionReport>>();
 const navigate = vi.fn();
@@ -17,7 +17,8 @@ vi.mock("../../app/router", () => ({ useRouter: () => ({ path: "/notifications",
 vi.mock("../../app/ui", () => ({ useUi: () => ({ openTask }) }));
 vi.mock("../../app/clock", () => ({ useNow: () => NOW }));
 vi.mock("../../store/context", () => ({ usePlanner: () => ({ tasks }) }));
-vi.mock("../../auth/AuthProvider", () => ({ useAuth: () => ({ services: {}, session: { accountId: "acct-1", deviceState: "trusted", deviceId: "d1" } }) }));
+const auth = vi.hoisted(() => ({ services: {}, session: { accountId: "acct-1", deviceState: "trusted", deviceId: "d1" } }));
+vi.mock("../../auth/AuthProvider", () => ({ useAuth: () => auth }));
 
 const at = Math.floor(new Date(2026, 10, 7, 9, 41).getTime() / 1000);
 const changed: ProtectionReport = {
@@ -57,14 +58,32 @@ describe("Notifications", () => {
   it("lists a reminder that has come due as unread, opens its task, and marks all as read", async () => {
     tasks = [task({})];
     ui();
-    expect(await screen.findByText("“Send the launch brief to Priya” is due at 12:00")).toBeInTheDocument();
+    expect(await screen.findByText("Send the launch brief to Priya is due at 12:00")).toBeInTheDocument();
     expect(screen.getByText("1 unread")).toBeInTheDocument();
     expect(screen.getByTestId("count")).toHaveTextContent("1");
     await userEvent.click(screen.getByRole("button", { name: "Mark all as read" }));
     expect(screen.getByText("All caught up")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Mark all as read" })).toBeDisabled(); // nothing left to mark
     expect(screen.getByTestId("count")).toHaveTextContent("0");
     await userEvent.click(screen.getByRole("button", { name: "Open task" }));
     expect(openTask).toHaveBeenCalledWith("t1");
+  });
+
+  it("words a due date: a time only for a timed task due today, a day for the others, and 'was due' once late", () => {
+    const now = new Date(2026, 10, 7, 12, 30); // Saturday 7 November
+    expect(dueWords("Pay rent", "2026-11-07", now)).toBe("Pay rent is due today");
+    expect(dueWords("Pay rent", "2026-11-08", now)).toBe("Pay rent is due tomorrow");
+    expect(dueWords("Pay rent", "2026-11-09", now)).toBe("Pay rent is due Monday 9 November");
+    expect(dueWords("Pay rent", "2026-11-06", now)).toBe("Pay rent was due yesterday");
+    expect(dueWords("Pay rent", "2026-11-04", now)).toBe("Pay rent was due Wednesday 4 November");
+    expect(dueWords("Send it", "2026-11-07T12:00", now)).toBe("Send it is due at 12:00");
+    expect(dueWords("Send it", "2026-11-06T18:00", now)).toBe("Send it was due yesterday"); // a date alone: no time once late
+  });
+
+  it("an all-day reminder shows no time", async () => {
+    tasks = [task({ id: "t2", title: "Pay rent", due: "2026-11-07" })];
+    ui();
+    expect(await screen.findByText("Pay rent is due today")).toBeInTheDocument();
   });
 
   it("a reminder that has not come due is not listed", async () => {
