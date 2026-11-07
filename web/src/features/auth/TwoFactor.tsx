@@ -1,11 +1,11 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { ApiFailure } from "../../api/auth";
 import { useAuth } from "../../auth/AuthProvider";
+import { confirmTotp, disableTotp, enrolTotp } from "../../auth/flows";
 import { saveFile } from "../export/save";
 import { Modal } from "../../components/Modal";
 import { describeError } from "./AuthScreens";
 import { QrCode } from "./QrCode";
-import { readTwoFactor, rememberTwoFactor } from "./twoFactorState";
 
 const groupSecret = (secret: string) => secret.replace(/\s+/g, "").replace(/(.{4})/g, "$1 ").trim();
 const digits = (value: string) => value.replace(/\D/g, "").slice(0, 6);
@@ -57,7 +57,7 @@ function CodesStep({ codes, onDone }: { codes: string[]; onDone: () => void }) {
   );
 }
 
-function EnrolDialog({ accountId, onClose, onDone }: { accountId: string; onClose: () => void; onDone: () => void }) {
+function EnrolDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const auth = useAuth()!;
   const [enrolment, setEnrolment] = useState<{ secret: string; uri: string } | null>(null);
   const [codes, setCodes] = useState<string[] | null>(null);
@@ -70,13 +70,11 @@ function EnrolDialog({ accountId, onClose, onDone }: { accountId: string; onClos
     setBusy(true);
     setError(null);
     try {
-      setEnrolment(await auth.services.api.totpEnrol());
+      setEnrolment(await enrolTotp(auth.services, auth.session!));
       setStarted(true);
     } catch (e) {
-      if (e instanceof ApiFailure && e.code === "totp_already_enabled") {
-        rememberTwoFactor(accountId, true);
-        onDone();
-      }
+      // The engine says it is already on: the row is out of date, so it is refreshed.
+      if (e instanceof ApiFailure && e.code === "totp_already_enabled") onDone();
       setError(describeError(e));
     } finally {
       setBusy(false);
@@ -88,8 +86,7 @@ function EnrolDialog({ accountId, onClose, onDone }: { accountId: string; onClos
     setBusy(true);
     setError(null);
     try {
-      const done = await auth.services.api.totpConfirm({ code: digits(code) });
-      rememberTwoFactor(accountId, true);
+      const done = await confirmTotp(auth.services, auth.session!, digits(code));
       setCodes(done.recovery_codes);
     } catch (e) {
       setError(describeError(e));
@@ -138,26 +135,20 @@ function EnrolDialog({ accountId, onClose, onDone }: { accountId: string; onClos
   );
 }
 
-function DisableDialog({ accountId, onClose, onDone }: { accountId: string; onClose: () => void; onDone: () => void }) {
+function DisableDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const auth = useAuth()!;
-  const [recovery, setRecovery] = useState(false);
-  const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
+  const submit = async () => {
     setBusy(true);
     setError(null);
     try {
-      await auth.services.api.totpDisable(recovery ? { code: null, recovery_code: code.trim() } : { code: digits(code), recovery_code: null });
-      rememberTwoFactor(accountId, false);
+      // This device's own signature is the proof: no code, so a lost authenticator can't lock anyone out of turning it off.
+      await disableTotp(auth.services, auth.session!);
       onDone();
     } catch (e) {
-      if (e instanceof ApiFailure && e.code === "totp_not_enabled") {
-        rememberTwoFactor(accountId, false);
-        onDone();
-      }
+      if (e instanceof ApiFailure && e.code === "totp_not_enabled") onDone();
       setError(describeError(e));
       setBusy(false);
     }
@@ -165,55 +156,57 @@ function DisableDialog({ accountId, onClose, onDone }: { accountId: string; onCl
 
   return (
     <Modal label="Turn off two-factor" onClose={onClose}>
-      <form onSubmit={(e) => void submit(e)} aria-label="Turn off two-factor">
-        <b className="card-title">Turn off two-factor</b>
-        <p className="t3 small">{recovery ? "Enter one of your recovery codes." : "Enter the six-digit code from your authenticator app."}</p>
-        <div className="form" style={{ width: "auto" }}>
-          <label htmlFor="tf-off">{recovery ? "Recovery code" : "Code"}</label>
-          <input
-            id="tf-off"
-            key={recovery ? "recovery" : "code"}
-            className="field"
-            inputMode={recovery ? "text" : "numeric"}
-            autoComplete="one-time-code"
-            autoCapitalize="characters"
-            placeholder={recovery ? "XXXXX-XXXXX" : "123456"}
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            data-autofocus
-          />
-        </div>
-        <button type="button" className="link-btn" onClick={() => { setRecovery(!recovery); setCode(""); setError(null); }}>
-          {recovery ? "Use a code from the app" : "Use a recovery code"}
-        </button>
-        {error && <p className="err" role="alert">{error}</p>}
-        <div className="dialog-actions">
-          <button type="button" className="ghost" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn" disabled={busy || (recovery ? code.trim().length < 5 : digits(code).length !== 6)}>Turn off</button>
-        </div>
-      </form>
+      <b className="card-title">Turn off two-factor?</b>
+      <p className="t3 small">New devices will sign in with just your password. This device proves it’s yours, so you don’t need a code. Your recovery codes stop working.</p>
+      {error && <p className="err" role="alert">{error}</p>}
+      <div className="dialog-actions">
+        <button type="button" className="ghost" data-autofocus onClick={onClose}>Cancel</button>
+        <button type="button" className="btn" disabled={busy} onClick={() => void submit()}>Turn off</button>
+      </div>
     </Modal>
   );
 }
 
-/** Settings · Account · Two-factor: the row, and the dialogs to turn it on (QR code, then recovery codes) and off. */
+/** Settings · Account · Two-factor: the row, and the dialogs to turn it on (QR code, then recovery codes) and off. The state is the engine's (`totp_enabled`). */
 export function TwoFactorRow() {
   const auth = useAuth();
-  const accountId = auth?.session?.accountId ?? "";
-  const [on, setOn] = useState(() => readTwoFactor(accountId));
+  const [on, setOn] = useState<boolean | null>(null);
   const [dialog, setDialog] = useState<"on" | "off" | null>(null);
+  const services = auth?.services;
+  const signedIn = Boolean(auth?.session);
+
+  /** Bumped when a dialog finishes, so the state is read from the engine again. */
+  const [reads, setReads] = useState(0);
+
+  useEffect(() => {
+    if (!signedIn || !services) return;
+    let live = true;
+    // Not known now (offline, say): the row says so rather than guessing.
+    void services.api.currentDevice().then(
+      (d) => live && setOn(d.totp_enabled),
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [signedIn, services, reads]);
+
   if (!auth?.session) return null;
+  const done = () => {
+    setDialog(null);
+    setReads((n) => n + 1);
+  };
   return (
     <>
       <div className="kv" style={{ height: 44, borderTop: "1px solid var(--line)" }}>
         <span>Two-factor</span>
         <b className="ctl">
-          <span className="t3">{on ? "On" : "Off"}</span>
-          <button type="button" className="ghost" onClick={() => setDialog(on ? "off" : "on")}>{on ? "Turn off…" : "Turn on…"}</button>
+          <span className="t3">{on === null ? "…" : on ? "On" : "Off"}</span>
+          <button type="button" className="ghost" disabled={on === null} onClick={() => setDialog(on ? "off" : "on")}>{on ? "Turn off…" : "Turn on…"}</button>
         </b>
       </div>
-      {dialog === "on" && <EnrolDialog accountId={accountId} onClose={() => setDialog(null)} onDone={() => { setOn(readTwoFactor(accountId)); setDialog(null); }} />}
-      {dialog === "off" && <DisableDialog accountId={accountId} onClose={() => setDialog(null)} onDone={() => { setOn(readTwoFactor(accountId)); setDialog(null); }} />}
+      {dialog === "on" && <EnrolDialog onClose={() => setDialog(null)} onDone={done} />}
+      {dialog === "off" && <DisableDialog onClose={() => setDialog(null)} onDone={done} />}
     </>
   );
 }

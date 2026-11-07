@@ -3,4 +3,12 @@
 /**
  * `POST /v1/accounts/totp/confirm`: a current code from the pending secret turns TOTP on.
  */
-export type TotpConfirm = { code: string, };
+export type TotpConfirm = { code: string, 
+/**
+ * The device's `orbyn/totp-manage/v1` signature over the account, device, action and code.
+ */
+device_signature: string | null, 
+/**
+ * Unix seconds, as the device signed them (within five minutes of the server's clock).
+ */
+signed_at: bigint | null, };

@@ -29,6 +29,7 @@ import type { SessionCreated } from "../generated/SessionCreated";
 import type { TotpConfirm } from "../generated/TotpConfirm";
 import type { TotpConfirmed } from "../generated/TotpConfirmed";
 import type { TotpDisable } from "../generated/TotpDisable";
+import type { TotpEnrol } from "../generated/TotpEnrol";
 import type { TotpEnrolment } from "../generated/TotpEnrolment";
 import { engineUrl } from "./engine";
 
@@ -42,6 +43,7 @@ const MESSAGES: Record<string, string> = {
   login_failed: "That email and password don’t match.",
   second_factor_required: "Enter the code from your authenticator app to finish signing in.",
   second_factor_failed: "That code didn’t work.",
+  device_proof_required: "This device couldn’t prove the request. Try again, and check that this device’s clock is right.",
   totp_already_enabled: "Two-factor is already on for this account.",
   totp_not_enabled: "Two-factor isn’t on for this account.",
   device_not_trusted: "This device hasn’t been approved yet. Approve it from a device you already trust.",
@@ -124,8 +126,9 @@ export function createAuthApi(options: AuthApiOptions) {
       // Not our JSON (a proxy's page, say): fall back to the status.
     }
     const code = typeof error.code === "string" ? error.code : response.status === 401 ? "unauthorized" : response.status >= 500 ? "internal" : "invalid_request";
-    // A 401 on a signed-in call ends the session, whatever the code.
-    if (authed && response.status === 401) options.onUnauthorized();
+    // A 401 on a signed-in call ends the session, except the two answers that are about a request, not the session: a wrong code
+    // and a missing device signature.
+    if (authed && response.status === 401 && code !== "second_factor_failed" && code !== "device_proof_required") options.onUnauthorized();
     const retry = Number(response.headers.get("retry-after"));
     throw new ApiFailure(code, response.status, plainMessage(code), error.message ?? "", error, Number.isFinite(retry) && retry > 0 ? retry : null);
   }
@@ -138,11 +141,11 @@ export function createAuthApi(options: AuthApiOptions) {
     loginFinish: (body: LoginFinish) => call<SessionCreated>("POST", "/v1/sessions/login/finish", body),
     /** The second step of a sign-in the engine answered `second_factor_required`: exactly one of a code and a recovery code. */
     loginSecondFactor: (body: SecondFactorLogin) => call<SessionCreated>("POST", "/v1/sessions/login/second-factor", body),
-    /** Two-factor, from a trusted device: a new secret, pending until confirmed. Shown once. */
-    totpEnrol: () => call<TotpEnrolment>("POST", "/v1/accounts/totp", undefined, true),
+    /** Two-factor, from a trusted device that signs the request: a new secret, pending until confirmed. Shown once. */
+    totpEnrol: (body: TotpEnrol) => call<TotpEnrolment>("POST", "/v1/accounts/totp", body, true),
     /** A current code from the pending secret turns two-factor on; answers ten recovery codes, shown once. */
     totpConfirm: (body: TotpConfirm) => call<TotpConfirmed>("POST", "/v1/accounts/totp/confirm", body, true),
-    /** Turns two-factor off with a current code or an unused recovery code. */
+    /** Turns two-factor off: the trusted device's signature alone, no code. */
     totpDisable: (body: TotpDisable) => call<void>("POST", "/v1/accounts/totp/disable", body, true),
     /** Ends this device's session. */
     signOut: () => call<void>("DELETE", "/v1/sessions/current", undefined, true),

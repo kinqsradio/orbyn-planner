@@ -315,3 +315,56 @@ export async function verifiedDevices(services: AuthServices, session: StoredSes
     return null;
   }
 }
+
+/** The time each device last signed for each action, in memory: the engine takes a signature only if it is strictly later than the last one it accepted. */
+const lastSigned = new Map<string, number>();
+
+/**
+ * The proof the engine wants to change two-factor: this device's own signature, made with its keys opened for the moment. It is
+ * signed with the current second, or one past the last time this page signed for the action if that is later (a retry within the
+ * same second, or a clock that is behind); `again` forces a later time than the last attempt.
+ */
+async function manageProof(services: AuthServices, session: StoredSession, action: "enrol" | "confirm" | "disable", code = ""): Promise<{ device_signature: string; signed_at: bigint }> {
+  const saved = await services.keys.loadKeys();
+  if (!saved) throw new ApiFailure("device_not_trusted", 403, "This device has no keys, so it can’t change two-factor.");
+  const wrap = await services.wrapSecret();
+  let keys: DeviceKeys;
+  try {
+    keys = services.crypto().deviceKeys.import(saved, wrap);
+  } finally {
+    wrap.fill(0);
+  }
+  try {
+    const slot = `${session.deviceId}:${action}`;
+    const signedAt = Math.max(Math.floor(services.now() / 1000), (lastSigned.get(slot) ?? 0) + 1);
+    lastSigned.set(slot, signedAt);
+    return { device_signature: encodeBytes(keys.signTotpManage(session.accountId, session.deviceId, action, code, signedAt)), signed_at: BigInt(signedAt) };
+  } finally {
+    keys.free();
+  }
+}
+
+/** A `device_proof_required` is answered once by signing again with a later time (the last one may have been used already), not as a failure. */
+async function withProof<T>(send: () => Promise<T>): Promise<T> {
+  try {
+    return await send();
+  } catch (e) {
+    if (e instanceof ApiFailure && e.code === "device_proof_required") return send();
+    throw e;
+  }
+}
+
+/** Starts two-factor: a new secret, shown once, pending until a code from it is confirmed. */
+export async function enrolTotp(services: AuthServices, session: StoredSession) {
+  return withProof(async () => services.api.totpEnrol(await manageProof(services, session, "enrol")));
+}
+
+/** Turns two-factor on with a current code; answers the recovery codes, shown once. */
+export async function confirmTotp(services: AuthServices, session: StoredSession, code: string) {
+  return withProof(async () => services.api.totpConfirm({ code, ...(await manageProof(services, session, "confirm", code)) }));
+}
+
+/** Turns two-factor off: this device's signature alone. */
+export async function disableTotp(services: AuthServices, session: StoredSession): Promise<void> {
+  await withProof(async () => services.api.totpDisable(await manageProof(services, session, "disable")));
+}

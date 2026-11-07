@@ -62,6 +62,13 @@ export class DeviceKeys {
      */
     signRegistration(email: string, upload: Uint8Array | number[]): Uint8Array;
     /**
+     * The `signature` that lets this device change the account's second factor, under
+     * `orbyn/totp-manage/v1`. `action` is `enrol`, `confirm` or `disable`; `code` is the six
+     * digits for `confirm` and empty otherwise; `signedAt` is Unix seconds, within five minutes of
+     * the server's clock. `accountId` and `deviceId` are the UUIDs of the session.
+     */
+    signTotpManage(account_id: string, device_id: string, action: string, code: string, signed_at: number): Uint8Array;
+    /**
      * The `signature` of a `TrustedDeviceProof`. `signed_at` is Unix seconds.
      */
     signTrustedStart(email: string, credential_request: Uint8Array | number[], signed_at: number): Uint8Array;
@@ -350,6 +357,7 @@ export interface InitOutput {
     readonly devicekeys_sign: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly devicekeys_signLogin: (a: number, b: number, c: number, d: number) => void;
     readonly devicekeys_signRegistration: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+    readonly devicekeys_signTotpManage: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => void;
     readonly devicekeys_signTrustedStart: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly devicekeys_signingKey: (a: number, b: number) => void;
     readonly devicesession_nonceJson: (a: number, b: number) => void;

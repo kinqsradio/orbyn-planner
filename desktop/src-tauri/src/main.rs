@@ -55,9 +55,9 @@ fn open_link(url: String) -> Result<(), String> {
 /// The largest export the page may hand over: far more than any planner holds, so a bug can't fill a disk.
 const MAX_EXPORT_BYTES: usize = 64 * 1024 * 1024;
 
-/// Whether `name` is a file name the page may suggest for an export: a plain `.json` or `.ics` name, no path.
+/// Whether `name` is a file name the page may suggest for a saved file: a plain `.json`, `.ics` or `.txt` name (an export, or recovery codes), no path.
 fn export_name_ok(name: &str) -> bool {
-    (name.ends_with(".json") || name.ends_with(".ics"))
+    (name.ends_with(".json") || name.ends_with(".ics") || name.ends_with(".txt"))
         && name.len() <= 100
         && !name.starts_with('.')
         && name.chars().all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | ' '))
@@ -81,7 +81,13 @@ async fn save_export(app: AppHandle, name: String, contents: String) -> Result<b
     if contents.len() > MAX_EXPORT_BYTES {
         return Err("too large to export".to_string());
     }
-    let extension = if name.ends_with(".json") { "json" } else { "ics" };
+    let extension = if name.ends_with(".json") {
+        "json"
+    } else if name.ends_with(".txt") {
+        "txt"
+    } else {
+        "ics"
+    };
     let Some(chosen) = app.dialog().file().set_file_name(&name).add_filter("Export", &[extension]).blocking_save_file() else {
         return Ok(false);
     };
@@ -245,7 +251,7 @@ mod tests {
         for ok in ["orbyn-planner-2026-11-07.json", "orbyn-planner-2026-11-07.ics", "My planner.json", "COM0.json", "CONSOLE.json"] {
             assert!(export_name_ok(ok), "{ok}");
         }
-        for bad in ["", ".json", "a.txt", "../a.json", "a/b.json", "a\\b.ics", "a.json.exe", "a\n.json", "CON.json", "nul.ics", "Com1.json", "LPT9.ics", &format!("{}.json", "x".repeat(100))] {
+        for bad in ["", ".json", "a.exe", "../a.json", "a/b.json", "a\\b.ics", "a.json.exe", "a\n.json", "CON.json", "nul.ics", "Com1.json", "LPT9.ics", &format!("{}.json", "x".repeat(100))] {
             assert!(!export_name_ok(bad), "{bad:?}");
         }
     }

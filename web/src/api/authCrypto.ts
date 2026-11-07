@@ -46,6 +46,11 @@ export interface DeviceKeys {
   signLogin(loginId: string): Uint8Array;
   /** The `signature` of a `TrustedDeviceProof`; `signedAt` is Unix seconds. */
   signTrustedStart(email: string, credentialRequest: Uint8Array, signedAt: number): Uint8Array;
+  /**
+   * The signature that lets this device change the account's second factor (`orbyn/totp-manage/v1`). `action` is `enrol`, `confirm` or
+   * `disable`; `code` is the six digits for `confirm` and empty otherwise; `signedAt` is Unix seconds, within five minutes of the server's clock.
+   */
+  signTotpManage(accountId: string, deviceId: string, action: string, code: string, signedAt: number): Uint8Array;
 }
 
 /**
