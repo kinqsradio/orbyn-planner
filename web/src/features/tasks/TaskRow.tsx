@@ -91,20 +91,20 @@ export function TodayRow({ task, late, compact = false }: { task: Task; late?: n
   let time = "Any";
   if (late !== undefined && parsed) time = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][parsed.date.getDay()]!;
   else if (parsed?.hasTime) time = formatTime(parsed.date);
-  const act = needsAction(task, now);
+  // The time turns amber when the task is overdue or due within the hour.
+  const soon = !task.done && parsed !== null && (late !== undefined || (parsed.hasTime && parsed.date.getTime() - now.getTime() <= 3_600_000));
 
   let meta: string;
   if (task.done) meta = "Done";
   else if (late !== undefined) meta = `${late} ${late === 1 ? "day" : "days"} late`;
-  else if (parsed?.hasTime) meta = `Due ${formatTime(parsed.date)}`;
-  else meta = list && !list.isInbox ? list.name : (list?.name ?? "");
+  else meta = list?.name ?? "";
 
   return (
     <li className={task.done ? "row done" : "row"} data-row-id={task.id} data-done={task.done} style={compact ? { gridTemplateColumns: "var(--sp-16) minmax(0,1fr) auto" } : undefined}>
-      {!compact && <span className="time">{time}</span>}
+      {!compact && <span className={soon ? "time amber" : "time"}>{time}</span>}
       <Check task={task} />
       <button type="button" className="what link-btn" onClick={open}>{task.title}</button>
-      <span className="meta" style={act ? { color: "var(--amber-text)", fontWeight: "var(--fw-medium)" } : undefined}>{compact ? (parsed?.hasTime ? formatTime(parsed.date) : "") : meta}</span>
+      <span className="meta">{compact ? (parsed?.hasTime ? formatTime(parsed.date) : "") : meta}</span>
     </li>
   );
 }

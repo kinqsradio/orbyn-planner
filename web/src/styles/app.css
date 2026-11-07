@@ -113,6 +113,7 @@ button { cursor: pointer; }
 }
 .row:last-child { border-bottom: var(--bw) solid var(--line); }
 .row .time { font-family: var(--mono); font-size: var(--fs-11-5); color: var(--t3); }
+.row .time.amber { color: var(--amber-text); }
 .row .what { color: var(--t1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row .meta { font-size: var(--fs-12); color: var(--t3); }
 .sw { width: var(--sp-8); height: var(--sp-8); border-radius: var(--r-3); display: inline-block; }

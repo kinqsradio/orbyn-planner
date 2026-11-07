@@ -11,9 +11,9 @@ beforeEach(() => {
 describe("navigation", () => {
   it("shows the Today empty state first", () => {
     render(<App />);
-    expect(screen.getByRole("heading", { name: "Nothing planned yet" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Nothing planned today" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "New task" })).toBeEnabled();
-    expect(screen.getByText("Done this week")).toBeInTheDocument();
+    expect(screen.getByText("Done today")).toBeInTheDocument();
   });
 
   it("changes page and URL from the sidebar and follows history", async () => {

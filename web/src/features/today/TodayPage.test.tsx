@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../../app/App";
 import { ClockProvider } from "../../app/clock";
@@ -26,19 +26,27 @@ async function openToday(seed?: (store: LocalStore) => void) {
 beforeEach(() => vi.unstubAllGlobals());
 
 describe("Today page", () => {
-  it("keeps the empty state when nothing is due", async () => {
+  const stats = () => Array.from(document.querySelectorAll(".stat")).map((el) => el.textContent);
+
+  it("says nothing is planned, offers one action, and keeps the week column", async () => {
     await openToday((s) => s.addTask({ title: "someday" }));
-    expect(screen.getByRole("heading", { name: "Nothing planned yet" })).toBeInTheDocument();
-    expect(screen.getByText("Done this week")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Nothing planned today" })).toBeInTheDocument();
+    expect(screen.getByText("No events or tasks. Add one, or look at the week.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add a task" })).toBeInTheDocument();
+    expect(screen.getByText("Saturday 7 November · nothing planned")).toBeInTheDocument();
+    expect(stats()).toEqual(["Today0", "Overdue0", "Coming up0", "Done today0"]);
+    expect(within(screen.getByRole("list", { name: "The week at a glance" })).getAllByRole("listitem")).toHaveLength(6);
+    expect(screen.queryByText("Progress")).toBeNull(); // no project has a goal in the next 30 days
   });
 
-  it("groups overdue and today in time order, with the week and the weekly stat", async () => {
+  it("groups overdue and today in time order, with the week from tomorrow and the four numbers", async () => {
     await openToday((s) => {
       s.addTask({ title: "late yesterday", due: "2026-11-06" });
       s.addTask({ title: "earlier today", due: "2026-11-07T08:00" });
       s.addTask({ title: "evening", due: "2026-11-07T18:30" });
       s.addTask({ title: "all day", due: "2026-11-07" });
       s.addTask({ title: "noon", due: "2026-11-07T12:00" });
+      s.addTask({ title: "soon", due: "2026-11-07T10:30" });
       s.addTask({ title: "monday one", due: "2026-11-09" });
       s.addTask({ title: "monday two", due: "2026-11-09T09:00" });
       s.addTask({ title: "far away", due: "2026-12-25" });
@@ -47,37 +55,137 @@ describe("Today page", () => {
     });
 
     const rows = Array.from(document.querySelectorAll(".row .what")).map((el) => el.textContent);
-    expect(rows).toEqual(["noon", "evening", "all day", "late yesterday", "earlier today"]);
+    expect(rows).toEqual(["soon", "noon", "evening", "all day", "late yesterday", "earlier today"]);
     expect(screen.getByText("Overdue", { selector: "b" })).toHaveClass("amber");
     const times = Array.from(document.querySelectorAll(".row .time")).map((el) => el.textContent);
-    expect(times).toEqual(["12:00", "18:30", "Any", "Fri", "08:00"]);
+    expect(times).toEqual(["10:30", "12:00", "18:30", "Any", "Fri", "08:00"]);
+    // Amber for a task due within the hour, and for an overdue one; not for noon, two hours away.
+    const amber = Array.from(document.querySelectorAll(".row .time.amber")).map((el) => el.textContent);
+    expect(amber).toEqual(["10:30", "Fri", "08:00"]);
+    // A task row says its list, or how late it is.
+    expect(Array.from(document.querySelectorAll(".row .meta")).map((el) => el.textContent)).toEqual(["Inbox", "Inbox", "Inbox", "Inbox", "1 day late", "Inbox"]);
 
     const glance = screen.getByRole("list", { name: "The week at a glance" });
     const days = within(glance).getAllByRole("listitem").map((li) => li.textContent);
-    expect(days).toEqual(["Sun 8Nothing planned", "Mon 92 tasks", "Tue 10Nothing planned", "Wed 11Nothing planned", "Thu 12Nothing planned"]);
-    const stats = Array.from(document.querySelectorAll(".stat")).map((el) => el.textContent);
-    expect(stats).toEqual(["Today3", "Overdue2", "This week6", "Done this week1"]);
-    expect(screen.getByText("1 of 6")).toBeInTheDocument();
+    expect(days).toEqual(["Sun 8Nothing planned", "Mon 92 tasks", "Tue 10Nothing planned", "Wed 11Nothing planned", "Thu 12Nothing planned", "Fri 13Nothing planned"]);
+    expect(stats()).toEqual(["Today4", "Overdue2", "Coming up2", "Done today1"]);
+    expect(screen.getByText("Saturday 7 November · 4 tasks")).toBeInTheDocument();
+  });
+
+  it("puts all-day events in their own group above the timed ones, with the calendar's name and the day of a longer one", async () => {
+    await openToday((s) => {
+      s.addEvent({ title: "Maya’s birthday", allDay: true, start: "2026-11-07", end: "2026-11-07" });
+      s.addEvent({ title: "Tiling", allDay: true, start: "2026-11-06", end: "2026-11-08" });
+      s.addEvent({ title: "Team planning", start: "2026-11-07T09:00", end: "2026-11-07T10:00", place: "Room 3" });
+      s.addEvent({ title: "Lunch", start: "2026-11-07T13:00", end: "2026-11-07T14:00" });
+      s.addEvent({ title: "Dentist", start: "2026-11-13T15:00", end: "2026-11-13T16:00" });
+    });
+    expect(screen.getByText("All day", { selector: "b" }).nextElementSibling).toHaveTextContent("2");
+    expect(screen.getByText("Timed", { selector: "b" })).toBeInTheDocument();
+    const rows = Array.from(document.querySelectorAll(".row")).map((el) => el.textContent);
+    expect(rows).toEqual(["All dayTiling · day 2 of 3Personal", "All dayMaya’s birthdayPersonal", "09:00Team planningEvent · Room 3", "13:00LunchEvent"]);
+    const glance = within(screen.getByRole("list", { name: "The week at a glance" }));
+    expect(glance.getByText("Dentist 15:00")).toBeInTheDocument(); // one event: its name and time
+    expect(screen.getByText("Saturday 7 November · 4 events")).toBeInTheDocument();
+  });
+
+  it("shows up to three projects with a goal in the next 30 days, nearest first, and says 'goal today' for today", async () => {
+    await openToday((s) => {
+      const near = s.addProject({ name: "Spring launch", colour: "c1", goal: "2026-11-07" });
+      s.addProject({ name: "Garden", colour: "c2", goal: "2026-11-20" });
+      s.addProject({ name: "Taxes", colour: "c3", goal: "2026-12-01" });
+      s.addProject({ name: "Later", colour: "c4", goal: "2026-12-05" });
+      s.addProject({ name: "Too far", colour: "c1", goal: "2027-03-01" });
+      s.addProject({ name: "No goal", colour: "c2", goal: null });
+      const a = s.addTask({ title: "a", projectId: near.id });
+      s.addTask({ title: "b", projectId: near.id });
+      s.setDone(a.id, true);
+    });
+    const progress = screen.getByText("Progress", { selector: "b" }).parentElement!.parentElement!;
+    const lines = Array.from(progress.querySelectorAll(".kv")).filter((el) => el.textContent?.includes("%")).map((el) => el.firstElementChild!.textContent);
+    expect(lines).toEqual(["Spring launch", "Garden", "Taxes"]);
+    expect(screen.getByText("50% · goal today")).toBeInTheDocument();
+  });
+
+  it("greets by the clock: morning from 05:00, afternoon from 12:00, evening from 18:00, and until 04:59", async () => {
+    const { greetingAt } = await import("./TodayPage");
+    expect(greetingAt(new Date(2026, 10, 7, 4, 59))).toBe("Good evening");
+    expect(greetingAt(new Date(2026, 10, 7, 5, 0))).toBe("Good morning");
+    expect(greetingAt(new Date(2026, 10, 7, 11, 59))).toBe("Good morning");
+    expect(greetingAt(new Date(2026, 10, 7, 12, 0))).toBe("Good afternoon");
+    expect(greetingAt(new Date(2026, 10, 7, 17, 59))).toBe("Good afternoon");
+    expect(greetingAt(new Date(2026, 10, 7, 18, 0))).toBe("Good evening");
+  });
+});
+
+describe("Today while it loads, and on a phone", () => {
+  it("keeps its layout while loading and shows the skeleton only after 400 ms", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      window.history.replaceState(null, "", "/today");
+      vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("offline"))));
+      const store = new LocalStore({ persistence: new MemoryPersistence(), now: () => NOW });
+      await store.ready;
+      // A store that has not finished loading: same store, but it says it is not ready.
+      const notReady = { ...store.getState(), ready: false }; // one object: a new one each call would loop
+      const loading = Object.assign(Object.create(store) as LocalStore, { getState: () => notReady });
+      render(<ClockProvider value={() => NOW}><App store={loading} /></ClockProvider>);
+      expect(screen.getByText("Today", { selector: "small" })).toBeInTheDocument();
+      expect(document.querySelector(".skel")).toBeNull();
+      expect(screen.queryByText("Loading today")).toBeNull();
+      await act(async () => void (await vi.advanceTimersByTimeAsync(450)));
+      expect(screen.getByText("Loading today")).toBeInTheDocument();
+      expect(document.querySelectorAll(".skel").length).toBeGreaterThan(6);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("on a phone: the title is Today, the count is items, there are no stats, events have no meta, and This week is one collapsed row", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: true, media: query, addEventListener: () => undefined, removeEventListener: () => undefined }));
+    await openToday((s) => {
+      s.addEvent({ title: "Lunch", start: "2026-11-07T13:00", end: "2026-11-07T14:00", place: "Cafe" });
+      s.addTask({ title: "Pick up", due: "2026-11-07" });
+      s.addTask({ title: "Monday", due: "2026-11-09" });
+    });
+    expect(screen.getByRole("heading", { name: "Today" })).toBeInTheDocument();
+    expect(screen.getByText("Saturday 7 November · 2 items")).toBeInTheDocument();
+    expect(document.querySelector(".row .meta")?.textContent).toBe("");
+    const fold = screen.getByRole("button", { name: /^This week\s*1 item$/ });
+    expect(fold).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("list", { name: "The week at a glance" })).toBeNull();
+  });
+
+  it("an empty day on a phone is A clear day, with Open the week beside Add a task", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: true, media: query, addEventListener: () => undefined, removeEventListener: () => undefined }));
+    await openToday();
+    expect(screen.getByRole("heading", { name: "A clear day" })).toBeInTheDocument();
+    expect(screen.getByText("No events or tasks today. Add one, or look at the week.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open the week" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add a task" })).toBeInTheDocument();
   });
 });
 
 describe("groupToday", () => {
-  it("counts the next five days and this week's completions", async () => {
+  it("counts the next six days, and what was finished today and this week", async () => {
     const store = new LocalStore({ persistence: new MemoryPersistence(), now: () => NOW });
     await store.ready;
     store.addTask({ title: "a", due: "2026-11-08" });
     store.addTask({ title: "b", due: "2026-11-09T09:00" });
     store.addTask({ title: "c", due: "2026-11-09" });
     store.addTask({ title: "d", due: "2026-11-12" });
-    store.addTask({ title: "e", due: "2026-11-13" }); // day six: outside the glance
+    store.addTask({ title: "e", due: "2026-11-13" });
+    store.addTask({ title: "f", due: "2026-11-14" }); // day seven: outside the glance
     const x = store.addTask({ title: "x" });
     store.setDone(x.id, true);
     const groups = groupToday(store.getState().tasks, NOW);
-    expect(groups.week.map((w) => w.tasks.length)).toEqual([1, 2, 0, 0, 1]);
+    expect(groups.week.map((w) => w.tasks.length)).toEqual([1, 2, 0, 0, 1, 1]);
     expect(groups.week[0]!.date.getDate()).toBe(8);
+    expect(groups.doneToday).toBe(1);
     expect(groups.doneThisWeek).toBe(1);
     // Monday of the week is 2 November: a task done on 1 November does not count.
     expect(groupToday(store.getState().tasks, new Date(2026, 10, 16, 10, 0)).doneThisWeek).toBe(0);
+    expect(groupToday(store.getState().tasks, new Date(2026, 10, 8, 10, 0)).doneToday).toBe(0);
   });
 });
 
@@ -115,5 +223,6 @@ describe("Done this week with repeating tasks", () => {
     const once = store.addTask({ title: "One-off" });
     store.setDone(once.id, true);
     expect(groupToday(store.getState().tasks, NOW).doneThisWeek).toBe(3);
+    expect(groupToday(store.getState().tasks, NOW).doneToday).toBe(3);
   });
 });

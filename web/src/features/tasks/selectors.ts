@@ -41,13 +41,11 @@ export function openCount(tasks: readonly Task[], listId: string): number {
 export interface TodayGroups {
   overdue: Task[];
   today: Task[];
-  /** The next five days after today, with the open tasks that fall on each. */
+  /** The next six days after today, with the open tasks that fall on each. */
   week: { date: Date; tasks: Task[] }[];
-  /** Open tasks due from today to six days on. */
-  thisWeekOpen: number;
+  /** Tasks finished since midnight; a repeating task counts each time it was completed. */
+  doneToday: number;
   doneThisWeek: number;
-  /** Done this week plus open tasks due this week: the "N of M" in Progress. */
-  weekTotal: number;
 }
 
 export function groupToday(tasks: readonly Task[], now: Date): TodayGroups {
@@ -58,25 +56,18 @@ export function groupToday(tasks: readonly Task[], now: Date): TodayGroups {
   const today = sortByDue(
     activeTasks(live, now).filter((t) => t.due !== null && isDueToday(t.due, now) && !overdueIds.has(t.id)),
   );
-  const week = [1, 2, 3, 4, 5].map((n) => {
+  const week = [1, 2, 3, 4, 5, 6].map((n) => {
     const date = addDays(startOfDay(now), n);
     const key = dateKey(date);
     return { date, tasks: sortByDue(open.filter((t) => dueDayKey(t.due!) === key)) };
   });
-  const from = dateKey(now);
-  const to = dateKey(addDays(now, 6));
-  const thisWeekOpen = open.filter((t) => dueDayKey(t.due!) >= from && dueDayKey(t.due!) <= to).length;
-  const weekStart = startOfWeek(now);
   // A repeating task counts once for each time it was completed; any other task once, when it was done.
-  const since = weekStart.getTime();
-  const doneThisWeek = live.reduce((n, t) => {
-    if (t.repeat) return n + (t.completions ?? []).filter((c) => new Date(c).getTime() >= since).length;
-    return n + (t.done && t.completedAt !== null && new Date(t.completedAt).getTime() >= since ? 1 : 0);
-  }, 0);
-  const monday = dateKey(weekStart);
-  const sunday = dateKey(addDays(weekStart, 6));
-  const openInWeek = open.filter((t) => dueDayKey(t.due!) >= monday && dueDayKey(t.due!) <= sunday).length;
-  return { overdue, today, week, thisWeekOpen, doneThisWeek, weekTotal: doneThisWeek + openInWeek };
+  const doneSince = (since: number) =>
+    live.reduce((n, t) => {
+      if (t.repeat) return n + (t.completions ?? []).filter((c) => new Date(c).getTime() >= since).length;
+      return n + (t.done && t.completedAt !== null && new Date(t.completedAt).getTime() >= since ? 1 : 0);
+    }, 0);
+  return { overdue, today, week, doneToday: doneSince(startOfDay(now).getTime()), doneThisWeek: doneSince(startOfWeek(now).getTime()) };
 }
 
 /** The count behind the Tasks badge: open tasks that are due or overdue. */
