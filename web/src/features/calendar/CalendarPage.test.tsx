@@ -83,7 +83,7 @@ describe("Week view", () => {
     expect(screen.getAllByTestId("now")).toHaveLength(1);
   });
 
-  it("moves with the arrows and Today, and switches views", async () => {
+  it("moves with the arrows and Today", async () => {
     await open({ seed: seedWeek });
     await userEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(screen.getByText("Week 46")).toBeInTheDocument();
@@ -93,11 +93,17 @@ describe("Week view", () => {
     expect(screen.getByText("Week 44")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Today" }));
     expect(screen.getByText("Week 45")).toBeInTheDocument();
+  });
 
+  it("switches to the Day view", async () => {
+    await open({ seed: seedWeek });
     await userEvent.click(screen.getByRole("radio", { name: "Day" }));
     expect(screen.getByRole("heading", { level: 1, name: "Friday 6 November" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Team planning/ })).toHaveTextContent("09:00 to 11:00 · Room 3");
+  });
 
+  it("switches to the Agenda view", async () => {
+    await open({ seed: seedWeek });
     await userEvent.click(screen.getByRole("radio", { name: "Agenda" }));
     expect(screen.getByText("Today · Fri 6")).toBeInTheDocument();
     expect(screen.getByText("Room 3 · 2h")).toBeInTheDocument();

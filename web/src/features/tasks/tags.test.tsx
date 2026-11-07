@@ -4,17 +4,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../../app/App";
 import { ClockProvider } from "../../app/clock";
 import { LocalStore } from "../../store/LocalStore";
+import type { Task } from "../../store/types";
 import { MemoryPersistence } from "../../store/persistence";
+
+// The panel stops offering tags at MAX_TAGS_PER_TASK. The real limit (100, covered in the store tests) would mean 100 chips on the page in the
+// row and the panel, so this file runs with a limit of 3; nothing else here has three tags on a task.
+vi.mock("../../store/records", async (original) => ({ ...(await original<typeof import("../../store/records")>()), MAX_TAGS_PER_TASK: 3 }));
 
 const NOW = new Date(2026, 10, 7, 10, 0);
 
-async function open(path = "/tasks") {
+async function open(path = "/tasks", seed?: (store: LocalStore, water: Task) => void) {
   window.history.replaceState(null, "", path);
   vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("offline"))));
   const store = new LocalStore({ persistence: new MemoryPersistence(), now: () => NOW, broadcast: false });
   await store.ready;
   const water = store.addTask({ title: "water plants", due: "2026-11-09T09:00" });
   const mail = store.addTask({ title: "post the parcel", due: "2026-11-10" });
+  seed?.(store, water); // before the first render, so the page isn't redrawn for every record
   const root = document.createElement("div");
   root.id = "root";
   document.body.appendChild(root);
@@ -33,7 +39,7 @@ afterEach(() => document.getElementById("root")?.remove());
 const row = (title: string) => screen.getByRole("button", { name: title }).closest("li")!;
 
 describe("tags in the planner", () => {
-  it("a task gets tags in its panel (a new one by typing, an existing one from the list), shows them as chips, and the Tasks page filters by tag", async () => {
+  it("a task gets a tag by typing a new one in its panel, or by picking an existing one, and shows each as a chip in the panel and its row", async () => {
     const { store, water } = await open();
     await userEvent.click(await screen.findByRole("button", { name: "water plants" }));
     const panel = screen.getByRole("complementary", { name: "Task" });
@@ -46,12 +52,26 @@ describe("tags in the planner", () => {
     expect(within(row("water plants")).getByText("Home")).toBeInTheDocument();
     expect(within(row("water plants")).getByText("Work")).toBeInTheDocument();
     expect(within(row("post the parcel")).queryByText("Home")).toBeNull();
+  });
 
+  it("× on a tag chip in the panel removes just that tag", async () => {
+    await open("/tasks", (store, task) => {
+      store.setTaskTag(task.id, store.addTag("Home", "c2").id, true);
+      store.setTaskTag(task.id, store.addTag("Work", "c1").id, true);
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "water plants" }));
+    const panel = screen.getByRole("complementary", { name: "Task" });
     await userEvent.click(within(panel).getByRole("button", { name: "Remove tag Work" }));
     expect(within(row("water plants")).queryByText("Work")).toBeNull();
+    expect(within(row("water plants")).getByText("Home")).toBeInTheDocument();
+  });
 
-    await userEvent.keyboard("{Escape}");
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Tag" }), "Home");
+  it("the Tasks page filters by tag", async () => {
+    await open("/tasks", (store, task) => {
+      store.setTaskTag(task.id, store.addTag("Home", "c2").id, true);
+    });
+    const home = (await screen.findByRole("combobox", { name: "Tag" })).querySelector("option[value]:not([value=''])") as HTMLOptionElement;
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Tag" }), home.value);
     expect(screen.getByRole("button", { name: "water plants" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "post the parcel" })).toBeNull();
   });
@@ -78,18 +98,19 @@ describe("tags in the planner", () => {
     expect(store.getState().tasks.find((t) => t.id === mail.id)!.tags).toEqual([tag.id]);
   });
 
-  it("a task with 100 tags can't be given another: Add a tag and New tag go, and come back when one is removed", async () => {
-    const { store, water } = await open();
-    const ids = Array.from({ length: 100 }, (_, i) => store.addTag(`Tag ${i}`, "c1").id);
-    store.addTag("One more", "c2");
-    for (const id of ids) store.setTaskTag(water.id, id, true);
-    await userEvent.click(await screen.findByRole("button", { name: "water plants" }));
-    const panel = screen.getByRole("complementary", { name: "Task" });
+  it("a task at the tag limit can't be given another: Add a tag and New tag go, and come back when one is removed", async () => {
+    // The limit is 100; the panel only compares a count with it, so the page is built with a limit of 3 (see the mock above) and not 100 chips.
+    await open("/tasks", (store, water) => {
+      for (let i = 0; i < 3; i++) store.setTaskTag(water.id, store.addTag(`Tag ${i}`, "c1").id, true);
+      store.addTag("One more", "c2");
+    });
+    await userEvent.click(await screen.findByText("water plants"));
+    const panel = screen.getByLabelText("Task", { selector: "aside" });
     expect(within(panel).getByText("A task can have 100 tags at most.")).toBeInTheDocument();
-    expect(within(panel).queryByRole("combobox", { name: "Add a tag" })).toBeNull();
-    expect(within(panel).queryByRole("textbox", { name: "New tag" })).toBeNull();
-    await userEvent.click(within(panel).getByRole("button", { name: "Remove tag Tag 0" }));
-    expect(within(panel).getByRole("combobox", { name: "Add a tag" })).toBeInTheDocument();
-    expect(within(panel).getByRole("textbox", { name: "New tag" })).toBeInTheDocument();
+    expect(within(panel).queryByLabelText("Add a tag")).toBeNull();
+    expect(within(panel).queryByLabelText("New tag")).toBeNull();
+    await userEvent.click(within(panel).getByLabelText("Remove tag Tag 0"));
+    expect(within(panel).getByLabelText("Add a tag")).toBeInTheDocument();
+    expect(within(panel).getByLabelText("New tag")).toBeInTheDocument();
   });
 });
