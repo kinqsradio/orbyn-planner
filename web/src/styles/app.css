@@ -467,3 +467,27 @@ button.pillx { border: 0; }
 .notif-row { grid-template-columns: var(--sp-16) minmax(0, 1fr) auto var(--sp-8); }
 .notif-row .what { white-space: normal; }
 .unread-dot { width: var(--sp-8); height: var(--sp-8); border-radius: var(--r-round); background: var(--blue-solid); }
+.busy-label { display: inline-grid; place-items: center; }
+.busy-label > * { grid-area: 1 / 1; }
+.busy-working { display: inline-flex; align-items: center; gap: var(--sp-6); }
+.spin.blue { border-top-color: var(--blue); }
+.skel { height: var(--sp-12); border-radius: var(--r-6); background: var(--raise); display: block; }
+.pv-loading { display: flex; align-items: center; gap: var(--sp-8); color: var(--t2); }
+.btn .spin, .danger .spin { border-color: color-mix(in srgb, currentColor 35%, transparent); border-top-color: currentColor; }
+.steps.numbered { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--sp-12); }
+.steps.numbered li { display: flex; gap: var(--sp-10); align-items: flex-start; }
+.steps.numbered li > div { display: flex; flex-direction: column; gap: var(--sp-6); }
+.pv-card.pv-bad { background: var(--main); box-shadow: 0 0 0 var(--bw) var(--line), inset 0 0 0 var(--bw) var(--red-bg); }
+.pv-red { color: var(--red); display: inline-flex; }
+.keys-card { width: var(--sp-440); gap: var(--sp-12); }
+.keys-title { margin: 0; font-weight: var(--fw-medium); font-size: var(--fs-18); color: var(--t1); line-height: 1.3; }
+.pv-stack { display: flex; flex-direction: column; gap: var(--sp-8); }
+.pv-stack > * { justify-content: center; }
+.keys-card small.err { font-size: var(--fs-12); }
+.pv-waitrow { display: flex; align-items: center; gap: var(--sp-8); }
+.pv-end { margin-left: auto; display: flex; gap: var(--sp-6); }
+.pv-waitrow .pv-loading { font-size: var(--fs-12-5); gap: var(--sp-8); }
+.steps.numbered li > span.mono { font-size: var(--fs-12); width: var(--sp-16); padding-top: var(--sp-2); }
+.steps.numbered li > div { flex: 1; gap: var(--sp-8); }
+.code-card { align-items: center; padding: var(--sp-12); font-size: var(--fs-24); letter-spacing: .2em; color: var(--t1); }
+.fingerprint { font-size: var(--fs-13); letter-spacing: .06em; color: var(--t1); }

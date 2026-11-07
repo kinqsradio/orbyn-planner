@@ -600,20 +600,28 @@ describe("keys the browser will not store", () => {
     // The tab approves it, with the same digits as Add a device.
     const onA = await mount(a);
     await userEvent.click(await screen.findByRole("button", { name: "Approve another device from this tab" }));
-    const list = await screen.findByRole("list", { name: "Devices" });
-    await waitFor(() => expect(within(list).getAllByRole("listitem")).toHaveLength(2));
+    const dialog = await screen.findByRole("dialog", { name: "Approve another device" });
+    expect(dialog).toHaveTextContent("Open Orbyn on your other device.");
+    expect(dialog).toHaveTextContent("Check the 6 digits match.");
+    expect(dialog).toHaveTextContent("Compare the key fingerprint.");
     const onB = await mount(b);
-    await userEvent.click(within(list).getByRole("button", { name: `Approve ${deviceName()}` }));
-    const dialog = screen.getByRole("dialog", { name: "New sign-in" });
     const sasA = (await within(dialog).findByTestId("approval-code")).textContent;
+    expect(within(dialog).getByTestId("fingerprint").textContent).toMatch(/^[0-9A-F]{4}( [0-9A-F]{4}){3}$/);
     expect((await within(onB.root).findByTestId("approval-code")).textContent).toBe(sasA);
     await userEvent.click(within(dialog).getByRole("button", { name: "They match" }));
     await userEvent.click(within(onB.root).getByRole("button", { name: "They match" }));
-    expect(await within(dialog).findByText(/is trusted/)).toBeInTheDocument();
     await userEvent.click(await within(onB.root).findByRole("button", { name: "Continue" }));
     expect(b.tokens.getSession()?.deviceState).toBe("trusted");
     expect(await keysB.loadKeys()).not.toBeNull(); // the device that can keep them has them
     expect(await keysA.loadKeys()).toBeNull(); // and this tab still wrote nothing
+    // Back on the tab: it says where the keys are now, and Continue opens the planner with them held in memory only.
+    const done = await screen.findByRole("status", { name: "Keys approved" });
+    expect(done).toHaveTextContent(`Your keys are on ${deviceName()} now.`);
+    expect(done).toHaveTextContent("This browser still can’t keep them, so you’ll sign in again here next time.");
+    expect(within(done).getByRole("button", { name: "Sign out of this browser" })).toBeInTheDocument();
+    await userEvent.click(within(done).getByRole("button", { name: "Continue" }));
+    expect(await within(onA.root).findByRole("heading", { name: "Nothing planned yet" })).toBeInTheDocument();
+    expect(a.keys.inMemory).toBe(true);
     onB.unmount();
     onA.unmount();
   });
@@ -631,6 +639,9 @@ describe("keys the browser will not store", () => {
     await userEvent.click(screen.getByRole("button", { name: "Try saving again" }));
     expect(screen.getByRole("alert", { name: "Account created, keys not saved" })).toBeInTheDocument(); // still refused: stays in memory
     expect(a.keys.inMemory).toBe(true);
+    // The second refusal says so, and approving another device becomes the main button.
+    expect(await screen.findByText("Still couldn’t save. This browser may not allow it. Approve another device from this tab instead.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve another device from this tab" })).toHaveClass("btn");
     keysA.saveKeys = save;
     keysA.replaceDevice = replace;
     await userEvent.click(screen.getByRole("button", { name: "Try saving again" }));
@@ -1108,8 +1119,8 @@ describe("the protection level", () => {
 
     await userEvent.click(within(card).getByRole("button", { name: "Choose" }));
     const dialog = screen.getByRole("dialog", { name: "Confirm your protection level" });
-    expect(dialog).toHaveTextContent("Your account uses Standard protection");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Confirm" }));
+    expect(dialog).toHaveTextContent("Confirming sets Standard protection.");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Set Standard protection" }));
     await waitFor(() => expect(engine.accounts.get("sam@example.com")!.protection).toHaveLength(1));
     expect(await within(await screen.findByLabelText("Protection")).findByText("Standard protection")).toBeInTheDocument();
   });
@@ -1158,7 +1169,7 @@ describe("the protection level", () => {
     const account = engine.accounts.get("sam@example.com")!;
     const other = account.devices[0]!;
     account.protection = [{ level: "standard", seq: 1, prev: PROTECTION_GENESIS, signed_at: Math.floor(nowMs / 1000) as unknown as bigint, signer_device_id: other.id, signature: "not-checked-here" }];
-    await userEvent.click(within(dialog).getByRole("button", { name: "Confirm" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Set Standard protection" }));
     expect(await within(dialog).findByText(/Protection was just changed on/)).toBeInTheDocument();
     expect(account.protection).toHaveLength(1);
     await userEvent.click(within(dialog).getByRole("button", { name: "Confirm" }));

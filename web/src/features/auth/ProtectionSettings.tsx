@@ -4,6 +4,7 @@ import { useAuth } from "../../auth/AuthProvider";
 import { pendingChange, readConfirmed, readSkipped, recordReport, writeSeen, writeSkipped, type ConfirmedSetting } from "../../auth/protectionNotice";
 import { confirmProtection, readProtection, type ProtectionReport } from "../../auth/flows";
 import type { ProtectionLevel } from "../../generated/ProtectionLevel";
+import { BusyButton } from "../../components/BusyButton";
 import { Icon } from "../../components/Icon";
 import { Modal } from "../../components/Modal";
 import { MONTHS, formatTime } from "../../lib/dates";
@@ -15,10 +16,10 @@ const KEEPS = "This browser keeps the setting it last confirmed";
 const REASON_LINES = {
   rollback: { reason: "The server showed an older setting", line: `The server showed an older setting than this browser has already confirmed. ${KEEPS} until a trusted device confirms it again.` },
   fork: { reason: "The server showed two different settings", line: `The server showed two different settings. ${KEEPS} until a trusted device confirms it again.` },
-  unknownDevice: { reason: "The latest change is signed by a device this browser doesn’t know", line: `The latest change is signed by a device this browser doesn’t know. ${KEEPS}.` },
-  badSignature: { reason: "The latest change has a signature that doesn’t check out", line: `The latest change has a signature that doesn’t check out. ${KEEPS}.` },
-  gap: { reason: "Some changes are missing between the setting this browser confirmed and the newest one", line: `Some changes are missing between the setting this browser confirmed and the newest one. ${KEEPS}.` },
-  invalid: { reason: "One of the changes isn’t in a form this browser can read", line: `One of the changes isn’t in a form this browser can read. ${KEEPS}.` },
+  unknownDevice: { reason: "Signed by a device this one doesn’t know", line: `The latest change is signed by a device this browser doesn’t know. ${KEEPS}.` },
+  badSignature: { reason: "A signature doesn’t check out", line: `The latest change has a signature that doesn’t check out. ${KEEPS}.` },
+  gap: { reason: "Some changes are missing", line: `Some changes are missing between the setting this browser confirmed and the newest one. ${KEEPS}.` },
+  invalid: { reason: "A change this device can’t read", line: `One of the changes isn’t in a form this browser can read. ${KEEPS}.` },
 } as const;
 
 type Kind = "verified" | "confirming" | "unset" | keyof typeof REASON_LINES;
@@ -34,6 +35,23 @@ function kindOf(report: ProtectionReport): Kind {
   if (report.state === "provisional") return "confirming";
   // Unknown with nothing stopping it: no device has signed a setting yet.
   return "unset";
+}
+
+/** A loading state shows only after this long. */
+const LOADING_AFTER_MS = 400;
+
+/** True once `active` has been true for `ms`. */
+function useAfter(active: boolean, ms: number): boolean {
+  const [done, setDone] = useState(false);
+  useEffect(() => {
+    if (!active) return;
+    const timer = setTimeout(() => setDone(true), ms);
+    return () => {
+      clearTimeout(timer);
+      setDone(false);
+    };
+  }, [active, ms]);
+  return active && done;
 }
 
 export const levelName = (level: string | null | undefined) => (level === "advanced" ? "Advanced" : "Standard");
@@ -68,7 +86,7 @@ function ConfirmDialog({ report, changedNow, onClose, onNotNow, onDone, onConfli
       setBusy(false);
       // Another device signed first: the screen reads the chain again and this dialog shows the new setting, to be checked and confirmed again.
       if (e instanceof ApiFailure && e.code === "protection_conflict") onConflict();
-      else setError(describeError(e));
+      else setError("Couldn’t confirm. Check your connection and try again.");
     }
   };
   return (
@@ -82,18 +100,20 @@ function ConfirmDialog({ report, changedNow, onClose, onNotNow, onDone, onConfli
           </div>
         )}
         <p className="t3">
-          {level === "standard" ? (
+          {!head ? (
+            <>No device has set a protection level for this account yet. Confirming sets <b style={{ fontWeight: "var(--fw-medium)" }}>Standard protection.</b></>
+          ) : level === "standard" ? (
             <>Your account uses <b style={{ fontWeight: "var(--fw-medium)" }}>Standard protection</b>: data is encrypted on your devices, and Orbyn keeps a recovery copy of the keys. Confirming lets this browser check every later change.</>
           ) : (
             <>Your account uses <b style={{ fontWeight: "var(--fw-medium)" }}>Advanced protection</b>: only your devices hold the keys. Confirming lets this browser check every later change.</>
           )}
         </p>
         {head && <div className="kv"><span>Set on</span><b>{setBy} · {openedAt - secsOf(head) < 60 ? "just now" : day(secsOf(head))}</b></div>}
-        {error && <p className="err" role="alert">{error}</p>}
         <div className="dialog-actions">
           <button type="button" className="ghost" data-autofocus disabled={busy} onClick={onNotNow}>Not now</button>
-          <button type="button" className="btn" disabled={busy} onClick={() => void sign()}>{busy ? "Confirming…" : "Confirm"}</button>
+          <BusyButton className="btn" busy={busy} idle={head ? "Confirm" : "Set Standard protection"} working="Confirming…" onClick={() => void sign()} />
         </div>
+        {error && <p className="err" role="alert">{error}</p>}
       </div>
     </Modal>
   );
@@ -148,6 +168,7 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
   const [skipped, setSkipped] = useState(0);
   const session = auth?.session ?? null;
   const services = auth?.services;
+  const slow = useAfter(report === null && error === null, LOADING_AFTER_MS);
   const trusted = session?.deviceState === "trusted";
 
   /** Takes what the engine verified; a change by another device is remembered until the person dismisses it. */
@@ -214,14 +235,26 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
         </div>
       )}
       <div aria-label="Protection" style={{ display: "flex", flexDirection: "column", gap: "var(--sp-8)" }}>
-      <div className={`card pv-card${kind === "verified" || kind === "confirming" ? "" : " err"}`}>
+      <div className={`card pv-card${kind === "verified" || kind === "confirming" || (!error && !report) ? "" : " pv-bad"}`}>
         {error ? (
           <>
-            <span className="err" role="alert">{error}</span>
-            <div><button type="button" className="ghost" onClick={() => void load()}>Try again</button></div>
+            <div className="pv-head">
+              <span className="pv-red"><Icon name="alert" small /></span>
+              <b style={{ fontWeight: "var(--fw-medium)" }} role="alert">Couldn’t check protection</b>
+            </div>
+            <span className="t2 pv-text">Orbyn didn’t answer. This device keeps the setting it last confirmed.</span>
+            <div><button type="button" className="btn sm" onClick={() => void load()}>Try again</button></div>
           </>
         ) : !report ? (
-          <span className="t3">Checking…</span>
+          // Nothing for the first 400 ms: a quick answer should not flash a loading state.
+          slow && (
+            <>
+              <div className="pv-head"><Icon name="shield" small /><b style={{ fontWeight: "var(--fw-medium)" }}>Protection</b></div>
+              <div className="pv-loading t3" role="status"><span className="spin blue" aria-hidden="true" />Checking protection…</div>
+              <span className="skel" style={{ width: "70%" }} />
+              <span className="skel" style={{ width: "45%" }} />
+            </>
+          )
         ) : kind === "verified" ? (
           <>
             <div className="pv-head">

@@ -26,7 +26,7 @@ export const groupCode = (code: string) => (code.length === 6 ? `${code.slice(0,
 
 
 /** The digits and the device's key fingerprint, side by side with the choice: nothing is approved until "They match". */
-function ApproveDialog({ device, onClose, onDone }: { device: Device; onClose: () => void; onDone: () => void }) {
+export function ApproveDialog({ device, onClose, onDone }: { device: Device; onClose: () => void; onDone: () => void }) {
   const auth = useAuth()!;
   const { services } = auth;
   const [attempt, setAttempt] = useState(0);
@@ -162,15 +162,22 @@ function RemoveDialog({ device, onClose, onDone }: { device: Device; onClose: ()
   );
 }
 
+/** The steps of adding a device, which Add a device and approving from a tab that can't keep its keys both show. */
+export function AddDeviceSteps() {
+  return (
+    <ol className="steps">
+      <li>On the new device, open Orbyn Planner and sign in with your email and password.</li>
+      <li>It will say it is waiting for approval. Come back here and choose Approve next to it.</li>
+      <li>Both devices show the same 6 digits. If they match, choose They match on each.</li>
+    </ol>
+  );
+}
+
 function AddDeviceDialog({ onClose }: { onClose: () => void }) {
   return (
     <Modal label="Add a device" onClose={onClose}>
       <b className="card-title">Add a device</b>
-      <ol className="steps">
-        <li>On the new device, open Orbyn Planner and sign in with your email and password.</li>
-        <li>It will say it is waiting for approval. Come back here and choose Approve next to it.</li>
-        <li>Both devices show the same 6 digits. If they match, choose They match on each.</li>
-      </ol>
+      <AddDeviceSteps />
       <div className="dialog-actions">
         <button type="button" className="btn" onClick={onClose}>Done</button>
       </div>

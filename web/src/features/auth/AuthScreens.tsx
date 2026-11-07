@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ApiFailure } from "../../api/auth";
 import { SignInUnavailable } from "../../api/authCrypto";
+import { BusyButton } from "../../components/BusyButton";
 import { Icon } from "../../components/Icon";
 import { KeysForAnotherAccount, SecondFactorNeeded, signIn, signUp, type PendingSignUp } from "../../auth/flows";
 import { cryptoLoad } from "../../api/realCrypto";
@@ -175,7 +176,7 @@ function CheckEmail({ pending, onBack, onDone }: { pending: PendingSignUp; onBac
           You’ve asked for several codes. Try again later, or check your spam folder.
         </div>
       )}
-      <button type="submit" className="btn lg" disabled={busy || !ready}>{busy ? "Checking…" : "Verify"}</button>
+      <BusyButton type="submit" className="btn lg" busy={busy} disabled={!ready} idle="Verify" working="Checking…" />
       {limited ? (
         <span className="t4 small">Send a new code · not available right now</span>
       ) : wait > 0 ? (

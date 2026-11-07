@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiFailure } from "../../api/auth";
@@ -78,6 +78,7 @@ describe("the protection card", () => {
     const details = screen.getByRole("dialog", { name: "Protection details" });
     expect(details).toHaveTextContent("For you or Orbyn support. Nothing here is secret.");
     expect(details).toHaveTextContent("ReasonThe server showed an older setting");
+    expect(details).not.toHaveTextContent("Devices that confirmed");
     expect(details).toHaveTextContent("Newest setting on the serverStandard · change 1");
     expect(details).toHaveTextContent("Signed byMacBook Air · 3 Nov");
     expect(details).toHaveTextContent("Last confirmed on this browserStandard · change 1 · 3 Nov");
@@ -119,5 +120,61 @@ describe("the other cards", () => {
     read.mockResolvedValue(report({}));
     render(<ProtectionSettings />);
     expect(await card()).toHaveTextContent("With Standard, Orbyn keeps a recovery copy of your keys, so it can read your data. Advanced protection, planned, removes that copy.");
+  });
+});
+
+describe("loading, errors and busy buttons", () => {
+  it("shows nothing for 400 ms, then a spinner and skeleton lines", async () => {
+    vi.useFakeTimers();
+    try {
+      read.mockReturnValue(new Promise(() => undefined));
+      render(<ProtectionSettings />);
+      await act(async () => void (await vi.advanceTimersByTimeAsync(399)));
+      expect(screen.queryByText("Checking protection…")).toBeNull();
+      await act(async () => void (await vi.advanceTimersByTimeAsync(2)));
+      expect(screen.getByText("Checking protection…")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("an unanswered read says so, keeps the last setting, and Try again reads again", async () => {
+    read.mockRejectedValueOnce(new Error("down"));
+    read.mockResolvedValue(report({}));
+    render(<ProtectionSettings />);
+    const c = await card();
+    expect(await within(c).findByText("Couldn’t check protection")).toBeInTheDocument();
+    expect(c).toHaveTextContent("Orbyn didn’t answer. This device keeps the setting it last confirmed.");
+    await userEvent.click(within(c).getByRole("button", { name: "Try again" }));
+    expect(await within(await card()).findByText("Standard protection")).toBeInTheDocument();
+  });
+
+  it("a failed Confirm says so under the buttons; the button shows Confirming… while it works and keeps its width", async () => {
+    read.mockResolvedValue(report({ state: "provisional", seq: 0 }));
+    let fail: (e: Error) => void = () => undefined;
+    confirm.mockReturnValue(new Promise((_, reject) => (fail = reject)));
+    render(<ProtectionSettings />);
+    const dialog = await screen.findByRole("dialog", { name: "Confirm your protection level" });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Confirm" }));
+    expect(within(dialog).getByRole("button", { name: "Confirm" })).toBeDisabled(); // disabled at once, and it still looks idle
+    await act(async () => void (await vi.advanceTimersByTimeAsync(450)));
+    vi.useRealTimers();
+    const busy = within(dialog).getByRole("button", { name: "Confirming…" });
+    expect(busy).toBeDisabled();
+    expect(busy.querySelector(".spin")).not.toBeNull();
+    await act(async () => fail(new Error("offline")));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Couldn’t confirm. Check your connection and try again.");
+    expect(within(dialog).getByRole("button", { name: "Confirm" })).toBeEnabled();
+  });
+
+  it("Not set: the dialog says Confirming sets Standard, has no Set on row, and the button reads Set Standard protection", async () => {
+    read.mockResolvedValue(report({ state: "unknown", seq: 0, level: null, head: null, signer: null }));
+    render(<ProtectionSettings />);
+    await userEvent.click(await within(await card()).findByRole("button", { name: "Choose" }));
+    const dialog = screen.getByRole("dialog", { name: "Confirm your protection level" });
+    expect(dialog).toHaveTextContent("No device has set a protection level for this account yet. Confirming sets Standard protection.");
+    expect(within(dialog).queryByText("Set on")).toBeNull();
+    expect(within(dialog).getByRole("button", { name: "Set Standard protection" })).toBeInTheDocument();
   });
 });
