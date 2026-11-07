@@ -1,95 +1,248 @@
 name: CI
 
+# Time budget: a pull request should turn green within 5 minutes. A run over it is a defect to fix at its slowest
+# step, not drift to accept.
+#
+# Pull requests run one lane: Web, the WebAssembly package and the end-to-end tests, all on Linux. The desktop
+# shell (macOS and Windows) runs on main, nightly, on manual runs, and on a pull request that touches `desktop/`
+# or the workflows, where its breakage lives: the shell is a thin window around the web build. Main and nightly run every lane.
 on:
-  pull_request:
   push:
     branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# A new push to a pull request cancels its older run. Main, nightly and manual runs group by
+# commit, so a nightly never replaces a queued push-to-main run or the reverse.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  web:
-    name: Web
+  # Decides which lanes a pull request can affect. A required job never skips as a whole (a skipped matrix job reports
+  # under its unexpanded name): its heavy steps skip instead, and the job reports success at once. Pushes to main, nightly
+  # and manual runs, and any path this does not recognise, run everything.
+  changes:
+    name: Changes
     runs-on: ubuntu-24.04
-    defaults:
-      run:
-        working-directory: web
+    outputs:
+      web: ${{ steps.scope.outputs.web }}
+      desktop: ${{ steps.scope.outputs.desktop }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: scope
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          all() { printf 'web=true\ndesktop=true\n' >> "$GITHUB_OUTPUT"; echo "Running every lane: $1"; }
+          if [ "$EVENT" != "pull_request" ]; then all "not a pull request"; exit 0; fi
+          # --no-renames lists both paths of a move, so moving code into docs still counts.
+          if ! files=$(git diff --no-renames --name-only "$BASE"...HEAD); then all "could not compare with the base"; exit 0; fi
+          docs='^(docs/|[^/]+\.md$|\.github/ISSUE_TEMPLATE/|\.github/pull_request_template\.md$|\.github/(CODEOWNERS|dependabot\.yml)$)'
+          web='^(web/|\.github/workflows/)'
+          desktop='^(desktop/|\.github/workflows/)'
+          # scripts/ holds the title checker, which the cheap checks run.
+          known="$web|$desktop|^scripts/"
+          code=$(printf '%s\n' "$files" | grep -Ev "$docs" | grep -v '^$' || true)
+          unknown=$(printf '%s\n' "$code" | grep -Ev "$known" | grep -v '^$' || true)
+          if [ -n "$unknown" ]; then all "unrecognised paths: ${unknown//$'\n'/ }"; exit 0; fi
+          has() { printf '%s\n' "$code" | grep -Eq "$1" && echo true || echo false; }
+          w=$(has "$web"); d=$(has "$desktop")
+          printf 'web=%s\ndesktop=%s\n' "$w" "$d" >> "$GITHUB_OUTPUT"
+          echo "web=$w desktop=$d"
+          printf '%s\n' "$files"
+
+  # The pull request's title and AI usage section, and (for a web change) types and lint: seconds to about a minute, before
+  # anything heavy. The heavy jobs wait for it and fail at once when it failed, so a typo never costs a full run.
+  lint:
+    name: Cheap checks
+    needs: changes
+    runs-on: ubuntu-24.04
+    env:
+      WEB: ${{ needs.changes.outputs.web }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Pull request title
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]'
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: python3 scripts/check_title.py --kind pull-request --title "$TITLE"
+      # The same check as the "PR AI usage" workflow, which owns it: keep the two in step.
+      - name: AI usage section
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]'
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          python3 - <<'PY'
+          import os, re, sys
+          body = re.sub(r"<!--.*?-->", "", os.environ.get("BODY") or "", flags=re.S)
+          match = re.search(r"^## AI usage\s*$(.*?)(?=^## |\Z)", body, flags=re.M | re.S)
+          if not match:
+              sys.exit("Add the AI usage section from the pull request template.")
+          section = match.group(1)
+          if re.search(r"^- \[[xX]\] Written by hand", section, flags=re.M):
+              sys.exit(0)
+          missing = [f for f in ["Harness and version", "Models", "Effort", "Human role", "Sources"] if not (m := re.search(rf"^- {re.escape(f)}:[ \t]*(.*)$", section, flags=re.M)) or not m.group(1).strip()]
+          if missing:
+              sys.exit("Tick 'Written by hand', or fill in: " + ", ".join(missing) + ".")
+          PY
+      - if: env.WEB == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - run: npm ci
+      - if: env.WEB == 'true'
+        run: npm ci
+        working-directory: web
+      - if: env.WEB == 'true'
+        run: npm run check
+        working-directory: web
+
+  web:
+    name: Web
+    needs: [changes, lint]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    env:
+      RUN: ${{ needs.changes.outputs.web }}
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Cheap checks passed
+        shell: bash
+        working-directory: .
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          LINT: ${{ needs.lint.result }}
+        run: |
+          if [ "$CHANGES" != success ] || [ "$LINT" != success ]; then
+            echo "changes=$CHANGES lint=$LINT"
+            exit 1
+          fi
+      - if: env.RUN != 'true'
+        run: echo "No web change in this pull request."
+      - if: env.RUN == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: env.RUN == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - if: env.RUN == 'true'
+        run: npm ci
       # The wire types must match orbyn-engine's main branch.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: env.RUN == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: kinqsradio/orbyn-engine
           path: engine
           persist-credentials: false
-      - run: npm run generate:check
+      - if: env.RUN == 'true'
+        run: npm run generate:check
         env:
           ORBYN_ENGINE_DIR: ${{ github.workspace }}/engine
-      - run: npm run check
-      - run: npm test
-      - run: npm run build
+      # Types and lint ran in "Cheap checks".
+      - if: env.RUN == 'true'
+        run: npm test
+      - if: env.RUN == 'true'
+        run: npm run build
 
   # The committed WebAssembly package must be what the pinned orbyn-engine commit builds on Linux, with the pinned toolchain.
   wasm:
     name: Wasm package
+    needs: [changes, lint]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
+    env:
+      RUN: ${{ needs.changes.outputs.web }}
     defaults:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - name: Cheap checks passed
+        shell: bash
+        working-directory: .
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          LINT: ${{ needs.lint.result }}
+        run: |
+          if [ "$CHANGES" != success ] || [ "$LINT" != success ]; then
+            echo "changes=$CHANGES lint=$LINT"
+            exit 1
+          fi
+      - if: env.RUN != 'true'
+        run: echo "No web change in this pull request."
+      - if: env.RUN == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: env.RUN == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - run: npm ci
+      - if: env.RUN == 'true'
+        run: npm ci
       # The engine commit the package was built from: updating it is a deliberate `npm run wasm` and a commit.
       - id: pin
+        if: env.RUN == 'true'
         run: |
           engine=$(node -p "require('./src/generated/wasm/manifest.json').engine")
           [[ "$engine" =~ ^[0-9a-f]{40}$ ]] || { echo "manifest.json engine is not a commit: $engine"; exit 1; }
           echo "engine=$engine" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: env.RUN == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: kinqsradio/orbyn-engine
           ref: ${{ steps.pin.outputs.engine }}
           path: engine
           persist-credentials: false
       # The versions in web/wasm.lock.json: change them together.
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - if: env.RUN == 'true'
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: 1.99.1
           targets: wasm32-unknown-unknown
-      # No build cache here: the package must come from a clean build of the pinned commit.
-      # Built from source like `cargo install` does locally: the prebuilt CLI stamps its own git hash
-      # into the package's producers section, so its output differs by a few bytes.
+      # The CLI is built from source (the prebuilt one stamps its own git hash into the package's producers section, so its output
+      # differs by a few bytes), once per version: the built program is cached by the lock file, so later runs reuse that same build.
+      - id: bindgen
+        if: env.RUN == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/wasm-bindgen
+          key: wasm-bindgen-cli-${{ runner.os }}-${{ hashFiles('web/wasm.lock.json') }}
       - name: wasm-bindgen CLI (same build as local)
+        if: env.RUN == 'true' && steps.bindgen.outputs.cache-hit != 'true'
         working-directory: .
         run: cargo +1.99.1 install wasm-bindgen-cli --version 0.2.130 --locked
       # Exactly the pinned commit, with nothing changed: the check is byte for byte.
       - name: The engine checkout is clean and at the pin
+        if: env.RUN == 'true'
         working-directory: engine
         run: |
           test "$(git rev-parse HEAD)" = "${{ steps.pin.outputs.engine }}"
           test -z "$(git status --porcelain)"
-      - run: npm run wasm:check
+      - if: env.RUN == 'true'
+        run: npm run wasm:check
         env:
           ORBYN_ENGINE_DIR: ${{ github.workspace }}/engine
           ORBYN_WASM_KEEP: ${{ runner.temp }}/wasm-built
       # The fresh build, to compare with or to commit when CI's build is the one to trust.
-      - if: always()
+      - if: env.RUN == 'true' && always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: wasm-built
@@ -101,37 +254,73 @@ jobs:
   # compose file with a database made for this run.
   e2e:
     name: End to end
+    needs: [changes, lint]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
+      RUN: ${{ needs.changes.outputs.web }}
       # The engine's compose file plus a mailbox for the sign-up code (see .github/e2e-mail.compose.yaml).
       COMPOSE_FILE: compose.yaml:${{ github.workspace }}/.github/e2e-mail.compose.yaml
     defaults:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - name: Cheap checks passed
+        shell: bash
+        working-directory: .
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          LINT: ${{ needs.lint.result }}
+        run: |
+          if [ "$CHANGES" != success ] || [ "$LINT" != success ]; then
+            echo "changes=$CHANGES lint=$LINT"
+            exit 1
+          fi
+      - if: env.RUN != 'true'
+        run: echo "No web change in this pull request."
+      - if: env.RUN == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: env.RUN == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - run: npm ci
+      - if: env.RUN == 'true'
+        run: npm ci
       - id: pin
+        if: env.RUN == 'true'
         run: |
           engine=$(node -p "require('./src/generated/wasm/manifest.json').engine")
           [[ "$engine" =~ ^[0-9a-f]{40}$ ]] || { echo "manifest.json engine is not a commit: $engine"; exit 1; }
           echo "engine=$engine" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: env.RUN == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: kinqsradio/orbyn-engine
           ref: ${{ steps.pin.outputs.engine }}
           path: engine
           persist-credentials: false
+      # The engine image is the pinned commit built once: the saved image is cached by that commit, so a run that doesn't move the
+      # pin loads it (seconds) instead of building it (about 2.5 minutes).
+      - id: image
+        if: env.RUN == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/engine-image.tar.gz
+          key: engine-image-${{ steps.pin.outputs.engine }}
+      - name: Load the engine image
+        if: env.RUN == 'true' && steps.image.outputs.cache-hit == 'true'
+        run: gunzip -c "$RUNNER_TEMP/engine-image.tar.gz" | docker load
       - name: Build the engine image
+        if: env.RUN == 'true' && steps.image.outputs.cache-hit != 'true'
         working-directory: engine
-        run: docker compose build
+        run: |
+          docker compose build
+          docker save orbyn-engine:dev | gzip > "$RUNNER_TEMP/engine-image.tar.gz"
       - name: Start the engine
+        if: env.RUN == 'true'
         working-directory: engine
         run: |
           # A fresh database: no volume from an earlier run, and no sign-in attempts counted against us.
@@ -142,7 +331,7 @@ jobs:
           echo "::add-mask::$setup"
           [ -n "$setup" ] || { echo "auth-setup produced nothing"; exit 1; }
           [ "$(printf '%s\n' "$setup" | wc -l)" -eq 1 ] || { echo "auth-setup printed more than one line"; exit 1; }
-          ORBYN_AUTH_SETUP="$setup" docker compose up -d postgres migrate server worker mailpit
+          ORBYN_AUTH_SETUP="$setup" docker compose up -d --no-build postgres migrate server worker mailpit
           docker compose exec -T postgres psql -U orbyn -d orbyn -c "delete from auth_attempts"
           for _ in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:8080/health; then exit 0; fi
@@ -151,28 +340,34 @@ jobs:
           echo "the engine did not become healthy"
           exit 1
       - name: End-to-end tests
+        if: env.RUN == 'true'
         run: npx vitest run src/e2e
         env:
           ORBYN_E2E_ENGINE: http://127.0.0.1:8080
           ORBYN_E2E_MAIL: http://127.0.0.1:8025
       - name: Compose logs
-        if: failure()
+        if: env.RUN == 'true' && failure()
         working-directory: engine
         run: docker compose logs --no-color --timestamps > "$RUNNER_TEMP/compose.log" || true
-      - if: failure()
+      - if: env.RUN == 'true' && failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-compose-logs
           path: ${{ runner.temp }}/compose.log
           if-no-files-found: ignore
       - name: Stop the engine
-        if: always()
+        if: env.RUN == 'true' && always()
         working-directory: engine
         run: docker compose down --volumes --remove-orphans
 
+  # The desktop shell: macOS and Windows on main, nightly, manual runs and a pull request that touches desktop/ or the workflows.
   desktop:
     name: Desktop (${{ matrix.os }})
+    needs: [changes, lint]
+    if: ${{ !cancelled() }}
     runs-on: ${{ matrix.os }}
+    env:
+      RUN: ${{ needs.changes.outputs.desktop }}
     strategy:
       fail-fast: false
       matrix:
@@ -181,24 +376,44 @@ jobs:
       run:
         working-directory: desktop
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - name: Cheap checks passed
+        shell: bash
+        working-directory: .
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          LINT: ${{ needs.lint.result }}
+        run: |
+          if [ "$CHANGES" != success ] || [ "$LINT" != success ]; then
+            echo "changes=$CHANGES lint=$LINT"
+            exit 1
+          fi
+      - if: env.RUN != 'true'
+        shell: bash
+        run: echo "No desktop change in this pull request; main and the nightly run both systems."
+      - if: env.RUN == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: env.RUN == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: desktop/package-lock.json
-      - run: npm ci
-      - run: npm test
-      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+      - if: env.RUN == 'true'
+        run: npm ci
+      - if: env.RUN == 'true'
+        run: npm test
+      - if: env.RUN == 'true'
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: cargo-audit
       - name: Cargo audit
+        if: env.RUN == 'true'
         working-directory: desktop/src-tauri
         run: cargo audit
       - name: Cargo check and test
+        if: env.RUN == 'true'
         working-directory: desktop/src-tauri
         run: |
           rustup toolchain install stable --profile minimal --component clippy
           cargo clippy --locked -- -D warnings
           cargo test --locked
-
