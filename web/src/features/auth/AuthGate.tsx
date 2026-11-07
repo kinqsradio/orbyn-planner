@@ -1,9 +1,9 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useAuth } from "../../auth/AuthProvider";
-import { deletedAccount } from "../../auth/deletedAccount";
+import { accountCheck, deletedAccount } from "../../auth/deletedAccount";
 import type { AuthScreen } from "../../auth/AuthProvider";
 import { AuthScreens } from "./AuthScreens";
-import { DeletedAccountScreen } from "./DeletedAccount";
+import { CheckingAccount, DeletedAccountScreen } from "./DeletedAccount";
 import { DeletionBanner, DeletionWatcher } from "./DeletionBanner";
 import { KeysNotSaved } from "./KeysNotSaved";
 import { PendingScreen } from "./PendingScreen";
@@ -70,6 +70,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const auth = useAuth();
   const incoming = useIncomingApproval();
   const deleted = useSyncExternalStore(deletedAccount.subscribe, deletedAccount.get);
+  const checking = useSyncExternalStore(accountCheck.subscribe, accountCheck.get);
   /** Where the sign-up or sign-in the person chose on the deleted-account screen opens. */
   const [leaveTo, setLeaveTo] = useState<AuthScreen>("landing");
   if (!auth) return <>{children}</>;
@@ -87,6 +88,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
     );
   }
   if (auth.status === "loading") return null;
+  // A 401 just ended the session and the status check is under way: nothing of the landing shows until it answers.
+  if (checking && auth.status === "landing") return <CheckingAccount />;
   if (auth.status === "landing") {
     return (
       <>

@@ -41,6 +41,18 @@ export const deletedAccount = {
   },
 };
 
+/** True while the status request after a 401 is in flight: the landing is held blank, then a neutral card, until the answer. */
+let checkingNow = false;
+export const accountCheck = {
+  get: () => checkingNow,
+  subscribe: (listener: () => void) => deletedAccount.subscribe(listener),
+};
+const setChecking = (value: boolean) => {
+  if (value === checkingNow) return;
+  checkingNow = value;
+  emit();
+};
+
 const asking = new Set<string>();
 
 /**
@@ -50,6 +62,7 @@ const asking = new Set<string>();
 export async function askWhetherDeleted(api: Pick<AuthApi, "accountStatus">, session: { accountId: string; email: string }, inMemory: boolean): Promise<void> {
   if (asking.has(session.accountId)) return;
   asking.add(session.accountId);
+  setChecking(true);
   try {
     const status = await api.accountStatus(session.accountId);
     if (!status) return;
@@ -66,5 +79,6 @@ export async function askWhetherDeleted(api: Pick<AuthApi, "accountStatus">, ses
     // Not reachable, or refused: not shown.
   } finally {
     asking.delete(session.accountId);
+    setChecking(asking.size > 0);
   }
 }

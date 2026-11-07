@@ -1,11 +1,11 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useSyncExternalStore } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiFailure } from "../../api/auth";
-import { askWhetherDeleted, deletedAccount, type DeletedAccount } from "../../auth/deletedAccount";
+import { accountCheck, askWhetherDeleted, deletedAccount, type DeletedAccount } from "../../auth/deletedAccount";
 import type { AuthServices } from "../../auth/services";
-import { DeletedAccountScreen, fileSize } from "./DeletedAccount";
+import { CheckingAccount, DeletedAccountScreen, fileSize } from "./DeletedAccount";
 
 const removePlanner = vi.fn();
 const closePlanner = vi.fn();
@@ -40,6 +40,7 @@ beforeEach(() => {
   onLeave.mockReset();
 });
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   deletedAccount.set(null);
 });
@@ -74,6 +75,35 @@ describe("the account was deleted: choose, export, remove", () => {
     expect(within(card).getByRole("button", { name: "Remove it now" })).toHaveClass("btn");
     expect(within(card).getByRole("button", { name: "Export again" })).toHaveClass("ghost");
     expect(removePlanner).not.toHaveBeenCalled(); // exporting removes nothing
+  });
+
+  it("while it exports, Export shows a spinner and Exporting… after 400 ms and Remove it now is disabled", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    save.mockReturnValue(new Promise(() => undefined));
+    show();
+    await userEvent.click(screen.getByRole("button", { name: "Export what’s on this browser" }));
+    expect(screen.getByRole("button", { name: "Remove it now" })).toBeDisabled(); // at once
+    expect(screen.getByRole("button", { name: "Export what’s on this browser" })).toBeDisabled();
+    await act(async () => void (await vi.advanceTimersByTimeAsync(450)));
+    const busy = screen.getByRole("button", { name: "Exporting…" });
+    expect(busy.querySelector(".spin")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Remove it now" })).toBeDisabled();
+  });
+
+  it("while it removes after an export, Remove it now shows Removing… and Export again is disabled; later the removal screen takes over", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    removePlanner.mockReturnValue(new Promise(() => undefined));
+    show({ phase: "exported", file: { name: "orbyn-planner-2026-11-07.json", size: 84_000 } });
+    expect(screen.getByText("Downloaded orbyn-planner-2026-11-07.json · 84 kB")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Remove it now" }));
+    expect(screen.getByRole("button", { name: "Export again" })).toBeDisabled();
+    await act(async () => void (await vi.advanceTimersByTimeAsync(450)));
+    const busy = screen.getByRole("button", { name: "Removing…" });
+    expect(busy.querySelector(".spin")).not.toBeNull();
+    expect(busy).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Export again" })).toBeDisabled();
+    await act(async () => void (await vi.advanceTimersByTimeAsync(500)));
+    expect(screen.getByRole("status")).toHaveTextContent("Removing its copy from this browser");
   });
 
   it("closing the save dialog changes nothing", async () => {
@@ -111,9 +141,11 @@ describe("the account was deleted: choose, export, remove", () => {
   });
 
   it("while it removes, the screen says so and nothing else is offered", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     removePlanner.mockReturnValue(new Promise(() => undefined));
     show();
     await userEvent.click(screen.getByRole("button", { name: "Remove it now" }));
+    await act(async () => void (await vi.advanceTimersByTimeAsync(900)));
     const card = await screen.findByRole("group", { name: "This account was deleted" });
     expect(card).toHaveTextContent("sam@example.com was deleted on Saturday 14 November. Its data can’t be restored.");
     expect(within(card).getByRole("status")).toHaveTextContent("Removing its copy from this browser");
@@ -186,10 +218,35 @@ describe("asking whether the account was deleted", () => {
   });
 });
 
+describe("the check after a 401", () => {
+  it("holds nothing on screen for 400 ms, then a neutral card with a still spinner and no buttons", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    render(<CheckingAccount />);
+    expect(screen.queryByRole("status")).toBeNull();
+    await act(async () => void (await vi.advanceTimersByTimeAsync(450)));
+    const card = screen.getByRole("status");
+    expect(card).toHaveTextContent("Checking your account…");
+    expect(card).toHaveTextContent("This takes a moment.");
+    expect(card.querySelector(".spin.still")).not.toBeNull();
+    expect(within(card).queryAllByRole("button")).toHaveLength(0);
+  });
+
+  it("is on while the status request is in flight and off when it answers", async () => {
+    let answer: (v: null) => void = () => undefined;
+    const api = { accountStatus: vi.fn(() => new Promise<null>((r) => (answer = r))) };
+    const pending = askWhetherDeleted(api, { accountId: "acct-1", email: "sam@example.com" }, false);
+    expect(accountCheck.get()).toBe(true);
+    answer(null);
+    await pending;
+    expect(accountCheck.get()).toBe(false);
+  });
+});
+
 describe("the file size", () => {
   it("is written in kB and MB, one decimal", () => {
     expect(fileSize(512)).toBe("512 B");
     expect(fileSize(2400)).toBe("2.4 kB");
+    expect(fileSize(84_000)).toBe("84 kB");
     expect(fileSize(2_400_000)).toBe("2.4 MB");
   });
 });

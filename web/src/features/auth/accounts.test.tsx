@@ -1745,6 +1745,37 @@ describe("an account that was deleted", () => {
     expect(statusCalls()[0]!.body).toEqual({ account_id: expect.any(String) });
   });
 
+  it("while the status check is out the landing stays blank, then a Checking card shows after 400 ms, then the right screen", async () => {
+    let release: () => void = () => undefined;
+    let asked = 0;
+    const gate = new Promise<void>((r) => (release = r));
+    const keys = createMemoryKeyStore();
+    const auth = createAuthServices({
+      wrapSecret: async () => wrapFor(keys).slice(),
+      fetch: ((input: RequestInfo | URL, init?: RequestInit) => (String(input).endsWith("/v1/accounts/status") ? (asked += 1, gate).then(() => engine.fetch(input, init)) : engine.fetch(input, init))) as typeof fetch,
+      baseUrl: "http://engine.test",
+      keys,
+      crypto: () => crypto,
+      now: () => nowMs,
+      poll: FAST_POLL,
+    });
+    await mount(auth);
+    await fillSignUp();
+    await todayShown();
+    engine.deleteAccountNow(SAM.email, "2026-11-14T00:00:00Z");
+    // The session ended: nothing of the landing shows while the check is out.
+    await waitFor(() => expect(asked).toBe(1));
+    expect(screen.queryByRole("heading", { name: /Your tasks and calendar/ })).toBeNull();
+    try {
+      expect(await screen.findByText("Checking your account…", {}, { timeout: 2000 })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: /Your tasks and calendar/ })).toBeNull();
+    } finally {
+      release();
+    }
+    expect(await screen.findByRole("group", { name: "This account was deleted" })).toBeInTheDocument();
+    expect(screen.queryByText("Checking your account…")).toBeNull();
+  });
+
   it("a 404 is an ordinary signed-out state: the landing page, nothing removed, and the question was asked once", async () => {
     await mount(services());
     await fillSignUp();
