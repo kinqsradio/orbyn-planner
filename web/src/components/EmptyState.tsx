@@ -12,7 +12,7 @@ export function EmptyState({ title, body, children }: { title: string; body: str
 }
 
 /** The sheet header: title, a quiet sub line and actions at the right. */
-export function PageHeader({ title, sub, children }: { title: string; sub?: ReactNode; children?: ReactNode }) {
+export function PageHeader({ title, sub, children }: { title: ReactNode; sub?: ReactNode; children?: ReactNode }) {
   return (
     <div className="ph">
       <h1>{title}</h1>

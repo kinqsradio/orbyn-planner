@@ -135,7 +135,7 @@ Deep pass (Today, calendar, tasks) is complete. Everything else is marked *not c
 
 | Frame | Component (web/src) | Status | Shots | Differs / note |
 | --- | --- | --- | --- | --- |
-| `p-cal-day-empty-phone` Calendar · Phone day view, empty day | `features/calendar/CalendarPage.tsx:47` | not built | `cmp-p-cal-day-empty-phone.png` | phone shows the desktop Day view (time grid, "Tasks today 0 / No tasks for this day"); design has a month title, a five-day strip and "Nothing planned" |
+| `p-cal-day-empty-phone` Calendar · Phone day view, empty day | `features/calendar/CalendarPage.tsx:47` | not built | partial | built to v39: month title with chevron, centred five-day strip, Today button, sub line, place or duration; the Last synced row and the offline banner follow once the sync pill PR merges (to re-check by eye) |
 | `calendar-week` Calendar · Week | `features/calendar/CalendarPage.tsx:47, features/calendar/TimeGrid.tsx:36` | partial | `cmp-calendar-week.png` | 7 columns Mon–Sun, design 5 (Tue–Sat); hours labelled every hour from 07:00, design every two hours from 9:00; toolbar adds a "Calendars" button; "Due this week" lists today’s tasks too, design only overdue and later; event time "09:00" vs "9:00" |
 | `calendar-day` Calendar · Day | `features/calendar/CalendarPage.tsx:47, features/calendar/TimeGrid.tsx:36` | partial | `cmp-calendar-day.png` | toolbar has Month and Calendars, design Week / Day / Agenda only; hours every hour from 07:00 vs every two hours; "Tasks today" lists all open tasks |
 | `calendar-agenda` Calendar · Agenda | `features/calendar/AgendaView.tsx:17` | partial | `cmp-calendar-agenda.png` | matches in structure; toolbar pills differ (Month, Day, Calendars extra); row meta joins place and length ("Room 3 · 1h"), design shows one; no "Every Tuesday" note |
@@ -244,7 +244,7 @@ Deep pass (Today, calendar, tasks) is complete. Everything else is marked *not c
 | --- | --- | --- | --- | --- |
 | `phone` Today, a list and offline on a phone | `app/App.tsx:103 (tab bar), features/today/TodayPage.tsx:150` | not checked yet | – | phone Today uses the "Today" title and a week fold (TodayPage.tsx:353) |
 | `p-phone-task` Phone · Task as a sheet | `features/tasks/TaskPanel.tsx:26` | not checked yet | – |  |
-| `p-phone-week` Phone · Calendar week | `features/calendar/CalendarPage.tsx:47` | not checked yet | – | p-cal-day-empty-phone shows the phone calendar has no day strip; this frame itself not compared |
+| `p-phone-week` Phone · Calendar week | `features/calendar/CalendarPage.tsx:47` | not checked yet | partial | built to v39 with p-cal-day-empty-phone (to re-check by eye) |
 | `p-phone-empty` Phone · Empty states | `features/today/TodayPage.tsx:316` | not checked yet | – |  |
 | `p-phone-offline` Phone · Offline | `features/sync/SyncLine.tsx:29` | not checked yet | – |  |
 
