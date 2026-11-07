@@ -371,6 +371,14 @@ describe("what the engine says a record is, and what a zone's own record looks l
     expect(acceptable("project:p", "t1", "task", task)).toBeNull(); // a project zone holds only the project
   });
 
+  it("the settings zone holds only tags, and a tag is only valid there", () => {
+    expect(acceptable("settings", "g1", "tag", { name: "Work", colour: "c1", deletedAt: null })).toBe("tag");
+    expect(acceptable("settings", "g1", "task", { listId: "settings" })).toBeNull();
+    expect(acceptable("settings", "g1", "tag", { title: "x", name: "Work" })).toBeNull(); // task-shaped
+    expect(acceptable("settings", "g1", "tag", { colour: "c1" })).toBeNull(); // no name
+    expect(acceptable("list:inbox", "g1", "tag", { name: "Work" })).toBeNull();
+  });
+
   it("the owner's id is only for the owner kind", () => {
     expect(acceptable("list:inbox", "inbox", "task", { name: "x" })).toBeNull();
     expect(acceptable("list:inbox", "t1", "list", { name: "x" })).toBeNull();

@@ -1,6 +1,6 @@
-import type { CalendarEvent, OutboxEntry, PlannerCalendar, Project, RecordType, Task, TaskList } from "./types";
+import type { CalendarEvent, OutboxEntry, PlannerCalendar, Project, RecordType, Tag, Task, TaskList } from "./types";
 
-export type AnyRecord = Task | TaskList | CalendarEvent | PlannerCalendar | Project;
+export type AnyRecord = Task | TaskList | CalendarEvent | PlannerCalendar | Project | Tag;
 
 /** One change to one record: a create carries the record, an update or delete only the fields that changed. */
 export type Patch =

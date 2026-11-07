@@ -452,3 +452,11 @@ button.pillx { border: 0; }
 .account-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
 .amber-text { color: var(--amber); font-weight: 500; }
 .device-row b { align-items: center; }
+
+/* Tags: a small chip next to a task's title, and the row that manages them in the task panel */
+.ttwrap { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ttwrap .tt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tagchip { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px; border-radius: 999px; background: var(--raise); color: var(--t2); font-size: 11.5px; white-space: nowrap; flex: none; }
+.chip-x { border: 0; background: transparent; color: var(--t3); cursor: pointer; padding: 0 0 0 2px; font: inherit; line-height: 1; }
+.chip-x:hover, .chip-x:focus-visible { color: var(--t1); }
+.tagrow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }

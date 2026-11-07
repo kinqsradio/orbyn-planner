@@ -15,30 +15,64 @@ import type { CalendarEvent, Project, ProjectSection, RecordType, Task } from ".
 type Fields = Record<string, unknown>;
 
 export const SECTION_PREFIX = "section.";
+/** A task carries a tag as the field `tag:<tagId>` (true; false once removed). */
+export const TAG_PREFIX = "tag:";
+/** A task carries at most this many tags; a record that claims more has the extra ones ignored. */
+export const MAX_TAGS_PER_TASK = 100;
+const TAG_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const isTagId = (id: string) => TAG_ID.test(id);
+
+/**
+ * A task's fields with the tag fields that can't be trusted left out, never the task: a `tag:<id>` whose id isn't UUID-form,
+ * or whose value isn't true or false, is ignored, and so are the tags beyond the first 100 (by id, the same on every device).
+ * Fields from another device are checked with this on the way in (`sync/mapping.ts`) and again when a record is read.
+ */
+export function validTagFields(fields: Fields): Fields {
+  const out: Fields = {};
+  const added: string[] = [];
+  for (const [k, v] of Object.entries(fields)) {
+    if (!k.startsWith(TAG_PREFIX)) {
+      out[k] = v;
+      continue;
+    }
+    const id = k.slice(TAG_PREFIX.length);
+    if (!isTagId(id) || typeof v !== "boolean") continue;
+    if (v) added.push(id);
+    else out[k] = v;
+  }
+  for (const id of added.sort().slice(0, MAX_TAGS_PER_TASK)) out[TAG_PREFIX + id] = true;
+  return out;
+}
 
 // Tasks ------------------------------------------------------------------------------------------
 
-function taskToView(stored: Fields): Task {
+function taskToView(raw: Fields): Task {
+  const stored = validTagFields(raw);
   const skipped: string[] = [];
+  const tags: string[] = [];
   const rest: Fields = {};
   for (const [k, v] of Object.entries(stored)) {
     if (k.startsWith(SKIP_PREFIX)) {
       if (v === true) skipped.push(k.slice(SKIP_PREFIX.length));
-    } else rest[k] = v;
+    } else if (k.startsWith(TAG_PREFIX)) {
+      if (v === true) tags.push(k.slice(TAG_PREFIX.length));
+    } else if (k !== "tags") rest[k] = v;
   }
   const rule = rest.repeat as { start: string; repeat: Repeat } | null | undefined;
-  const task = { overrideOf: null, ...rest, repeat: rule ? { start: rule.start, repeat: rule.repeat, skipped: skipped.sort() } : null } as unknown as Task;
+  const task = { overrideOf: null, ...rest, tags: tags.sort(), repeat: rule ? { start: rule.start, repeat: rule.repeat, skipped: skipped.sort() } : null } as unknown as Task;
   return task;
 }
 
 function taskToStored(task: Task): Fields {
-  const { repeat, ...rest } = task;
+  const { repeat, tags, ...rest } = task;
   const out: Fields = { ...rest, repeat: repeat ? { start: repeat.start, repeat: repeat.repeat } : null };
   for (const d of repeat?.skipped ?? []) out[SKIP_PREFIX + d] = true;
+  for (const id of tags ?? []) out[TAG_PREFIX + id] = true;
   return out;
 }
 
-function applyTaskFields(task: Task, fields: Fields): Task {
+function applyTaskFields(task: Task, raw: Fields): Task {
+  const fields = validTagFields(raw);
   let next: Task = { ...task };
   if ("repeat" in fields) {
     const rule = fields.repeat as { start: string; repeat: Repeat } | null;
@@ -46,7 +80,12 @@ function applyTaskFields(task: Task, fields: Fields): Task {
   }
   for (const [k, v] of Object.entries(fields)) {
     if (k === "repeat") continue;
-    if (k.startsWith(SKIP_PREFIX)) {
+    if (k.startsWith(TAG_PREFIX)) {
+      const id = k.slice(TAG_PREFIX.length);
+      const rest = next.tags.filter((t) => t !== id);
+      // The merged set, then the first 100 by id: exactly what reading the stored record gives, so a reload never changes which show.
+      next = { ...next, tags: (v === true ? [...rest, id] : rest).sort().slice(0, MAX_TAGS_PER_TASK) };
+    } else if (k.startsWith(SKIP_PREFIX)) {
       if (!next.repeat) continue;
       const date = k.slice(SKIP_PREFIX.length);
       const rest = next.repeat.skipped.filter((d) => d !== date);
