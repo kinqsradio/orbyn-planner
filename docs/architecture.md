@@ -1,6 +1,6 @@
 # Orbyn Planner architecture
 
-The plan lives in the [Orbyn platform plan](https://claude.ai/artifact/BBhxZSmXRg1DawhLVRbsNc), and the screens in [Orbyn Planner Designs](https://claude.ai/artifact/7DCiHUzLLfBa3t8ojwiPVM). This file is the contract the UI follows. Change it in the same commit as any rule it states.
+The plan lives in the internal Orbyn Platform Plan, and the screens in the internal Orbyn Planner Designs. This file is the contract the UI follows. Change it in the same commit as any rule it states.
 
 ## Rules
 
