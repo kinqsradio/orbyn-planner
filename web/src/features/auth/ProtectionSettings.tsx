@@ -133,9 +133,9 @@ function DetailsDialog({ report, kind, confirmed, onClose, onReviewDevices }: { 
   const copy = () => void navigator.clipboard?.writeText(rows.map(([k, v]) => `${k}: ${v}`).join("\n")).catch(() => undefined);
   return (
     <Modal label="Protection details" onClose={onClose}>
-      <div>
+      <div className="pv-dialog">
         <b className="card-title">Protection details</b>
-        <p className="t3 small">For you or Orbyn support. Nothing here is secret.</p>
+        <p className="t3">For you or Orbyn support. Nothing here is secret.</p>
         <div>
           {rows.map(([k, v]) => (
             <div className="kv" key={k}><span>{k}</span><b>{v}</b></div>
