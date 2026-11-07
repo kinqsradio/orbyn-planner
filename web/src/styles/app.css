@@ -262,8 +262,10 @@ textarea.field { height: auto; padding: var(--sp-8) var(--sp-12); resize: vertic
 /* Red: a filled red button only to confirm a delete or a remove inside a dialog (.danger); red text everywhere else. */
 .danger {
   display: inline-flex; align-items: center; gap: var(--sp-6); height: var(--sp-30); padding: 0 var(--sp-13); border: 0; border-radius: var(--r-9);
-  background: var(--red); color: var(--on-red); font-size: var(--fs-12-5); font-weight: var(--fw-medium); white-space: nowrap;
+  background: var(--danger-bg); color: var(--on-red); font-size: var(--fs-12-5); font-weight: var(--fw-medium); white-space: nowrap;
 }
+.danger:hover:not(:disabled) { background: var(--danger-bg-hover); }
+.danger:active:not(:disabled) { background: var(--danger-bg-press); }
 .danger:disabled { opacity: .4; cursor: not-allowed; }
 .danger.lg { height: var(--sp-40); padding: 0 var(--sp-16); border-radius: var(--r-12); font-size: var(--fs-13-5); }
 .ghost.red, .mi.red { color: var(--red); }

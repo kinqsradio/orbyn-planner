@@ -37,6 +37,13 @@ export function motionMs(name: keyof typeof MOTION_MS): number {
   return MOTION_MS[name] * motionFactor();
 }
 
+/** The fills of the red button (`.danger`) per theme, with white text on each: `--danger-bg`, `--danger-bg-hover`, `--danger-bg-press`. */
+export const DANGER_FILL = {
+  light: { bg: "#d42a2a", hover: "#b91c1c", press: "#991b1b" },
+  dark: { bg: "#dc2626", hover: "#c81e1e", press: "#b91c1c" },
+  dim: { bg: "#c93a33", hover: "#b8322b", press: "#a82a24" },
+} as const;
+
 /** Pixels per hour in the time grid (`--hour`), as in the designs' 52px slots. */
 export const HOUR_PX = 52;
 

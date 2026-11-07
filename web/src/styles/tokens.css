@@ -27,6 +27,8 @@
   --green: #047857; --green-bg: rgba(16,185,129,.09); --blue: #1d4ed8; --blue-bg: rgba(59,130,246,.09);
   --amber-solid: #f59e0b; --green-solid: #10b981; --blue-solid: #3b82f6; --red-solid: #ef4444;
   --c1: #3b82f6; --c2: #16a34a; --c3: #a855f7; --c4: #f97316;
+  /* The filled red button (.danger): white text on each fill, 5.04, 6.47 and 8.31 to 1. */
+  --danger-bg: #d42a2a; --danger-bg-hover: #b91c1c; --danger-bg-press: #991b1b;
   --on-red: #fff;
   --scrim: rgba(0,0,0,.16);
   --sh-pop: 0 10px 30px rgba(0,0,0,.14), 0 0 0 1px var(--line2);
@@ -41,6 +43,7 @@
   --red: #f05252; --red-bg: rgba(239,68,68,.1);
   --green: #34d399; --green-bg: rgba(16,185,129,.12); --blue: #60a5fa; --blue-bg: rgba(59,130,246,.13);
   --c1: #60a5fa; --c2: #4ade80; --c3: #c084fc; --c4: #fb923c;
+  --danger-bg: #dc2626; --danger-bg-hover: #c81e1e; --danger-bg-press: #b91c1c; /* white on each: 4.83, 5.74 and 6.47 to 1 */
   --scrim: rgba(0,0,0,.5);
   --sh-pop: 0 10px 30px rgba(0,0,0,.6), 0 0 0 1px var(--line2);
 }
@@ -54,6 +57,7 @@
   --red: hsl(4 82% 67%); --red-bg: hsl(4 72% 54% / .14);
   --green: #6ee7b7; --green-bg: rgba(16,185,129,.12); --blue: #93c5fd; --blue-bg: rgba(59,130,246,.13);
   --c1: #60a5fa; --c2: #4ade80; --c3: #c084fc; --c4: #fb923c;
+  --danger-bg: #c93a33; --danger-bg-hover: #b8322b; --danger-bg-press: #a82a24; /* white on each: 5.08, 5.95 and 6.95 to 1 */
   --scrim: rgba(0,0,0,.5);
   --sh-pop: 0 10px 30px rgba(0,0,0,.6), 0 0 0 1px var(--line2);
 }
