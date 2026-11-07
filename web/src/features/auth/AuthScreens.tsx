@@ -49,6 +49,8 @@ function CheckEmail({ pending, onBack, onDone }: { pending: PendingSignUp; onBac
   const [lastSent, setLastSent] = useState(clock());
   const [resends, setResends] = useState<number[]>([]);
   const [, tick] = useState(0);
+  const [engineLimited, setEngineLimited] = useState(false);
+  const [keysFailed, setKeysFailed] = useState(false);
 
   // Leaving this screen lets the sign-up go: its keys were only ever in memory. React's development check unmounts and mounts a
   // screen at once to test this very cleanup, so the sign-up is let go only if no mount follows straight after.
@@ -70,19 +72,30 @@ function CheckEmail({ pending, onBack, onDone }: { pending: PendingSignUp; onBac
 
   const recent = resends.filter((t) => clock() - t < HOUR_MS);
   const wait = Math.max(0, Math.ceil((lastSent + RESEND_AFTER_MS - clock()) / 1000));
-  const limited = recent.length >= RESENDS_PER_HOUR;
-  const ready = code.replace(/\D/g, "").length === 6;
+  const limited = engineLimited || recent.length >= RESENDS_PER_HOUR;
+  const digits = code.replace(/\D/g, "").slice(0, 6);
+  const ready = digits.length === 6;
+  const [focused, setFocused] = useState(true);
+  const [wrong, setWrong] = useState(false);
 
   const verify = async (event: FormEvent) => {
     event.preventDefault();
     setBusy(true);
     setError(null);
+    setWrong(false);
     try {
-      await pending.verify(code);
+      await pending.verify(digits);
       onDone();
     } catch (e) {
-      // A wrong, an expired and a made-up code are one answer; "Send a new code" is always there.
-      setError(describeError(e));
+      if (e instanceof ApiFailure && e.code === "keys_not_saved") {
+        setKeysFailed(true);
+      } else if (e instanceof ApiFailure && e.code === "invalid_email_code") {
+        // A wrong, an expired and a made-up code are one answer; "Send a new code" is always there.
+        setWrong(true);
+        setError("That code isn’t right. Use the code in the newest email.");
+      } else {
+        setError(describeError(e));
+      }
     } finally {
       setBusy(false);
     }
@@ -90,35 +103,88 @@ function CheckEmail({ pending, onBack, onDone }: { pending: PendingSignUp; onBac
 
   const resend = async () => {
     setError(null);
+    setWrong(false);
     try {
       await pending.resend();
       setResends([...recent, clock()]);
       setLastSent(clock());
       setCode("");
     } catch (e) {
-      setError(describeError(e));
+      // The engine answers a resend it will not do with its own "too many attempts"; the page shows the same state it shows after three.
+      if (e instanceof ApiFailure && e.code === "too_many_attempts") setEngineLimited(true);
+      else setError(describeError(e));
     }
   };
 
+  const retrySave = async () => {
+    setBusy(true);
+    try {
+      await pending.retrySave();
+      onDone();
+    } catch {
+      // Still not saved: the same screen stays, and Try saving again can be pressed once more.
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (keysFailed) {
+    return (
+      <div className="authcard" role="alert" aria-label="Account created, keys not saved">
+        <Icon name="alert" />
+        <h1 className="auth-title">Your account is ready, but this browser couldn’t save its keys</h1>
+        <p className="t2">Your keys exist only in this tab right now. Keep it open until they’re saved.</p>
+        <p className="t3 small">This usually happens in a private window, or when the browser blocks or is out of site storage.</p>
+        <div className="pv-line">
+          <button type="button" className="btn lg" disabled={busy} onClick={() => void retrySave()}>{busy ? "Saving…" : "Try saving again"}</button>
+        </div>
+      </div>
+    );
+  }
+
+  const seconds = `${Math.floor(wait / 60)}:${String(wait % 60).padStart(2, "0")}`;
   return (
     <form className="authcard" onSubmit={(e) => void verify(e)} aria-label="Check your email" noValidate>
       <h1 className="auth-title">Check your email</h1>
-      <p className="t3">We sent a 6-digit code to <b style={{ fontWeight: "var(--fw-medium)" }}>{pending.email}</b>. This code expires in 30 minutes.</p>
-      <div className="form" style={{ width: "auto" }}>
-        <label htmlFor="su-code">Code</label>
-        <input id="su-code" className="field" inputMode="numeric" autoComplete="one-time-code" maxLength={7} placeholder="123456" value={code} onChange={(e) => setCode(e.target.value)} autoFocus />
+      <p className="t2">We sent a 6-digit code to <b style={{ fontWeight: "var(--fw-medium)" }}>{pending.email}</b>. It works for 30 minutes.</p>
+      <div className="cboxes">
+        {Array.from({ length: 6 }, (_, i) => (
+          <span key={i} className={`cbox${wrong ? " err" : ""}${focused && !wrong && i === Math.min(digits.length, 5) ? " on" : ""}`} aria-hidden="true">{digits[i] ?? ""}</span>
+        ))}
+        {/* One real field under the six boxes: typing, paste and autofill all land in it. */}
+        <input
+          id="su-code"
+          aria-label="Code"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          value={digits}
+          onChange={(e) => {
+            setCode(e.target.value);
+            setWrong(false);
+            setError(null);
+          }}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          autoFocus
+        />
       </div>
-      {error && <p className="err" role="alert">{error}</p>}
-      <button type="submit" className="btn" disabled={busy || !ready}>{busy ? "Checking…" : "Verify"}</button>
-      <span className="t3 small">
-        {limited ? (
-          <span role="status">Try again later.</span>
-        ) : (
-          <button type="button" className="link-btn" disabled={wait > 0} onClick={() => void resend()}>
-            Send a new code{wait > 0 ? ` (${wait}s)` : ""}
-          </button>
-        )}{" "}
-        · <button type="button" className="link-btn" onClick={onBack}>Use a different email</button>
+      {error && <span className="err" role="alert">{error}</span>}
+      {limited && (
+        <div className="banner warn" role="status">
+          <Icon name="alert" small />
+          You’ve asked for several codes. Try again later, or check your spam folder.
+        </div>
+      )}
+      <button type="submit" className="btn lg" disabled={busy || !ready}>{busy ? "Checking…" : "Verify"}</button>
+      {limited ? (
+        <span className="t4 small">Send a new code · not available right now</span>
+      ) : wait > 0 ? (
+        <span className="t3 small">Send a new code in {seconds}</span>
+      ) : (
+        <button type="button" className="link-btn small" onClick={() => void resend()}>Send a new code</button>
+      )}
+      <span className="t4 small">
+        Wrong address? <button type="button" className="link-btn link" onClick={onBack}>Change email</button>
       </span>
     </form>
   );

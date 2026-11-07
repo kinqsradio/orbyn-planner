@@ -12,12 +12,16 @@ export interface ToastState {
   focusRowOnUndo?: string;
   /** A second action beside Undo. */
   secondary?: { label: string; run: () => void };
+  /** How long it stays, when not the usual ten seconds. */
+  ms?: number;
 }
 
 export interface ToastOptions {
   focusUndo?: boolean;
   focusRowOnUndo?: string;
   secondary?: { label: string; run: () => void };
+  /** How long the toast stays, when not the usual ten seconds. */
+  ms?: number;
 }
 
 export interface EventKey {
@@ -73,7 +77,7 @@ export function UiProvider({ children }: { children: ReactNode }) {
   const [toast, setToast] = useState<ToastState | null>(null);
 
   const showToast = useCallback((message: string, undo?: () => void, options?: ToastOptions) => {
-    setToast({ id: ++toastCounter, message, undo, focusUndo: options?.focusUndo, focusRowOnUndo: options?.focusRowOnUndo, secondary: options?.secondary });
+    setToast({ id: ++toastCounter, message, undo, focusUndo: options?.focusUndo, focusRowOnUndo: options?.focusRowOnUndo, secondary: options?.secondary, ms: options?.ms });
   }, []);
   const dismissToast = useCallback(() => setToast(null), []);
 

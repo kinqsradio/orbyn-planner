@@ -3,6 +3,7 @@ import { ApiFailure } from "../../api/auth";
 import { useAuth } from "../../auth/AuthProvider";
 import { confirmTotp, disableTotp, enrolTotp } from "../../auth/flows";
 import { saveFile } from "../export/save";
+import { useUi } from "../../app/ui";
 import { Modal } from "../../components/Modal";
 import { describeError } from "./AuthScreens";
 import { QrCode } from "./QrCode";
@@ -14,13 +15,18 @@ const digits = (value: string) => value.replace(/\D/g, "").slice(0, 6);
 export const recoveryFile = (codes: readonly string[]) =>
   `Orbyn Planner recovery codes\n\nEach code works once, in place of a code from your authenticator app. Keep them somewhere safe.\n\n${codes.join("\n")}\n`;
 
+/** How long the note after copying the codes stays. */
+export const CODES_COPIED_MS = 8_000;
+
 function CodesStep({ codes, onDone }: { codes: string[]; onDone: () => void }) {
+  const ui = useUi();
   const [saved, setSaved] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(codes.join("\n"));
-      setNote("Copied.");
+      // Said once, as a toast, and the clipboard is left alone: the person is told to copy something else themselves.
+      ui.showToast("Copied. Paste them somewhere safe, then copy something else so they don’t stay on your clipboard.", undefined, { ms: CODES_COPIED_MS });
     } catch {
       setNote("Couldn’t copy. Select the codes and copy them, or download them.");
     }
@@ -46,7 +52,6 @@ function CodesStep({ codes, onDone }: { codes: string[]; onDone: () => void }) {
         <button type="button" className="ghost" onClick={() => void download()}>Download .txt</button>
       </div>
       {note && <p className="t3 small" role="status">{note}</p>}
-      <p className="t3 small">Copied codes stay on your clipboard until you copy something else.</p>
       <label className="small" style={{ display: "flex", gap: "var(--sp-8)", alignItems: "center" }}>
         <input type="checkbox" checked={saved} onChange={(e) => setSaved(e.target.checked)} />
         I’ve saved these codes

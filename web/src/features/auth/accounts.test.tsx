@@ -201,7 +201,7 @@ describe("sign up", () => {
     expect(engine.latestEmailCode(SAM.email)).toBeUndefined();
     await userEvent.type(screen.getByLabelText("Code"), "123456");
     await userEvent.click(screen.getByRole("button", { name: "Verify" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("That code didn’t work.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("That code isn’t right. Use the code in the newest email.");
   });
 
   it("an invalid email is refused before anything is sent", async () => {
@@ -831,7 +831,7 @@ describe("email verification at sign-up", () => {
     const { auth, keys } = await toCodeStep();
     const form = screen.getByRole("form", { name: "Check your email" });
     expect(within(form).getByText(/sam@example\.com/)).toBeInTheDocument();
-    expect(within(form).getByText(/This code expires in 30 minutes\./)).toBeInTheDocument();
+    expect(within(form).getByText(/It works for 30 minutes\./)).toBeInTheDocument();
     // No account and no session: nothing is stored.
     expect(auth.tokens.getSession()).toBeNull();
     expect(await keys.loadKeys()).toBeNull();
@@ -839,9 +839,10 @@ describe("email verification at sign-up", () => {
 
     await userEvent.type(screen.getByLabelText("Code"), "000000");
     await userEvent.click(screen.getByRole("button", { name: "Verify" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("That code didn’t work.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("That code isn’t right. Use the code in the newest email.");
+    expect(screen.getByLabelText("Code").closest("form")!.querySelectorAll(".cbox.err")).toHaveLength(6); // red boxes
     expect(await keys.loadKeys()).toBeNull();
-    expect(screen.getByRole("button", { name: /Send a new code/ })).toBeInTheDocument(); // always offered, for an expired code too
+    expect(screen.getByText(/Send a new code in \d:\d\d/)).toBeInTheDocument(); // the countdown; a new code is always on its way
 
     await userEvent.clear(screen.getByLabelText("Code"));
     await userEvent.type(screen.getByLabelText("Code"), engine.latestEmailCode(SAM.email)!);
@@ -862,27 +863,66 @@ describe("email verification at sign-up", () => {
 
   it("a new code can be asked for a minute after the last one, three times an hour, and the old code stops working", async () => {
     await toCodeStep();
-    const resend = () => screen.getByRole("button", { name: /Send a new code/ });
-    expect(resend()).toBeDisabled();
-    expect(resend()).toHaveTextContent(/\(\d+s\)/);
+    expect(screen.getByText(/Send a new code in 1:00/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send a new code" })).toBeNull();
     const first = engine.latestEmailCode(SAM.email)!;
     for (let i = 1; i <= 3; i++) {
       nowMs += 61_000;
-      await waitFor(() => expect(resend()).toBeEnabled(), { timeout: 3000 });
-      await userEvent.click(resend());
+      const resend = await screen.findByRole("button", { name: "Send a new code" }, { timeout: 3000 });
+      await userEvent.click(resend);
       await waitFor(() => expect(engine.latestEmailCode(SAM.email)).not.toBe(first));
-      if (i < 3) await waitFor(() => expect(resend()).toBeDisabled());
+      if (i < 3) await screen.findByText(/Send a new code in/);
     }
-    expect(await screen.findByText("Try again later.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Send a new code/ })).toBeNull();
+    // After the third the limit shows, in amber, with no wait: the code boxes stay usable.
+    expect(await screen.findByText("You’ve asked for several codes. Try again later, or check your spam folder.")).toBeInTheDocument();
+    expect(screen.getByText("Send a new code · not available right now")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send a new code" })).toBeNull();
     await userEvent.type(screen.getByLabelText("Code"), first);
     await userEvent.click(screen.getByRole("button", { name: "Verify" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("That code didn’t work.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("That code isn’t right. Use the code in the newest email.");
   });
 
-  it("Use a different email starts over, and the abandoned sign-up leaves nothing behind", async () => {
+  it("when the engine refuses a resend as too many attempts, the same limit shows", async () => {
+    await toCodeStep();
+    engine.refuseNext("/v1/accounts/email/resend", 429, "too_many_attempts");
+    nowMs += 61_000;
+    await userEvent.click(await screen.findByRole("button", { name: "Send a new code" }, { timeout: 3000 }));
+    expect(await screen.findByText("You’ve asked for several codes. Try again later, or check your spam folder.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Code")).toBeEnabled();
+  });
+
+  it("six boxes take a paste with spaces, and Verify waits for six digits", async () => {
+    await toCodeStep();
+    const verifyButton = screen.getByRole("button", { name: "Verify" });
+    expect(verifyButton).toBeDisabled();
+    await userEvent.click(screen.getByLabelText("Code"));
+    await userEvent.paste("482 91");
+    expect(verifyButton).toBeDisabled();
+    await userEvent.clear(screen.getByLabelText("Code"));
+    await userEvent.paste(`${engine.latestEmailCode(SAM.email)!.slice(0, 3)} ${engine.latestEmailCode(SAM.email)!.slice(3)}`);
+    expect(verifyButton).toBeEnabled();
+    expect(screen.getByLabelText("Code").closest("form")!.querySelectorAll(".cbox")).toHaveLength(6);
+  });
+
+  it("when the keys can't be saved it says so and Try saving again finishes the sign-up", async () => {
+    const keys = createMemoryKeyStore();
+    const save = keys.saveKeys.bind(keys);
+    keys.saveKeys = () => Promise.reject(new Error("quota"));
+    await toCodeStep(keys);
+    await userEvent.type(screen.getByLabelText("Code"), engine.latestEmailCode(SAM.email)!);
+    await userEvent.click(screen.getByRole("button", { name: "Verify" }));
+    const card = await screen.findByRole("alert", { name: "Account created, keys not saved" });
+    expect(card).toHaveTextContent("Your account is ready, but this browser couldn’t save its keys");
+    expect(card).toHaveTextContent("Your keys exist only in this tab right now. Keep it open until they’re saved.");
+    keys.saveKeys = save;
+    await userEvent.click(within(card).getByRole("button", { name: "Try saving again" }));
+    await todayShown();
+    expect(await keys.loadKeys()).not.toBeNull();
+  });
+
+  it("Change email starts over, and the abandoned sign-up leaves nothing behind", async () => {
     const { keys } = await toCodeStep();
-    await userEvent.click(screen.getByRole("button", { name: "Use a different email" }));
+    await userEvent.click(screen.getByRole("button", { name: "Change email" }));
     expect(screen.getByRole("form", { name: "Create your account" })).toBeInTheDocument();
     expect(screen.getByLabelText("Email")).toHaveValue(SAM.email); // kept, to correct
     expect(screen.getByLabelText("Password")).toHaveValue(""); // the password was not kept in the page while the code was awaited
@@ -920,12 +960,13 @@ describe("two-factor", () => {
 
     const list = await screen.findByRole("list", { name: "Recovery codes" });
     expect(within(list).getAllByRole("listitem")).toHaveLength(10);
-    expect(screen.getByText("Copied codes stay on your clipboard until you copy something else.")).toBeInTheDocument();
     const written: string[] = [];
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (t: string) => void written.push(t) } });
     await userEvent.click(screen.getByRole("button", { name: "Copy" }));
     expect(written[0]).toContain("RECOV-00001");
-    expect(await screen.findByText("Copied.")).toBeInTheDocument();
+    // One line says what happened, what to do next and why; the clipboard is not touched again.
+    expect(await screen.findByText("Copied. Paste them somewhere safe, then copy something else so they don’t stay on your clipboard.")).toBeInTheDocument();
+    expect(written).toHaveLength(1);
     URL.createObjectURL = vi.fn(() => "blob:codes");
     URL.revokeObjectURL = vi.fn();
     const saved: string[] = [];
@@ -981,9 +1022,9 @@ describe("the protection level", () => {
     await privacy();
     const card = await screen.findByLabelText("Protection");
     expect(await within(card).findByText("Standard protection")).toBeInTheDocument();
-    expect(card).toHaveTextContent("Orbyn can help you recover your account if you lose every device.");
-    expect(card).toHaveTextContent("Orbyn can read your data");
-    expect(within(card).getByRole("button", { name: "Coming later" })).toBeDisabled(); // Advanced is shown, and off
+    expect(card).toHaveTextContent("Verified");
+    expect(card).toHaveTextContent("Confirmed by your devices. Last change 7 Nov on");
+    expect(card).toHaveTextContent("Advanced protectionOnly your devices hold the keys.Planned"); // shown, and not available yet
     expect(engine.accounts.get("sam@example.com")!.protection).toHaveLength(1); // signed once, at sign-up
   });
 
@@ -991,7 +1032,8 @@ describe("the protection level", () => {
     engine.refuseNext("/v1/keychain/protection", 500, "internal", "Refused.", 1);
     await privacy();
     const card = await screen.findByLabelText("Protection");
-    expect(await within(card).findByText("Your protection level can’t be confirmed on this device")).toBeInTheDocument();
+    expect(await within(card).findByText("Protection can’t be confirmed on this device")).toBeInTheDocument();
+    expect(card).toHaveTextContent("Can’t confirm");
     expect(card).toHaveTextContent("No setting has been signed yet.");
     expect(engine.accounts.get("sam@example.com")!.protection ?? []).toHaveLength(0); // nothing signed it on its own
 
@@ -1023,19 +1065,21 @@ describe("the protection level", () => {
     account.protectionFromStart = true;
     await reopen();
     const card = await screen.findByLabelText("Protection");
-    expect(await within(card).findByText("Your protection level can’t be confirmed on this device")).toBeInTheDocument();
-    expect(card).toHaveTextContent("older setting than this device had already verified");
-    expect(within(card).queryByText("Standard protection")).toBeNull();
+    expect(await within(card).findByText(/Standard protection, last confirmed/)).toBeInTheDocument();
+    expect(card).toHaveTextContent("Can’t confirm");
+    expect(card).toHaveTextContent("The server showed an older setting than this device has already confirmed. This device keeps the setting it last confirmed until a trusted device confirms it again.");
+    expect(card).toHaveTextContent("Open Orbyn on a trusted device to fix this.");
+    expect(within(card).queryByText("Verified")).toBeNull();
     expect(within(card).queryByRole("button", { name: "Confirm protection level" })).toBeNull(); // there is no head to sign after
 
     // Or a different setting at sequence 2.
     account.protection = [good[0]!, { ...good[1]!, level: "advanced" }];
     account.protectionFromStart = false;
     await reopen();
-    expect(await within(await screen.findByLabelText("Protection")).findByText(/different setting than the one this device had already verified/)).toBeInTheDocument();
-    expect(within(screen.getByLabelText("Protection")).queryByText("Standard protection")).toBeNull();
+    expect(await within(await screen.findByLabelText("Protection")).findByText(/The server showed two different settings\./)).toBeInTheDocument();
+    expect(within(screen.getByLabelText("Protection")).queryByText("Verified")).toBeNull();
     expect(within(screen.getByLabelText("Protection")).queryByRole("button", { name: "Confirm protection level" })).toBeNull();
-    expect(screen.queryByText(/Protection was changed on/)).toBeNull(); // a fork names no device
+    expect(screen.queryByText(/Protection was changed to/)).toBeNull(); // a fork names no device
   });
 
   it("a conflict in Confirm protection level shows the new state and the person chooses again, after the new head", async () => {
@@ -1081,10 +1125,11 @@ describe("the protection level", () => {
     // The first device reads it again when Settings opens.
     await userEvent.click(await screen.findByRole("button", { name: "Account" }));
     await userEvent.click(await screen.findByRole("button", { name: "Privacy" }));
-    const note = await screen.findByText(/Protection was changed on/);
+    const note = await screen.findByText(/Protection was changed to Standard on/);
     expect(note).toHaveTextContent(phone.name);
+    expect(screen.getByRole("button", { name: "Review" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
-    expect(screen.queryByText(/Protection was changed on/)).toBeNull();
+    expect(screen.queryByText(/Protection was changed to/)).toBeNull();
   });
 });
 

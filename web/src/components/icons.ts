@@ -27,6 +27,11 @@ export const ICONS = {
   inbox: [{"t":"path","d":"M3.5 13.5l2.5-8h12l2.5 8V19a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z"},{"t":"path","d":"M3.5 13.5h5l1 2h5l1-2h5"}],
   more: [{"t":"path","d":"M6 12h.01M12 12h.01M18 12h.01"}],
   pin: [{"t":"path","d":"M9 4h6l-1 5 3 3H7l3-3zM12 12v8"}],
+  shield: [{"t":"path","d":"M12 3.5l7 2.8v5.4c0 4.3-3 7.5-7 8.8-4-1.3-7-4.5-7-8.8V6.3z"}],
+  laptop: [{"t":"rect","x":"5","y":"5","width":"14","height":"10","rx":"1.5"},{"t":"path","d":"M3 18.5h18"}],
+  alert: [{"t":"path","d":"M12 4l9 15.5H3z"},{"t":"path","d":"M12 10v4M12 17h.01"}],
+  info: [{"t":"circle","cx":"12","cy":"12","r":"8.5"},{"t":"path","d":"M12 11v5M12 8h.01"}],
+  lock: [{"t":"rect","x":"5","y":"10.5","width":"14","height":"9.5","rx":"2"},{"t":"path","d":"M8 10.5V8a4 4 0 0 1 8 0v2.5"}],
 } satisfies Record<string, IconShape[]>;
 
 export type IconName = keyof typeof ICONS;

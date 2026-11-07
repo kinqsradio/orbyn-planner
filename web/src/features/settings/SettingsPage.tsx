@@ -106,7 +106,7 @@ export function SettingsPage() {
             </>
           ) : category === "Privacy" ? (
             <>
-              <ProtectionSettings />
+              <ProtectionSettings onReviewDevices={() => setCategory("Account")} />
               <ExportSettings />
             </>
           ) : category === "Tags" ? (

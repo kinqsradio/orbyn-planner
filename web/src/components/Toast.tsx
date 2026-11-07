@@ -11,9 +11,9 @@ function ToastBody({ toast, dismiss }: { toast: ToastState; dismiss: () => void 
 
   useEffect(() => {
     if (paused) return;
-    const timer = setTimeout(dismiss, TOAST_MS);
+    const timer = setTimeout(dismiss, toast.ms ?? TOAST_MS);
     return () => clearTimeout(timer);
-  }, [paused, dismiss]);
+  }, [paused, dismiss, toast.ms]);
 
   useEffect(() => {
     if (toast.focusUndo) undo.current?.focus();

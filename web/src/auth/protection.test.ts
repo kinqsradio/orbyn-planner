@@ -93,6 +93,22 @@ describe("the signed protection setting", () => {
     expect(engine.accounts.has("sam@example.com")).toBe(true);
   });
 
+  it("Try saving again keeps the same account: once storage works, the keys are kept and the session starts", async () => {
+    const engine = createMockEngine();
+    const keys = createMemoryKeyStore();
+    const save = keys.saveKeys.bind(keys);
+    keys.saveKeys = () => Promise.reject(new Error("quota"));
+    const a = createAuthServices({ fetch: engine.fetch, baseUrl: "http://e.test", keys, crypto: () => crypto, wrapSecret: async () => new Uint8Array(32).fill(4) });
+    const pending = await signUp(a, SAM);
+    await pending.verify(engine.emailCode(pending.signupId)!).catch(() => undefined);
+    expect(await pending.retrySave().catch((e: unknown) => (e as ApiFailure).code)).toBe("keys_not_saved"); // storage is still full
+    keys.saveKeys = save;
+    const session = await pending.retrySave();
+    expect(a.tokens.getSession()?.accountId).toBe(session.accountId);
+    expect(await keys.loadKeys()).not.toBeNull();
+    expect(engine.calls.filter((c) => c.path === "/v1/accounts/email/verify")).toHaveLength(1); // the code was not used twice
+  });
+
   it("a second device, once approved, reads the setting the first signed as verified", async () => {
     const engine = createMockEngine();
     const a = browser(engine);

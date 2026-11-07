@@ -87,7 +87,7 @@
 }
 /* ---- Radii ---- */
 :root {
-  --r-3: 3px; --r-5: 5px; --r-6: 6px; --r-7: 7px; --r-8: 8px; --r-9: 9px; --r-10: 10px; --r-12: 12px; --r-16: 16px;
+  --r-3: 3px; --r-5: 5px; --r-6: 6px; --r-7: 7px; --r-8: 8px; --r-9: 9px; --r-10: 10px; --r-12: 12px; --r-14: 14px; --r-16: 16px;
   --r-pill: 999px; --r-round: 50%;
 }
 /* ---- Border and outline widths ---- */
@@ -100,7 +100,7 @@
   --sp-7: 7px; --sp-8: 8px; --sp-9: 9px; --sp-10: 10px; --sp-11: 11px; --sp-12: 12px;
   --sp-13: 13px; --sp-14: 14px; --sp-15: 15px; --sp-16: 16px; --sp-18: 18px; --sp-20: 20px;
   --sp-22: 22px; --sp-24: 24px; --sp-26: 26px; --sp-28: 28px; --sp-29: 29px; --sp-30: 30px;
-  --sp-32: 32px; --sp-36: 36px; --sp-38: 38px; --sp-40: 40px; --sp-44: 44px; --sp-48: 48px;
+  --sp-32: 32px; --sp-36: 36px; --sp-38: 38px; --sp-40: 40px; --sp-44: 44px; --sp-48: 48px; --sp-52: 52px;
   --sp-56: 56px; --sp-60: 60px; --sp-64: 64px; --sp-70: 70px; --sp-76: 76px;
   --sp-78: 78px; --sp-84: 84px; --sp-90: 90px; --sp-110: 110px; --sp-120: 120px; --sp-140: 140px;
   --sp-160: 160px; --sp-200: 200px; --sp-176: 176px; --sp-220: 220px; --sp-224: 224px; --sp-260: 260px; --sp-320: 320px;

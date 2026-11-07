@@ -71,6 +71,8 @@ export interface PendingSignUp {
   verify(code: string): Promise<StoredSession>;
   /** Asks for a new code (the engine allows three an hour and answers the same whatever happens). */
   resend(): Promise<void>;
+  /** After `verify` failed with `keys_not_saved`: tries to save the keys again, for the same account. Resolves with the session. */
+  retrySave(): Promise<StoredSession>;
   /** Lets go of the keys: the sign-up is simply gone. */
   cancel(): void;
 }
@@ -106,6 +108,18 @@ export async function signUp(services: AuthServices, input: { name: string; emai
     // Only what the verify step needs: not the whole input, which holds the password.
     const name = input.name.trim();
     let released = false;
+    let keepKeys: (() => Promise<StoredSession>) | null = null;
+    /** Keeps the keys; they stay in memory only while saving them can still be tried again, and any other end lets them go. */
+    const finish = async (): Promise<StoredSession> => {
+      try {
+        const session = await keepKeys!();
+        release();
+        return session;
+      } catch (e) {
+        if (!(e instanceof ApiFailure && e.code === "keys_not_saved")) release();
+        throw e;
+      }
+    };
     const release = () => {
       if (released) return;
       released = true;
@@ -118,7 +132,7 @@ export async function signUp(services: AuthServices, input: { name: string; emai
         if (released) throw new ApiFailure("invalid_email_code", 400, "That code didn’t work.");
         const created = await services.api.emailVerify({ signup_id: waiting.signup_id, code: code.replace(/\D/g, "") });
         // Only now is there an account and a session, so only now are the keys kept.
-        try {
+        const keep = async (): Promise<StoredSession> => {
           try {
             const wrap = await services.wrapSecret();
             try {
@@ -135,9 +149,13 @@ export async function signUp(services: AuthServices, input: { name: string; emai
           await services.tokens.set(session);
           await signStandardProtection(services, session);
           return session;
-        } finally {
-          release();
-        }
+        };
+        keepKeys = keep;
+        return finish();
+      },
+      retrySave: () => {
+        if (!keepKeys || released) throw new ApiFailure("keys_not_saved", 0, KEYS_NOT_SAVED);
+        return finish();
       },
       resend: () => services.api.emailResend({ signup_id: waiting.signup_id }),
       cancel: release,

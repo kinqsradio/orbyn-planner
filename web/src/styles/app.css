@@ -433,3 +433,33 @@ button.pillx { border: 0; }
 .chip-x { border: 0; background: transparent; color: var(--t3); cursor: pointer; padding: 0 0 0 var(--sp-2); font: inherit; line-height: 1; }
 .chip-x:hover, .chip-x:focus-visible { color: var(--t1); }
 .tagrow { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-6); }
+
+/* Status badges, banners, the code boxes and the protection card (Orbyn Account Designs: protection and verification). */
+.st { display: inline-flex; align-items: center; gap: var(--sp-6); height: var(--sp-22); padding: 0 var(--sp-9); border-radius: var(--r-pill); font-size: var(--fs-11-5); font-weight: var(--fw-medium); white-space: nowrap; width: max-content; background: var(--raise); color: var(--t2); }
+.st .sd { width: var(--sp-6); height: var(--sp-6); border-radius: var(--r-pill); background: currentColor; display: inline-block; }
+.st.ok { background: var(--green-bg); color: var(--green); }
+.st.info { background: var(--blue-bg); color: var(--blue); }
+.st.warn { background: var(--amber-bg); color: var(--amber-text); box-shadow: var(--ring-amber); }
+.st.err { background: var(--red-bg); color: var(--red); }
+.st.planned { background: transparent; color: var(--t3); box-shadow: inset 0 0 0 var(--bw) var(--line2); }
+.banner { display: flex; align-items: center; gap: var(--sp-12); padding: var(--sp-10) var(--sp-14); border-radius: var(--r-14); background: var(--raise); color: var(--t1); font-size: var(--fs-12-5); }
+.banner.warn { background: var(--amber-bg); box-shadow: var(--ring-amber); }
+.banner.info { background: var(--blue-bg); }
+.banner .end { margin-left: auto; display: flex; gap: var(--sp-6); }
+.srow { display: flex; align-items: center; gap: var(--sp-16); min-height: var(--sp-52); border-top: var(--bw) solid var(--line); border-bottom: var(--bw) solid var(--line); padding: var(--sp-8) 0; }
+.srow .lab2 { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.srow .lab2 b { font-weight: var(--fw-regular); color: var(--t1); }
+.srow .lab2 small { color: var(--t3); font-size: var(--fs-12); }
+.pv-card { gap: var(--sp-8); background: var(--main); box-shadow: 0 0 0 var(--bw) var(--line); }
+.pv-card.err { background: var(--raise); box-shadow: inset 0 0 0 var(--bw) var(--red-bg); }
+.pv-text { font-size: var(--fs-12-5); }
+.pv-head { display: flex; align-items: center; gap: var(--sp-10); }
+.pv-head .st { margin-left: auto; }
+.pv-line { display: flex; align-items: center; gap: var(--sp-8); color: var(--t2); }
+.ghost.sm, .btn.sm { height: var(--sp-26); padding: 0 var(--sp-10); border-radius: var(--r-8); font-size: var(--fs-12); }
+.cboxes { position: relative; display: flex; gap: var(--sp-8); }
+.cbox { width: var(--sp-44); height: var(--sp-52); border-radius: var(--r-10); border: var(--bw) solid var(--line2); display: grid; place-items: center; font-family: var(--mono); font-size: var(--fs-20); color: var(--t1); background: var(--main); }
+.cbox.on { border-color: var(--t2); box-shadow: 0 0 0 var(--sp-3) var(--sel); }
+.cbox.err { border-color: var(--red); }
+.cboxes input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; border: 0; padding: 0; font-size: var(--fs-16); cursor: text; }
+.link { color: var(--t1); text-decoration: underline; text-decoration-color: var(--line2); text-underline-offset: var(--sp-3); }
