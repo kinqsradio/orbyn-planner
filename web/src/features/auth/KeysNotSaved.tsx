@@ -133,7 +133,7 @@ function ApproveFromTab({ onClose, onApproved }: { onClose: () => void; onApprov
   const newest = [...waiting].sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
   const selected = choice ?? newest?.id ?? null;
   return (
-    <Modal label={choosing ? "Which device is it?" : "Approve another device"} onClose={onClose}>
+    <Modal label={choosing ? "Which device is it?" : "Approve another device"} onClose={onClose} className="approve-dialog">
       <b className="card-title">{choosing ? "Which device is it?" : "Approve another device"}</b>
       {device ? (
         <>

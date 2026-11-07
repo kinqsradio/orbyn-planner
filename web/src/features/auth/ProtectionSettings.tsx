@@ -239,8 +239,8 @@ export function ProtectionSettings({ onReviewDevices }: { onReviewDevices?: () =
           </div>
         </div>
       )}
-      <div aria-label="Protection" style={{ display: "flex", flexDirection: "column", gap: "var(--sp-8)" }}>
-      <div className={`card pv-card${kind === "verified" || kind === "confirming" || (!error && !report) ? "" : " pv-bad"}`}>
+      <div aria-label="Protection" className="pv-cards">
+      <div className={`card pv-card${error ? " pv-err" : kind === "verified" || kind === "confirming" || kind === "unlisted" || kind === "unset" || !report ? "" : " pv-bad"}`}>
         {error ? (
           <>
             <div className="pv-head">
