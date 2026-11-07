@@ -32,6 +32,7 @@
   --on-red: #fff;
   --scrim: rgba(0,0,0,.16);
   --sh-pop: 0 10px 30px rgba(0,0,0,.14), 0 0 0 1px var(--line2);
+  --sh-dialog: 0 16px 48px rgba(0,0,0,.18), 0 0 0 1px var(--line2);
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
