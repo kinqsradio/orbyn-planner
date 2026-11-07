@@ -710,8 +710,132 @@ describe("keys the browser will not store", () => {
     expect(engine.calls.some((c) => c.method === "POST" && c.path === "/v1/devices/approvals")).toBe(false); // none was started yet
     await userEvent.click(within(group).getAllByRole("radio")[0]!);
     await userEvent.click(within(dialog).getByRole("button", { name: "Continue" }));
-    expect(await within(dialog).findByText("Kind")).toBeInTheDocument();
-    expect(within(dialog).getByText("When")).toBeInTheDocument();
+    await within(dialog).findByText("Waiting for your other device…"); // the chosen one's approval started; its details are the chooser's, not this dialog's
+    expect(within(dialog).queryByText("Kind")).toBeNull();
+  });
+
+  /** A holds its account in memory (storage refuses), and B has signed in and waits. A is mounted, its dialog open. */
+  async function dialogOpen(strict = false) {
+    const keysA = createMemoryKeyStore();
+    keysA.replaceDevice = () => Promise.reject(new Error("quota"));
+    const a = services(keysA);
+    const b = services(createMemoryKeyStore());
+    const first = await mount(a);
+    await fillSignUp();
+    await screen.findByRole("alert", { name: "Account created, keys not saved" });
+    first.unmount();
+    const second = await mount(b);
+    await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
+    await fillSignIn();
+    await screen.findByRole("heading", { name: "Approve this device" });
+    second.unmount();
+    const onA = await mount(a, "/today", strict);
+    await userEvent.click(await screen.findByRole("button", { name: "Approve another device from this tab" }));
+    const dialog = await screen.findByRole("dialog", { name: "Approve another device" });
+    return { a, b, keysA, onA, dialog };
+  }
+  const approvalsStarted = () => engine.calls.filter((c) => c.method === "POST" && c.path === "/v1/devices/approvals").length;
+  const approvalsCancelled = () => engine.calls.filter((c) => c.method === "POST" && c.path.endsWith("/cancel")).length;
+
+  it("when the other device cancels, the dialog says so and Start again is the main button", async () => {
+    const { b, dialog } = await dialogOpen();
+    const onB = await mount(b);
+    await within(dialog).findByTestId("approval-code");
+    await within(onB.root).findByTestId("approval-code");
+    await userEvent.click(within(onB.root).getByRole("button", { name: "Cancel" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Your other device cancelled. Nothing was shared.");
+    expect(within(dialog).getByRole("button", { name: "Start again" })).toHaveClass("btn");
+  });
+
+  it("pressing Cancel at the comparison says the digits didn't match, and Start again begins a new approval", async () => {
+    const { b, dialog } = await dialogOpen();
+    await mount(b);
+    await within(dialog).findByTestId("approval-code");
+    const before = approvalsStarted();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("The digits didn’t match, so nothing was shared. If you didn’t start this, someone else may be trying to add a device.");
+    await waitFor(() => expect(approvalsCancelled()).toBeGreaterThan(0));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Start again" }));
+    await waitFor(() => expect(approvalsStarted()).toBe(before + 1));
+  });
+
+  it("in React's development check the approval is started once and is not cancelled", async () => {
+    const { b, dialog } = await dialogOpen(true);
+    await mount(b);
+    await within(dialog).findByTestId("approval-code");
+    expect(approvalsStarted()).toBe(1);
+    expect(approvalsCancelled()).toBe(0);
+  });
+
+  it("after Continue, nothing about the account reaches IndexedDB, localStorage or sessionStorage", async () => {
+    // IndexedDB exists here, so a planner opened for the account would try its own database; every attempt is counted.
+    const opened: string[] = [];
+    vi.stubGlobal("indexedDB", {
+      open: (name: string) => {
+        opened.push(name);
+        const request: { onerror?: () => void; error: Error } = { error: new Error("not in this test") };
+        queueMicrotask(() => request.onerror?.());
+        return request;
+      },
+    });
+    const writes: string[] = [];
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key: string) {
+      writes.push(key);
+    });
+    try {
+      const keysA = createMemoryKeyStore();
+      keysA.replaceDevice = () => Promise.reject(new Error("quota"));
+      const a = services(keysA);
+      const b = services(createMemoryKeyStore());
+      /** The real app, with no store handed in, so the planner for the account is chosen as in a build. */
+      const mountReal = async (auth: AuthServices) => {
+        window.history.replaceState(null, "", "/today");
+        const root = document.createElement("div");
+        document.body.appendChild(root);
+        const view = render(<ClockProvider value={() => NOW}><App auth={auth} /></ClockProvider>, { container: root });
+        return { root, unmount: () => { view.unmount(); root.remove(); } };
+      };
+      const first = await mountReal(a);
+      await fillSignUp();
+      await screen.findByRole("alert", { name: "Account created, keys not saved" });
+      const accountId = a.tokens.getSession()!.accountId;
+      first.unmount();
+      const second = await mount(b);
+      await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
+      await fillSignIn();
+      await screen.findByRole("heading", { name: "Approve this device" });
+      second.unmount();
+
+      const onA = await mountReal(a);
+      await userEvent.click(await screen.findByRole("button", { name: "Approve another device from this tab" }));
+      const dialog = await screen.findByRole("dialog", { name: "Approve another device" });
+      const onB = await mount(b);
+      await within(dialog).findByTestId("approval-code");
+      await userEvent.click(within(dialog).getByRole("button", { name: "They match" }));
+      await userEvent.click(await within(onB.root).findByRole("button", { name: "They match" }));
+      await userEvent.click(await within(onB.root).findByRole("button", { name: "Continue" }));
+      // The other device is a browser of its own, which stores what it likes; what this one writes from here on is counted.
+      onB.unmount();
+      writes.length = 0;
+      await userEvent.click(await within(onA.root).findByRole("button", { name: "Continue" }));
+      await within(onA.root).findByRole("navigation", { name: "Primary" });
+
+      // Use the planner: the notifications, then Settings · Privacy, which reads the protection chain.
+      await userEvent.click(within(onA.root).getByRole("link", { name: /Notifications/ }));
+      await within(onA.root).findByText("You’re all caught up");
+      await userEvent.click(within(onA.root).getByRole("link", { name: /Settings/ }));
+      await userEvent.click(await within(onA.root).findByRole("button", { name: "Privacy" }));
+      await within(onA.root).findByLabelText("Protection");
+      await within(onA.root).findByText(/Standard protection|Confirming|Choose your protection level/);
+
+      expect(opened.filter((name) => name.includes(accountId))).toEqual([]); // no database for the account
+      expect(writes.filter((key) => key.includes(accountId) || /protection|notifications-read/.test(key))).toEqual([]);
+      expect(await keysA.loadKeys()).toBeNull();
+      onA.unmount();
+    } finally {
+      setItem.mockRestore();
+      vi.unstubAllGlobals();
+    }
   });
 
   it("Try saving again moves the account into storage once it works, and the planner opens", async () => {

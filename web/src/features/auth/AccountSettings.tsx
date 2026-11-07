@@ -1,5 +1,5 @@
 import { useSyncState } from "../../sync/SyncProvider";
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { ApiFailure } from "../../api/auth";
 import { authCryptoAvailable, SIGN_IN_UNAVAILABLE } from "../../api/authCrypto";
 import { cryptoLoad } from "../../api/realCrypto";
@@ -11,7 +11,7 @@ import { TwoFactorRow } from "./TwoFactor";
 import type { Device } from "../../generated/Device";
 import { useAuth } from "../../auth/AuthProvider";
 import { removeDevice, verifiedDevices } from "../../auth/flows";
-import { ApproverController } from "../../auth/pairing";
+import { useApprover } from "./useApprover";
 import { describeError } from "./AuthScreens";
 
 export const PLATFORMS: Record<Device["platform"], string> = { web: "Web", ios: "iPhone or iPad", android: "Android", macos: "Mac", windows: "Windows", linux: "Linux" };
@@ -30,16 +30,7 @@ export function ApproveDialog({ device, onClose, onDone }: { device: Device; onC
   const auth = useAuth()!;
   const { services } = auth;
   const [attempt, setAttempt] = useState(0);
-  const controller = useMemo(() => {
-    void attempt; // a new attempt is a new approval
-    return new ApproverController(services, auth.session!, device);
-  }, [services, auth.session, device, attempt]);
-  const state = useSyncExternalStore(controller.subscribe, controller.getState);
-
-  useEffect(() => {
-    void controller.start();
-    return () => controller.dispose();
-  }, [controller]);
+  const { controller, state } = useApprover(services, auth.session!, device, attempt);
 
   const close = () => {
     // Leaving before it is done closes the approval; a finished or closed one just goes.

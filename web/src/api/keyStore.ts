@@ -29,6 +29,8 @@ export interface SyncState {
   keysSent: Record<string, string>;
   /** Zones this device made (or chose to make) the key for, so a crash between making a zone and its key can't strand it. */
   made: Record<string, true>;
+  /** Zones whose key was really sent to a device other than this one (an envelope was put), not merely marked as owed to nobody. */
+  keysReached?: Record<string, true>;
   /** True from the moment the engine's snapshot was dropped or replaced until this device has been approved again once: nothing is called stranded, and no delete is offered, while it is true. */
   reset?: boolean;
   /** When (ms) every key was last resent because a device's approval changed, per device: at most once in ten minutes unless an approval completed here. */
@@ -47,7 +49,7 @@ export interface SyncState {
 
 /** What only the engine's snapshot can vouch for. Dropping or replacing the snapshot makes it untrue. */
 export function withoutEngineSide(state: SyncState): SyncState {
-  return { ...state, staged: {}, stagedZone: {}, keysSent: {}, made: {}, quarantined: {}, reset: true };
+  return { ...state, staged: {}, stagedZone: {}, keysSent: {}, keysReached: {}, made: {}, quarantined: {}, reset: true };
 }
 
 export const emptySyncState = (): SyncState => ({ zones: [], zoneOf: {}, staged: {}, stagedZone: {}, keysSent: {}, made: {}, approvals: {}, resentAt: {}, failed: {}, backoff: {}, quarantined: {}, lastSyncedAt: null });
@@ -346,6 +348,8 @@ export interface FallbackKeyStore extends KeyStore {
   /** The store being wrapped. */
   readonly root: KeyStore;
   subscribe(listener: () => void): () => void;
+  /** Tells `listener` whenever the sync state is saved. */
+  subscribeSync(listener: () => void): () => void;
   /** From now on keep everything in memory, never in storage. Nothing already stored is touched. */
   holdInMemory(): void;
   /** Moves what is held in memory into storage, in one transaction for the device, and goes back to storage. Throws and stays in memory if storage still refuses. */
@@ -361,6 +365,7 @@ export function withMemoryFallback(real: KeyStore, lock?: <T>(fn: () => Promise<
   const memory = createMemoryKeyStore();
   let held = false;
   const listeners = new Set<() => void>();
+  const syncListeners = new Set<() => void>();
   const set = (next: boolean) => {
     if (held === next) return;
     held = next;
@@ -376,6 +381,15 @@ export function withMemoryFallback(real: KeyStore, lock?: <T>(fn: () => Promise<
       return () => listeners.delete(l);
     },
     holdInMemory: () => set(true),
+    subscribeSync: (l: () => void) => {
+      syncListeners.add(l);
+      return () => syncListeners.delete(l);
+    },
+    /** The sync state is saved here so a change tells the listeners at once (the guard on closing a memory-only tab). */
+    saveSyncState: async (state: SyncState) => {
+      await (held ? memory : real).saveSyncState(state);
+      syncListeners.forEach((l) => l());
+    },
     moveToStorage: async () => {
       // Under the engine's lock, so no action is half-way through while the device is carried over; one transaction, so a refusal
       // leaves nothing written and the tab stays in memory.
@@ -402,9 +416,8 @@ export function withMemoryFallback(real: KeyStore, lock?: <T>(fn: () => Promise<
         await memory.clearDevice();
         await memory.clearSession();
         set(false);
-        // Whatever a refused write left in storage goes too.
-        await real.clearDevice().catch(() => undefined);
-        await real.clearSession().catch(() => undefined);
+        // Storage is left alone: the keys were written in one transaction or not at all, so nothing of this account is there, and
+        // what is there may be another account's.
       } else await real.clearDevice();
     },
   };

@@ -17,7 +17,7 @@ vi.mock("../../app/router", () => ({ useRouter: () => ({ path: "/notifications",
 vi.mock("../../app/ui", () => ({ useUi: () => ({ openTask }) }));
 vi.mock("../../app/clock", () => ({ useNow: () => NOW }));
 vi.mock("../../store/context", () => ({ usePlanner: () => ({ tasks }) }));
-const auth = vi.hoisted(() => ({ services: {}, session: { accountId: "acct-1", deviceState: "trusted", deviceId: "d1" } }));
+const auth = vi.hoisted(() => ({ services: {}, session: { accountId: "acct-1", deviceState: "trusted", deviceId: "d1" } as { accountId: string; deviceState: string; deviceId: string } }));
 vi.mock("../../auth/AuthProvider", () => ({ useAuth: () => auth }));
 
 const at = Math.floor(new Date(2026, 10, 7, 9, 41).getTime() / 1000);
@@ -84,6 +84,19 @@ describe("Notifications", () => {
     tasks = [task({ id: "t2", title: "Pay rent", due: "2026-11-07" })];
     ui();
     expect(await screen.findByText("Pay rent is due today")).toBeInTheDocument();
+  });
+
+  it("what was read is kept for each account: marking one account's reminders read leaves another's unread", async () => {
+    tasks = [task({})];
+    auth.session = { accountId: "acct-1", deviceState: "trusted", deviceId: "d1" };
+    ui();
+    await userEvent.click(await screen.findByRole("button", { name: "Mark all as read" }));
+    expect(screen.getByTestId("count")).toHaveTextContent("0");
+    cleanup();
+    auth.session = { accountId: "acct-2", deviceState: "trusted", deviceId: "d9" };
+    ui();
+    expect(await screen.findByText("1 unread")).toBeInTheDocument(); // another account's marks do not reach this one
+    auth.session = { accountId: "acct-1", deviceState: "trusted", deviceId: "d1" };
   });
 
   it("a reminder that has not come due is not listed", async () => {

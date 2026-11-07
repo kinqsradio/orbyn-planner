@@ -379,7 +379,10 @@ export async function runCycle(
     });
     if (put === null) return "nokey";
     try {
-      if (parse<{ envelopes: unknown[] }>(put).envelopes.length > 0) await api.putKeyEnvelopes(parse(put));
+      if (parse<{ envelopes: unknown[] }>(put).envelopes.length > 0) {
+        await api.putKeyEnvelopes(parse(put));
+        (state.keysReached ??= {})[zone] = true; // a device other than this one has the key
+      }
     } catch (error) {
       if (error instanceof ApiFailure && error.status >= 400 && error.status < 500 && error.status !== 401 && error.status !== 429) {
         report.keysPending.push(zone); // refused (a device was removed meanwhile, say): tried again next pass

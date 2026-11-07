@@ -3,7 +3,7 @@ import { ApiFailure } from "../api/auth";
 import { createMemoryKeyStore, emptySyncState, type KeyStore } from "../api/keyStore";
 import { FakeAuthCrypto } from "../api/testing/FakeAuthCrypto";
 import { createMockEngine, type MockEngine } from "../api/testing/MockEngine";
-import { confirmProtection, readProtection, signIn, signUp } from "./flows";
+import { confirmProtection, readProtection, signIn, signOut, signUp } from "./flows";
 import { signedUp } from "./testing/signedUp";
 import { createAuthServices, type AuthServices } from "./services";
 
@@ -138,18 +138,24 @@ describe("the signed protection setting", () => {
     await nothingStored(keys);
   });
 
-  it("signing out of a held account also removes whatever a refused write left in storage", async () => {
+  it("signing out of an account held in memory leaves another account's stored device untouched", async () => {
     const engine = createMockEngine();
     const keys = createMemoryKeyStore();
+    // Account A is stored in this browser.
+    await keys.saveKeys(new Uint8Array([1, 2, 3]));
+    await keys.saveIdentity({ accountId: "acct-A", deviceId: "dev-A", email: "a@example.com" });
+    await keys.saveSession({ token: "t", accountId: "acct-A", deviceId: "dev-A", deviceState: "trusted", expiresAt: "2099-01-01T00:00:00Z", email: "a@example.com", name: "A" });
+    // Account B signs up here, storage refuses it, and it is held in memory.
     keys.replaceDevice = () => Promise.reject(new Error("quota"));
-    const a = createAuthServices({ fetch: engine.fetch, baseUrl: "http://e.test", keys, crypto: () => crypto, wrapSecret: async () => new Uint8Array(32).fill(4) });
-    const pending = await signUp(a, SAM);
+    const b = createAuthServices({ fetch: engine.fetch, baseUrl: "http://e.test", keys, crypto: () => crypto, wrapSecret: async () => new Uint8Array(32).fill(4) });
+    const pending = await signUp(b, SAM);
     await pending.verify(engine.emailCode(pending.signupId)!);
-    expect(a.keys.inMemory).toBe(true);
-    await keys.saveKeys(new Uint8Array([1, 2, 3])); // a partial write that got through
-    await a.engine.forget();
-    expect(a.keys.inMemory).toBe(false);
-    await nothingStored(keys);
+    expect(b.keys.inMemory).toBe(true);
+    await signOut(b);
+    expect(b.keys.inMemory).toBe(false);
+    expect(await keys.loadKeys()).toEqual(new Uint8Array([1, 2, 3])); // A's device is still there
+    expect((await keys.loadIdentity())?.accountId).toBe("acct-A");
+    expect((await keys.loadSession())?.accountId).toBe("acct-A");
   });
 
   it("moving a held account to storage is one write: a refusal leaves nothing, and a success carries the sync state, the quarantine, the engine state and the session", async () => {

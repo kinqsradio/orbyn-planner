@@ -4,6 +4,11 @@
  * whatever came due in the last 15 minutes. Each shown key goes to IndexedDB and to the other tabs
  * over a BroadcastChannel. Everything here fails soft: without storage a hand-over may repeat one.
  */
+import { isMemoryOnly } from "../../lib/browserStorage";
+
+/** What this tab showed while the keys are held in memory only. */
+const heldShown = new Set<string>();
+
 const DB = "orbyn-planner-reminders";
 const STORE = "shown";
 const CHANNEL = "orbyn-planner-reminders";
@@ -21,6 +26,7 @@ function open(): Promise<IDBDatabase> {
 
 /** The keys shown in the last day. Old ones are removed as they are read. */
 export function loadShown(now: number = Date.now()): Promise<Set<string>> {
+  if (isMemoryOnly()) return Promise.resolve(new Set(heldShown));
   if (typeof indexedDB === "undefined") return Promise.resolve(new Set());
   return open()
     .then(
@@ -82,6 +88,11 @@ function releaseChannel(): void {
  * repeat this reminder. Telling the other tabs never fails the call.
  */
 export function rememberShown(key: string, now: number = Date.now()): Promise<void> {
+  // While an account's keys are held in memory only, nothing is written to storage: what was shown is kept for this tab alone.
+  if (isMemoryOnly()) {
+    heldShown.add(key);
+    return Promise.resolve();
+  }
   try {
     channel()?.postMessage(key);
   } catch {

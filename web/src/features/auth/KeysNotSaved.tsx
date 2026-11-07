@@ -1,45 +1,56 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 import type { Device } from "../../generated/Device";
 import { useAuth } from "../../auth/AuthProvider";
 import { BusyButton } from "../../components/BusyButton";
 import { Icon } from "../../components/Icon";
 import { Modal } from "../../components/Modal";
 import { motionMs } from "../../styles/tokens";
-import { ApproverController } from "../../auth/pairing";
-import { PLATFORMS, groupCode, when } from "./AccountSettings";
+import { useApprover } from "./useApprover";
+import { groupCode } from "./AccountSettings";
 
 /** The steps with this device's side of the approval: digits to match, the key fingerprint, and what it is waiting for. */
 function ApprovalSteps({ device, onClose, onApproved }: { device: Device; onClose: () => void; onApproved: (device: Device) => void }) {
   const auth = useAuth()!;
   const [attempt, setAttempt] = useState(0);
-  const controller = useMemo(() => {
-    void attempt; // Start again is a new approval
-    return new ApproverController(auth.services, auth.session!, device);
-  }, [auth.services, auth.session, device, attempt]);
-  const state = useSyncExternalStore(controller.subscribe, controller.getState);
+  const { controller, state } = useApprover(auth.services, auth.session!, device, attempt);
   // The digits and the fingerprint stay on screen after They match, and after a timeout, as the frames show them.
   const [compared, setCompared] = useState<{ sas: string; fingerprint: string } | null>(null);
   if (state.phase === "compare" && compared?.sas !== state.sas) setCompared({ sas: state.sas, fingerprint: state.fingerprint });
+  /** The person pressed Cancel while the digits were showing: they didn't match, so this ends the approval and says so. */
+  const [declined, setDeclined] = useState(false);
   const said = state.phase === "confirming" || state.phase === "finishing";
   const waitingFirst = useAfter(state.phase === "starting" || state.phase === "waiting");
   const waitingLast = useAfter(said);
   useEffect(() => {
-    void controller.start();
-    return () => {
-      // Closing in any way (Cancel, Escape, a click outside) ends the approval on the server too, unless it already ended.
-      const phase = controller.getState().phase;
-      if (phase !== "done" && phase !== "closed") void controller.cancel();
-      controller.dispose();
-    };
-  }, [controller]);
-  useEffect(() => {
     if (state.phase === "done") onApproved(device);
   }, [state.phase, device, onApproved]);
   const cancel = () => {
+    if (state.phase === "compare") {
+      // Cancel at the comparison means the digits didn't match.
+      void controller.cancel();
+      setDeclined(true);
+      return;
+    }
     if (state.phase !== "done" && state.phase !== "closed") void controller.cancel();
     onClose();
   };
-  const shown = state.phase === "compare" || said || state.phase === "closed" ? state : null;
+  const startAgain = () => {
+    setCompared(null);
+    setDeclined(false);
+    setAttempt((n) => n + 1);
+  };
+  const closed = state.phase === "closed" ? state : null;
+  /** Why the approval ended, in the words the designs give: a real expiry, the other device cancelling, or the digits not matching. */
+  const ended = declined || closed?.reason === "mismatch" ? "mismatch" : closed?.reason === "expired" ? "expired" : closed?.reason === "closed" ? "cancelled" : null;
+  const stopped = declined || (closed !== null && closed.reason !== "cancelled");
+  const endedText =
+    ended === "mismatch"
+      ? "The digits didn’t match, so nothing was shared. If you didn’t start this, someone else may be trying to add a device."
+      : ended === "expired"
+        ? "Your other device didn’t answer in 10 minutes. Nothing was shared."
+        : ended === "cancelled"
+          ? "Your other device cancelled. Nothing was shared."
+          : null;
   return (
     <>
       <ol className="steps numbered">
@@ -59,25 +70,25 @@ function ApprovalSteps({ device, onClose, onApproved }: { device: Device; onClos
           </div>
         </li>
       </ol>
-      {state.phase === "compare" && <span className="t3 pv-text">Only continue if both match exactly. If they don’t, press Cancel: someone else may be trying to add a device.</span>}
+      {state.phase === "compare" && !declined && <span className="t3 pv-text">Only continue if both match exactly. If they don’t, press Cancel: someone else may be trying to add a device.</span>}
       {said && <span className="t3 pv-text pv-said"><span className="pv-ok"><Icon name="check2" small /></span>You said the digits and fingerprint match.</span>}
-      {state.phase === "closed" && state.reason !== "cancelled" && (
+      {stopped && endedText && (
         <span className="pv-text pv-timeout" role="alert">
           <Icon name="alert" small />
-          {state.reason === "expired" || state.reason === "closed" ? "Your other device didn’t answer in 10 minutes. Nothing was shared." : state.message}
+          {endedText}
         </span>
       )}
       <div className="pv-waitrow">
-        {(waitingFirst || (said && waitingLast)) && (
+        {!stopped && (waitingFirst || (said && waitingLast)) && (
           <div className="pv-loading t3" role="status">
             <span className="spin blue" aria-hidden="true" />
             {said ? "Waiting for your other device to finish…" : "Waiting for your other device…"}
           </div>
         )}
         <span className="pv-end">
-          <button type="button" className="ghost" data-autofocus onClick={cancel}>Cancel</button>
-          {shown?.phase === "compare" && <button type="button" className="btn" onClick={() => void controller.confirm()}>They match</button>}
-          {shown?.phase === "closed" && shown.reason !== "cancelled" && <button type="button" className="btn" onClick={() => { setCompared(null); setAttempt((n) => n + 1); }}>Start again</button>}
+          <button type="button" className="ghost" data-autofocus onClick={stopped ? onClose : cancel}>Cancel</button>
+          {state.phase === "compare" && !declined && <button type="button" className="btn" onClick={() => void controller.confirm()}>They match</button>}
+          {stopped && <button type="button" className="btn" onClick={startAgain}>Start again</button>}
         </span>
       </div>
     </>
@@ -123,9 +134,6 @@ function ApproveFromTab({ onClose, onApproved }: { onClose: () => void; onApprov
       <b className="card-title">{choosing ? "Which device is it?" : "Approve another device"}</b>
       {device ? (
         <>
-          <div className="kv"><span>Device</span><b>{device.name}</b></div>
-          <div className="kv"><span>Kind</span><b>{PLATFORMS[device.platform]}</b></div>
-          <div className="kv"><span>When</span><b>{when(device.created_at)}</b></div>
           <ApprovalSteps device={device} onClose={onClose} onApproved={onApproved} />
         </>
       ) : waiting.length > 0 ? (
