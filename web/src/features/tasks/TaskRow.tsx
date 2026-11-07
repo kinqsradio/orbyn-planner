@@ -82,7 +82,7 @@ export function TaskRow({ task, layout = "tasks", extra }: { task: Task; layout?
 }
 
 /** A Today row: time, check, title, and what matters about it. */
-export function TodayRow({ task, late, compact = false }: { task: Task; late?: number; compact?: boolean }) {
+export function TodayRow({ task, late, compact = false, quietLate = false, at }: { task: Task; late?: number; compact?: boolean; /** On a phone an overdue row has no meta. */ quietLate?: boolean; /** Where the row stands in a list drawn in steps, for a screen reader. */ at?: { index: number; of: number } }) {
   const { lists } = usePlanner();
   const { open } = useTaskActions(task);
   const now = useNow();
@@ -96,11 +96,11 @@ export function TodayRow({ task, late, compact = false }: { task: Task; late?: n
 
   let meta: string;
   if (task.done) meta = "Done";
-  else if (late !== undefined) meta = `${late} ${late === 1 ? "day" : "days"} late`;
+  else if (late !== undefined) meta = quietLate ? "" : `${late} ${late === 1 ? "day" : "days"} late`;
   else meta = list?.name ?? "";
 
   return (
-    <li className={task.done ? "row done" : "row"} data-row-id={task.id} data-done={task.done} style={compact ? { gridTemplateColumns: "var(--sp-16) minmax(0,1fr) auto" } : undefined}>
+    <li className={task.done ? "row done" : "row"} data-row-id={task.id} data-done={task.done} {...(at ? { "aria-posinset": at.index + 1, "aria-setsize": at.of } : {})} style={compact ? { gridTemplateColumns: "var(--sp-16) minmax(0,1fr) auto" } : undefined}>
       {!compact && <span className={soon ? "time amber" : "time"}>{time}</span>}
       <Check task={task} />
       <button type="button" className="what link-btn" onClick={open}>{task.title}</button>

@@ -8,7 +8,7 @@ import { motionMs } from "../../styles/tokens";
 import { projectStats } from "../projects/stats";
 import { PageHeader } from "../../components/EmptyState";
 import { Icon } from "../../components/Icon";
-import { MONTHS, WEEKDAYS, addDays, dateKey, formatTime, parseDue, startOfDay } from "../../lib/dates";
+import { MONTHS, WEEKDAYS, addDays, dateKey, formatTime, isDueToday, parseDue, startOfDay } from "../../lib/dates";
 import { daysBetween, lastDayOf, touchesDay } from "../../lib/wall";
 import { usePlanner } from "../../store/context";
 import { expandEvents, type Occurrence } from "../../store/occurrences";
@@ -39,8 +39,8 @@ export function goalLabel(goal: string, now: Date): string {
 /** Shown in place of the lists only when the planner on this device can't be read, which the store does not report yet, so Today does not render it. */
 export function TodayError({ onRetry }: { onRetry: () => void }) {
   return (
-    <div className="card" role="alert">
-      <span className="line"><Icon name="alert" small /><b>Couldn’t open your planner on this device.</b></span>
+    <div className="card red-ring" role="alert">
+      <span className="line"><span className="pv-red"><Icon name="alert" small /></span><b>Couldn’t open your planner on this device.</b></span>
       <span className="t3">Nothing was changed. Your other devices still have everything.</span>
       <span><button type="button" className="btn" onClick={onRetry}>Try again</button></span>
     </div>
@@ -76,17 +76,31 @@ function useSlow(active: boolean): boolean {
   return active && slow;
 }
 
-function EventRow({ occ, day, phone }: { occ: Occurrence; day: string; phone: boolean }) {
+/** Where a row stands in a list drawn in steps, for a screen reader; a list that fits in the first rows needs no such thing. */
+const place = (index: number, of: number) => (of > FIRST_ROWS ? { index, of } : undefined);
+
+const clock = (iso: string) => formatTime(parseDue(iso).date);
+
+function EventRow({ occ, day, phone, at }: { occ: Occurrence; day: string; phone: boolean; at?: { index: number; of: number } }) {
   const { calendars } = usePlanner();
   const ui = useUi();
   const calendar = calendars.find((c) => c.id === occ.event.calendarId);
   // An all-day event names its calendar; a timed one says it is an event, and where.
   const total = daysBetween(occ.date, lastDayOf(occ.start, occ.end, occ.allDay)) + 1;
   const title = occ.allDay && total > 1 ? `${occ.event.title} · day ${daysBetween(occ.date, day) + 1} of ${total}` : occ.event.title;
-  const meta = phone ? "" : occ.allDay ? (calendar?.name ?? "") : ["Event", occ.event.place].filter(Boolean).join(" · ");
+  // A timed event that began on an earlier day and is still going reads "Until 06:00" (it sorts as if it began at 00:00); one that begins
+  // today and runs past midnight keeps its start and says when it ends.
+  const startedEarlier = !occ.allDay && occ.start.slice(0, 10) < day;
+  const endsLater = !occ.allDay && lastDayOf(occ.start, occ.end, false) > day;
+  const dayWord = (d: string) => (daysBetween(day, d) === 1 ? "tomorrow" : daysBetween(day, d) === -1 ? "yesterday" : `${WEEKDAYS[parseDue(d).date.getDay()]!.slice(0, 3)} ${parseDue(d).date.getDate()} ${MONTHS[parseDue(d).date.getMonth()]!.slice(0, 3)}`);
+  const time = occ.allDay ? "All day" : startedEarlier ? `Until ${clock(occ.end)}` : clock(occ.start);
+  let meta = occ.allDay ? (calendar?.name ?? "") : ["Event", occ.event.place].filter(Boolean).join(" · ");
+  if (startedEarlier) meta = `Started ${dayWord(occ.start.slice(0, 10))} ${clock(occ.start)}`;
+  else if (endsLater) meta = `Until ${clock(occ.end)} ${dayWord(lastDayOf(occ.start, occ.end, false))}`;
+  if (phone) meta = "";
   return (
-    <li className="row" data-row-id={occ.event.id}>
-      <span className="time">{occ.allDay ? "All day" : formatTime(parseDue(occ.start).date)}</span>
+    <li className="row" data-row-id={occ.event.id} {...(at ? { "aria-posinset": at.index + 1, "aria-setsize": at.of } : {})}>
+      <span className="time">{time}</span>
       <span className="sw" style={{ background: colourOf(calendars, occ.event) }} aria-hidden="true" />
       <button type="button" className="what link-btn" onClick={() => ui.openEvent(occ.event.id, occ.date)}>{title}</button>
       <span className="meta">{meta}</span>
@@ -97,9 +111,10 @@ function EventRow({ occ, day, phone }: { occ: Occurrence; day: string; phone: bo
 type Entry = { kind: "task"; task: Task } | { kind: "event"; occ: Occurrence };
 
 /** Timed events and tasks together in time order, then the day's tasks with no time, then finished ones. */
-function inTimeOrder(entries: Entry[]): Entry[] {
+function inTimeOrder(entries: Entry[], day: string): Entry[] {
   const rank = (e: Entry): [number, string] => {
-    if (e.kind === "event") return [0, e.occ.start.slice(11, 16)];
+    // An event still going from an earlier day sorts as if it began at 00:00.
+    if (e.kind === "event") return [0, e.occ.start.slice(0, 10) < day ? "00:00" : e.occ.start.slice(11, 16)];
     if (e.task.done) return [2, ""];
     return e.task.due && e.task.due.length > 10 ? [0, e.task.due.slice(11, 16)] : [1, ""];
   };
@@ -129,7 +144,11 @@ export function TodayPage() {
   const auth = useAuth();
   const phone = useMediaQuery(PHONE_QUERY);
   const [weekOpen, setWeekOpen] = useState(false);
-  const now = useNow();
+  const clockNow = useNow();
+  // Everything below reads the day and the time to the minute, so the page is worked out once a minute, not on every render (the
+  // rows of a long list arrive a frame at a time, and each step renders again).
+  const minute = Math.floor(clockNow.getTime() / 60_000);
+  const now = useMemo(() => new Date(minute * 60_000), [minute]);
   const waiting = useMemo(() => {
     const latest = new Map<string, string>();
     for (const e of outbox) if (e.type === "task") latest.set(e.id, e.updatedAt);
@@ -159,8 +178,8 @@ export function TodayPage() {
     return todayEvents.filter((o) => o.allDay).sort((a, b) => a.start.localeCompare(b.start) || Number(span(b) > 0) - Number(span(a) > 0) || a.event.title.localeCompare(b.event.title));
   }, [todayEvents]);
   const entries = useMemo(
-    () => inTimeOrder([...g.today.map((task): Entry => ({ kind: "task", task })), ...todayEvents.filter((o) => !o.allDay).map((occ): Entry => ({ kind: "event", occ }))]),
-    [g.today, todayEvents],
+    () => inTimeOrder([...g.today.map((task): Entry => ({ kind: "task", task })), ...todayEvents.filter((o) => !o.allDay).map((occ): Entry => ({ kind: "event", occ }))], key),
+    [g.today, todayEvents, key],
   );
 
   const entryRows = useProgressive(entries.length);
@@ -187,7 +206,12 @@ export function TodayPage() {
   }, [projects, tasks, now, key]);
 
   const todayOpen = g.today.filter((t) => !t.done).length;
-  const itemCount = todayEvents.length + g.today.length;
+  // The header counts everything scheduled or due today, done included, and a task whose time has already passed today is still today's.
+  const lateToday = g.overdue.filter((t) => isDueToday(t.due!, now)).length;
+  const todayTasks = g.today.length + lateToday;
+  // The Today number is what is still to come: an event that has ended no longer counts.
+  const eventsToCome = todayEvents.filter((o) => o.allDay || parseDue(o.end).date.getTime() > now.getTime()).length;
+  const itemCount = todayEvents.length + todayTasks;
   const dayName = WEEKDAYS[now.getDay()]!;
   const first = auth?.session?.name?.trim().split(/\s+/)[0];
   const title = phone ? "Today" : first ? `${greetingAt(now)}, ${first}` : greetingAt(now);
@@ -197,7 +221,7 @@ export function TodayPage() {
       ? "nothing planned"
       : phone
         ? countWords(itemCount, "item", "items")
-        : [todayEvents.length > 0 && countWords(todayEvents.length, "event", "events"), g.today.length > 0 && countWords(g.today.length, "task", "tasks")].filter(Boolean).join(", ");
+        : [todayEvents.length > 0 && countWords(todayEvents.length, "event", "events"), todayTasks > 0 && countWords(todayTasks, "task", "tasks")].filter(Boolean).join(", ");
   /** Whole days late, or undefined for a task that is only late today. */
   const lateDays = (due: string) => {
     const days = Math.round((startOfDay(now).getTime() - startOfDay(new Date(due.slice(0, 10) + "T00:00")).getTime()) / 86_400_000);
@@ -206,8 +230,8 @@ export function TodayPage() {
   const empty = g.overdue.length === 0 && itemCount === 0;
   const dateLabel = `${dayName.slice(0, 3)} ${now.getDate()} ${MONTHS[now.getMonth()]!.slice(0, 3)}`;
 
-  const rows = (list: Entry[]) =>
-    list.map((e) => (e.kind === "task" ? <TodayRow key={e.task.id} task={e.task} /> : <EventRow key={`${e.occ.event.id}-${e.occ.date}`} occ={e.occ} day={key} phone={phone} />));
+  const rows = (list: Entry[], of: number) =>
+    list.map((e, i) => (e.kind === "task" ? <TodayRow key={e.task.id} task={e.task} at={place(i, of)} /> : <EventRow key={`${e.occ.event.id}-${e.occ.date}`} occ={e.occ} day={key} phone={phone} at={place(i, of)} />));
 
   const weekList = (
     <ul aria-label="The week at a glance">
@@ -232,9 +256,8 @@ export function TodayPage() {
   if (!ready) {
     return (
       <>
-        <PageHeader title={title} sub={skeleton ? undefined : undefined}>
+        <PageHeader title={title} sub={skeleton ? <span className="skel" style={{ width: "var(--sp-200)" }} /> : undefined}>
           {skeleton && <span role="status" className="t3"><span className="spin" aria-hidden="true" />Loading today</span>}
-          <SyncLine status={status} onRetry={retry} waiting={waiting} />
           <button type="button" className="btn" disabled><Icon name="plus" small />New task</button>
         </PageHeader>
         <div className="grid4 today-stats" style={{ padding: "var(--sp-4) var(--sp-28) 0" }}>
@@ -242,9 +265,12 @@ export function TodayPage() {
             <div className="stat" key={l}><small>{l}</small><b>{skeleton ? <span className="skel" /> : "\u00a0"}</b></div>
           ))}
         </div>
-        <div className="cols">
+        <div className="cols today-cols">
           <div className="blk" aria-busy="true"><div className="bh"><b>Today</b><span></span></div>{skeleton && <ul>{loadingRows(6)}</ul>}</div>
-          <div className="blk aside"><div className="bh"><b>This week</b><span></span></div></div>
+          <div className="blk aside">
+            <div className="bh"><b>This week</b><span></span></div>
+            {skeleton && Array.from({ length: 5 }, (_, i) => <div className="kv" key={i}><span><span className="skel" style={{ width: "var(--sp-44)" }} /></span><span className="skel" style={{ width: "var(--sp-120)" }} /></div>)}
+          </div>
         </div>
       </>
     );
@@ -261,13 +287,13 @@ export function TodayPage() {
       </PageHeader>
 
       <div className="grid4 today-stats" style={{ padding: "var(--sp-4) var(--sp-28) 0" }}>
-        <div className="stat"><small>Today</small><b>{todayOpen + todayEvents.length}</b></div>
+        <div className="stat"><small>Today</small><b>{todayOpen + eventsToCome}</b></div>
         <div className="stat"><small>Overdue</small><b style={g.overdue.length > 0 ? { color: "var(--amber-text)" } : undefined}>{g.overdue.length}</b></div>
         <div className="stat"><small>Coming up</small><b>{comingUp}</b></div>
         <div className="stat"><small>Done today</small><b>{g.doneToday}</b></div>
       </div>
 
-      <div className="cols">
+      <div className="cols today-cols">
         <div className="blk">
           {!phone && (
             <div className="bh">
@@ -297,7 +323,7 @@ export function TodayPage() {
                   {entries.length > 0 && <div className="bh"><b>Timed</b><span></span></div>}
                 </>
               )}
-              {entries.length > 0 && <ul>{rows(entries.slice(0, entryRows))}</ul>}
+              {entries.length > 0 && <ul>{rows(entries.slice(0, entryRows), entries.length)}</ul>}
               {g.overdue.length > 0 && (
                 <>
                   <div className="bh" style={{ paddingTop: "var(--sp-16)" }}>
@@ -305,8 +331,8 @@ export function TodayPage() {
                     <span>{g.overdue.length}</span>
                   </div>
                   <ul>
-                    {g.overdue.slice(0, lateRows).map((t) => (
-                      <TodayRow key={t.id} task={t} late={lateDays(t.due!)} />
+                    {g.overdue.slice(0, lateRows).map((t, i) => (
+                      <TodayRow key={t.id} task={t} late={lateDays(t.due!)} quietLate={phone} at={place(i, g.overdue.length)} />
                     ))}
                   </ul>
                 </>

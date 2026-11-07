@@ -10,14 +10,14 @@ import { TodayError, goalLabel } from "./TodayPage";
 // Saturday 7 November 2026, 10:00.
 const NOW = new Date(2026, 10, 7, 10, 0);
 
-async function openToday(seed?: (store: LocalStore) => void) {
+async function openToday(seed?: (store: LocalStore) => void, now: Date = NOW) {
   window.history.replaceState(null, "", "/today");
   vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("offline"))));
-  const store = new LocalStore({ persistence: new MemoryPersistence(), now: () => NOW });
+  const store = new LocalStore({ persistence: new MemoryPersistence(), now: () => now });
   await store.ready;
   seed?.(store);
   render(
-    <ClockProvider value={() => NOW}>
+    <ClockProvider value={() => now}>
       <App store={store} />
     </ClockProvider>,
   );
@@ -70,7 +70,8 @@ describe("Today page", () => {
     const days = within(glance).getAllByRole("listitem").map((li) => li.textContent);
     expect(days).toEqual(["Sun 8Nothing planned", "Mon 92 tasks", "Tue 10Nothing planned", "Wed 11Nothing planned", "Thu 12Nothing planned", "Fri 13Nothing planned"]);
     expect(stats()).toEqual(["Today4", "Overdue2", "Coming up2", "Done today1"]);
-    expect(screen.getByText("Saturday 7 November · 4 tasks")).toBeInTheDocument();
+    // The header counts everything due today, done included, and a task whose time has already passed (08:00 at 10:00) is still today's.
+    expect(screen.getByText("Saturday 7 November · 5 tasks")).toBeInTheDocument();
   });
 
   it("puts all-day events in their own group above the timed ones, with the calendar's name and the day of a longer one", async () => {
@@ -88,6 +89,15 @@ describe("Today page", () => {
     const glance = within(screen.getByRole("list", { name: "The week at a glance" }));
     expect(glance.getByText("Dentist 15:00")).toBeInTheDocument(); // one event: its name and time
     expect(screen.getByText("Saturday 7 November · 4 events")).toBeInTheDocument();
+  });
+
+  it("all-day events with the same length and title rank sort by their start alone", async () => {
+    await openToday((s) => {
+      s.addEvent({ title: "Aaa trip", allDay: true, start: "2026-11-06", end: "2026-11-08" });
+      s.addEvent({ title: "Zzz trip", allDay: true, start: "2026-11-05", end: "2026-11-08" }); // started earlier, so first, though Z follows A
+    });
+    const titles = Array.from(document.querySelectorAll(".row .what")).map((el) => el.textContent);
+    expect(titles).toEqual(["Zzz trip · day 3 of 4", "Aaa trip · day 2 of 3"]);
   });
 
   it("orders all-day events by start, then a multi-day one before a single-day one, then by title", async () => {
@@ -130,6 +140,19 @@ describe("Today page", () => {
     expect(stats()[1]).toBe("Overdue150"); // the numbers never depended on how many rows were drawn
   }, 20_000);
 
+  it("goals more than 30 days away, goals already past and projects with no goal are left out, and the rest come nearest first whatever order they were made in", async () => {
+    await openToday((s) => {
+      s.addProject({ name: "Far", colour: "c1", goal: "2026-12-08" }); // 31 days on
+      s.addProject({ name: "Late", colour: "c1", goal: "2026-11-06" }); // yesterday
+      s.addProject({ name: "Edge", colour: "c2", goal: "2026-12-07" }); // exactly 30 days on
+      s.addProject({ name: "Soon", colour: "c3", goal: "2026-11-09" });
+      s.addProject({ name: "Now", colour: "c4", goal: "2026-11-07" });
+    });
+    const progress = screen.getByText("Progress", { selector: "b" }).parentElement!.parentElement!;
+    const names = Array.from(progress.querySelectorAll(".kv")).filter((el) => el.textContent?.includes("%")).map((el) => el.firstElementChild!.textContent);
+    expect(names).toEqual(["Now", "Soon", "Edge"]); // made in another order; Far and Late are out
+  });
+
   it("greets by the clock: morning from 05:00, afternoon from 12:00, evening from 18:00, and until 04:59", async () => {
     const { greetingAt } = await import("./TodayPage");
     expect(greetingAt(new Date(2026, 10, 7, 4, 59))).toBe("Good evening");
@@ -138,6 +161,64 @@ describe("Today page", () => {
     expect(greetingAt(new Date(2026, 10, 7, 12, 0))).toBe("Good afternoon");
     expect(greetingAt(new Date(2026, 10, 7, 17, 59))).toBe("Good afternoon");
     expect(greetingAt(new Date(2026, 10, 7, 18, 0))).toBe("Good evening");
+  });
+});
+
+describe("the header and the numbers follow the rules", () => {
+  const sub = () => document.querySelector(".ph .sub")!.textContent;
+  const stat = (label: string) => screen.getByText(label, { selector: "small" }).nextElementSibling!.textContent;
+
+  it("the header counts tasks due earlier and later today, done ones included; the Today number counts only what is open and not overdue", async () => {
+    await openToday((s) => {
+      s.addTask({ title: "earlier", due: "2026-11-07T08:00" }); // 10:00 now: overdue, still today's
+      s.addTask({ title: "later", due: "2026-11-07T15:00" });
+      const done = s.addTask({ title: "finished", due: "2026-11-07T14:00" });
+      s.setDone(done.id, true);
+    });
+    expect(sub()).toBe("Saturday 7 November · 3 tasks");
+    expect(stat("Today")).toBe("1"); // only "later": not the finished one, not the overdue one
+    expect(stat("Overdue")).toBe("1");
+    expect(stat("Done today")).toBe("1");
+  });
+
+  it("an event that has ended no longer counts in the Today number", async () => {
+    await openToday((s) => {
+      s.addEvent({ title: "Over", start: "2026-11-07T08:00", end: "2026-11-07T09:00" });
+      s.addEvent({ title: "To come", start: "2026-11-07T11:00", end: "2026-11-07T12:00" });
+    });
+    expect(stat("Today")).toBe("1");
+    expect(sub()).toBe("Saturday 7 November · 2 events"); // the header still names both
+  });
+});
+
+const stat = (label: string) => screen.getByText(label, { selector: "small" }).nextElementSibling!.textContent;
+
+describe("events across midnight", () => {
+  const times = () => Array.from(document.querySelectorAll(".row")).map((el) => [el.querySelector(".time")!.textContent, el.querySelector(".what")!.textContent, el.querySelector(".meta")!.textContent]);
+
+  it("one still going from yesterday reads Until 06:00, says when it started, and sorts first as if it began at 00:00; it does not count once it has ended", async () => {
+    await openToday((s) => {
+      s.addEvent({ title: "Night shift", start: "2026-11-06T22:00", end: "2026-11-07T06:00" });
+      s.addEvent({ title: "Lunch", start: "2026-11-07T13:00", end: "2026-11-07T14:00" });
+      s.addEvent({ title: "Early swim", start: "2026-11-07T07:30", end: "2026-11-07T08:30" });
+    });
+    expect(times()).toEqual([
+      ["Until 06:00", "Night shift", "Started yesterday 22:00"],
+      ["07:30", "Early swim", "Event"],
+      ["13:00", "Lunch", "Event"],
+    ]);
+    expect(stat("Today")).toBe("1"); // 10:00: the shift and the swim are over, lunch is to come
+  });
+
+  it("while it is still going (02:00) it counts in the Today number", async () => {
+    await openToday((s) => s.addEvent({ title: "Night shift", start: "2026-11-06T22:00", end: "2026-11-07T06:00" }), new Date(2026, 10, 7, 2, 0));
+    expect(stat("Today")).toBe("1");
+  });
+
+  it("one that starts today and ends after midnight keeps its start and says when it ends", async () => {
+    await openToday((s) => s.addEvent({ title: "Night shift", start: "2026-11-07T22:00", end: "2026-11-08T06:00" }));
+    expect(times()).toEqual([["22:00", "Night shift", "Until 06:00 tomorrow"]]);
+    expect(stat("Today")).toBe("1");
   });
 });
 
@@ -179,6 +260,36 @@ describe("Today while it loads, and on a phone", () => {
     expect(screen.queryByRole("list", { name: "The week at a glance" })).toBeNull();
   });
 
+  it("on a phone an overdue row has no meta, and a long list tells a screen reader where each row stands", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: true, media: query, addEventListener: () => undefined, removeEventListener: () => undefined }));
+    await openToday((s) => {
+      for (let i = 0; i < 60; i++) s.addTask({ title: `late ${i}`, due: "2026-11-05" });
+    });
+    const first = document.querySelector(".row")!;
+    expect(first.querySelector(".meta")!.textContent).toBe(""); // not "2 days late"
+    expect(first).toHaveAttribute("aria-posinset", "1");
+    expect(first).toHaveAttribute("aria-setsize", "60");
+  });
+
+  it("while loading the header has a skeleton and a spinner, the week has skeleton rows, and there is no sync pill", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      window.history.replaceState(null, "", "/today");
+      vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("offline"))));
+      const store = new LocalStore({ persistence: new MemoryPersistence(), now: () => NOW });
+      await store.ready;
+      const notReady = { ...store.getState(), ready: false };
+      const loading = Object.assign(Object.create(store) as LocalStore, { getState: () => notReady });
+      render(<ClockProvider value={() => NOW}><App store={loading} /></ClockProvider>);
+      await act(async () => void (await vi.advanceTimersByTimeAsync(450)));
+      expect(document.querySelector(".ph .sub .skel")).not.toBeNull();
+      expect(document.querySelectorAll(".aside .kv .skel")).toHaveLength(10);
+      expect(document.querySelector(".ph .pillx")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("an empty day on a phone is A clear day, with Open the week beside Add a task", async () => {
     vi.stubGlobal("matchMedia", (query: string) => ({ matches: true, media: query, addEventListener: () => undefined, removeEventListener: () => undefined }));
     await openToday();
@@ -209,6 +320,7 @@ describe("goal labels and the error card", () => {
     expect(screen.getByText("Nothing was changed. Your other devices still have everything.")).toBeInTheDocument();
     screen.getByRole("button", { name: "Try again" }).click();
     expect(retry).toHaveBeenCalledTimes(1);
+    expect(document.querySelector(".card.red-ring .pv-red")).not.toBeNull(); // red icon and ring, as drawn
   });
 });
 
