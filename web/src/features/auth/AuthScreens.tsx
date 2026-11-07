@@ -1,8 +1,8 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { ApiFailure } from "../../api/auth";
 import { SignInUnavailable } from "../../api/authCrypto";
 import { Icon } from "../../components/Icon";
-import { KeysForAnotherAccount, signIn, signUp } from "../../auth/flows";
+import { KeysForAnotherAccount, SecondFactorNeeded, signIn, signUp } from "../../auth/flows";
 import { cryptoLoad } from "../../api/realCrypto";
 import { CryptoProblem, MODULE_LOAD_FAILED } from "./CryptoProblem";
 import { useAuth, type AuthScreen } from "../../auth/AuthProvider";
@@ -90,6 +90,42 @@ function SignIn({ go }: { go: (s: AuthScreen) => void }) {
   const [error, setError] = useState<string | null>(null);
   /** This browser holds another account's keys: nothing has been sent, and the person decides. */
   const [foreign, setForeign] = useState<KeysForAnotherAccount | null>(null);
+  /** The password was right and the account has two-factor on: the sign-in waits for a code. */
+  const [second, setSecond] = useState<SecondFactorNeeded | null>(null);
+  const [recovery, setRecovery] = useState(false);
+  const [factor, setFactor] = useState("");
+
+  // Leaving this screen with a sign-in still waiting for its code lets its keys go (releasing twice is harmless).
+  useEffect(() => () => second?.cancel(), [second]);
+
+  const stopSecond = () => {
+    second?.cancel();
+    setSecond(null);
+    setFactor("");
+    setRecovery(false);
+  };
+
+  const finishSecond = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!second) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await second.complete(recovery ? { recoveryCode: factor.trim() } : { code: factor.replace(/\D/g, "") });
+      auth.closeAuth();
+    } catch (e) {
+      // A wrong code leaves the sign-in open to try again; anything else has ended it, so the password step comes back.
+      if (e instanceof ApiFailure && e.code === "second_factor_failed") setError(describeError(e));
+      else {
+        setSecond(null);
+        setFactor("");
+        setRecovery(false);
+        setError(e instanceof ApiFailure && e.code === "login_failed" ? "That sign-in ended. Enter your password to start again." : describeError(e));
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const attempt = async (replaceKeys: boolean) => {
     setBusy(true);
@@ -99,6 +135,7 @@ function SignIn({ go }: { go: (s: AuthScreen) => void }) {
       auth.closeAuth();
     } catch (e) {
       if (e instanceof KeysForAnotherAccount) setForeign(e);
+      else if (e instanceof SecondFactorNeeded) setSecond(e);
       else setError(describeError(e));
     } finally {
       setBusy(false);
@@ -109,6 +146,39 @@ function SignIn({ go }: { go: (s: AuthScreen) => void }) {
     event.preventDefault();
     void attempt(false);
   };
+
+  if (second) {
+    const ready = recovery ? factor.trim().length >= 5 : factor.replace(/\D/g, "").length === 6;
+    return (
+      <form className="authcard" onSubmit={(e) => void finishSecond(e)} aria-label="Two-factor code" noValidate>
+        <h1 className="auth-title">Enter your code</h1>
+        <p className="t3">{recovery ? "Enter one of your recovery codes. Each works once." : "Enter the six-digit code from your authenticator app."}</p>
+        <div className="form" style={{ width: "auto" }}>
+          <label htmlFor="si-factor">{recovery ? "Recovery code" : "Code"}</label>
+          <input
+            id="si-factor"
+            key={recovery ? "recovery" : "code"}
+            className="field"
+            inputMode={recovery ? "text" : "numeric"}
+            autoComplete="one-time-code"
+            autoCapitalize="characters"
+            placeholder={recovery ? "XXXXX-XXXXX" : "123456"}
+            value={factor}
+            onChange={(e) => setFactor(e.target.value)}
+            autoFocus
+          />
+        </div>
+        {error && <p className="err" role="alert">{error}</p>}
+        <button type="submit" className="btn" disabled={busy || !ready}>{busy ? "Checking…" : "Continue"}</button>
+        <span className="t3 small">
+          <button type="button" className="link-btn" onClick={() => { setRecovery(!recovery); setFactor(""); setError(null); }}>
+            {recovery ? "Use a code from the app" : "Use a recovery code"}
+          </button>{" "}
+          · <button type="button" className="link-btn" onClick={stopSecond}>Cancel</button>
+        </span>
+      </form>
+    );
+  }
 
   if (foreign) {
     return (
