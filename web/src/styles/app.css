@@ -491,3 +491,5 @@ button.pillx { border: 0; }
 .steps.numbered li > div { flex: 1; gap: var(--sp-8); }
 .code-card { align-items: center; padding: var(--sp-12); font-size: var(--fs-24); letter-spacing: .2em; color: var(--t1); }
 .fingerprint { font-size: var(--fs-13); letter-spacing: .06em; color: var(--t1); }
+.notif-row .dot.none { background: transparent; }
+.notif-row { grid-template-columns: var(--sp-16) minmax(0, 1fr) auto var(--sp-8); }

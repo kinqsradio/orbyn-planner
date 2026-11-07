@@ -5,6 +5,7 @@ import { useDialog } from "../components/useDialog";
 import { CalendarPage } from "../features/calendar/CalendarPage";
 import { ListsPage } from "../features/lists/ListsPage";
 import { NotificationsPage } from "../features/notifications/NotificationsPage";
+import { NotificationsProvider, useNotifications } from "../features/notifications/useNotifications";
 import { ProjectPage } from "../features/projects/ProjectPage";
 import { ProjectsPage } from "../features/projects/ProjectsPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
@@ -47,12 +48,12 @@ const PAGES: Record<string, () => ReactNode> = {
   "/completed": () => <CompletedPage />,
 };
 
-function NavLink({ item, className = "nav", onNavigate, badge }: { item: NavItem; className?: string; onNavigate?: () => void; badge?: string }) {
+function NavLink({ item, className = "nav", onNavigate, badge, amberBadge = false }: { item: NavItem; className?: string; onNavigate?: () => void; badge?: string; amberBadge?: boolean }) {
   return (
     <Link to={item.path} className={className} onClick={onNavigate}>
       <Icon name={item.icon} />
       <span>{item.label}</span>
-      {badge && <span className="n amber">{badge}</span>}
+      {badge && <span className={amberBadge ? "n amber" : "n"}>{badge}</span>}
     </Link>
   );
 }
@@ -105,6 +106,7 @@ function Shell() {
   const { tasks } = usePlanner();
   const now = useNow();
   const due = dueCount(tasks, now);
+  const unread = useNotifications().unread;
   useSubscriptionRefresh();
   useReminders((message) => ui.showToast(message));
   const project = /^\/projects\/([^/]+)$/.exec(path);
@@ -127,7 +129,7 @@ function Shell() {
         <QuickFind />
         <nav aria-label="Primary" className="primary">
           {NAV.map((item) => (
-            <NavLink key={item.path} item={item} badge={item.path === "/tasks" && due > 0 ? `${due} due` : undefined} />
+            <NavLink key={item.path} item={item} badge={item.path === "/tasks" && due > 0 ? `${due} due` : item.path === "/notifications" && unread > 0 ? String(unread) : undefined} amberBadge={item.path === "/tasks"} />
           ))}
           <NavLink item={SETTINGS} className="nav bottom" />
         </nav>
@@ -176,7 +178,9 @@ export function App({ store, auth }: { store?: PlannerStore; auth?: AuthServices
             <AuthGate>
               <SyncProvider>
                 <RouterProvider>
-                  <Shell />
+                  <NotificationsProvider>
+                    <Shell />
+                  </NotificationsProvider>
                 </RouterProvider>
               </SyncProvider>
             </AuthGate>
