@@ -36,7 +36,7 @@ function CodesStep({ codes, onDone }: { codes: string[]; onDone: () => void }) {
     <>
       <b className="card-title">Save your recovery codes</b>
       <p className="t3 small">If you lose your authenticator app, each of these signs you in once. They are shown only now.</p>
-      <ul className="card mono" aria-label="Recovery codes" style={{ listStyle: "none", margin: 0, columns: 2, gap: 6, padding: "10px 14px" }}>
+      <ul className="card mono" aria-label="Recovery codes" style={{ listStyle: "none", margin: 0, columns: 2, gap: "var(--sp-6)", padding: "var(--sp-10) var(--sp-14)" }}>
         {codes.map((c) => (
           <li key={c}>{c}</li>
         ))}
@@ -46,7 +46,7 @@ function CodesStep({ codes, onDone }: { codes: string[]; onDone: () => void }) {
         <button type="button" className="ghost" onClick={() => void download()}>Download .txt</button>
       </div>
       {note && <p className="t3 small" role="status">{note}</p>}
-      <label className="small" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <label className="small" style={{ display: "flex", gap: "var(--sp-8)", alignItems: "center" }}>
         <input type="checkbox" checked={saved} onChange={(e) => setSaved(e.target.checked)} />
         I’ve saved these codes
       </label>
@@ -112,9 +112,9 @@ function EnrolDialog({ onClose, onDone }: { onClose: () => void; onDone: () => v
       ) : (
         <form onSubmit={(e) => void confirm(e)} aria-label="Confirm two-factor">
           <b className="card-title">Scan this with your authenticator app</b>
-          <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap", margin: "10px 0" }}>
+          <div style={{ display: "flex", gap: "var(--sp-16)", alignItems: "flex-start", flexWrap: "wrap", margin: "var(--sp-10) 0" }}>
             <QrCode value={enrolment!.uri} label="QR code for your authenticator app" />
-            <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-6)", minWidth: 0 }}>
               <span className="t3 small">Or type this key into the app:</span>
               <code className="mono" aria-label="Secret key" style={{ wordBreak: "break-all" }}>{groupSecret(enrolment!.secret)}</code>
               <span className="t3 small">It is shown only now.</span>
@@ -198,7 +198,7 @@ export function TwoFactorRow() {
   };
   return (
     <>
-      <div className="kv" style={{ height: 44, borderTop: "1px solid var(--line)" }}>
+      <div className="kv" style={{ height: "var(--sp-44)", borderTop: "var(--bw) solid var(--line)" }}>
         <span>Two-factor</span>
         <b className="ctl">
           <span className="t3">{on === null ? "…" : on ? "On" : "Off"}</span>

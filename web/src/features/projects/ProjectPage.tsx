@@ -21,10 +21,10 @@ function ProjectRow({ task }: { task: Task }) {
   const now = useNow();
   const act = needsAction(task, now);
   return (
-    <li className={task.done ? "row done" : "row"} data-row-id={task.id} data-done={task.done} style={{ gridTemplateColumns: "16px minmax(0,1fr) auto" }}>
+    <li className={task.done ? "row done" : "row"} data-row-id={task.id} data-done={task.done} style={{ gridTemplateColumns: "var(--sp-16) minmax(0,1fr) auto" }}>
       <input type="checkbox" className="check" checked={task.done} aria-label={`Complete ${task.title}`} onChange={(e) => toggle(e.target.checked)} />
       <button type="button" className="what link-btn" onClick={open}>{task.title}</button>
-      <span className="meta" style={act ? { color: "var(--amber)", fontWeight: 500 } : undefined}>{task.done ? "Done" : dueText(task, now)}</span>
+      <span className="meta" style={act ? { color: "var(--amber-text)", fontWeight: "var(--fw-medium)" } : undefined}>{task.done ? "Done" : dueText(task, now)}</span>
     </li>
   );
 }
@@ -72,7 +72,7 @@ function SectionHeader({ project, lane, index, count }: { project: Project; lane
             </button>
           </>
         )}
-        <span style={{ marginLeft: 8 }}>{done} of {lane.tasks.length}</span>
+        <span style={{ marginLeft: "var(--sp-8)" }}>{done} of {lane.tasks.length}</span>
       </span>
     </div>
   );
@@ -95,7 +95,7 @@ function TasksTab({ project }: { project: Project }) {
               <SectionHeader project={project} lane={lane} index={realSections.indexOf(lane)} count={realSections.length} />
             </div>
             {lane.tasks.length === 0 ? (
-              <p className="quiet note" style={{ padding: "6px 0" }}>No tasks in this section.</p>
+              <p className="quiet note" style={{ padding: "var(--sp-6) 0" }}>No tasks in this section.</p>
             ) : (
               <ul>
                 {lane.tasks.map((t) => (
@@ -107,7 +107,7 @@ function TasksTab({ project }: { project: Project }) {
         ))}
         <form
           className="inline-form"
-          style={{ marginTop: 16 }}
+          style={{ marginTop: "var(--sp-16)" }}
           onSubmit={(e) => {
             e.preventDefault();
             if (!newSection.trim()) return;
@@ -122,7 +122,7 @@ function TasksTab({ project }: { project: Project }) {
       <div className="blk aside">
         <div className="bh"><b>Progress</b><span></span></div>
         <div className="meter" role="progressbar" aria-label="Progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={stats.percent}><i style={{ width: `${stats.percent}%` }} /></div>
-        <div className="kv" style={{ marginTop: 6 }}><span>Done</span><b>{stats.done} of {stats.total} tasks</b></div>
+        <div className="kv" style={{ marginTop: "var(--sp-6)" }}><span>Done</span><b>{stats.done} of {stats.total} tasks</b></div>
         <div className="kv"><span>Next</span><b>{stats.next?.title ?? "Nothing open"}</b></div>
       </div>
     </div>
@@ -186,7 +186,7 @@ function BoardTab({ project }: { project: Project }) {
     { key: "done", name: "Done", tasks: finished, done: true },
   ];
   return (
-    <div className="board scroll" style={{ gridTemplateColumns: `repeat(${all.length}, minmax(200px, 1fr))` }}>
+    <div className="board scroll" style={{ gridTemplateColumns: `repeat(${all.length}, minmax(var(--sp-200), 1fr))` }}>
       {all.map((lane) => (
         <section key={lane.key} className="lane" aria-label={lane.name}>
           <h2 className="lane-h">{lane.name}<span>{lane.tasks.length}</span></h2>
@@ -194,7 +194,7 @@ function BoardTab({ project }: { project: Project }) {
             {lane.tasks.map((t) => (
               <li className="tcard" key={t.id} data-row-id={t.id} data-done={t.done}>
                 <button type="button" className="tt link-btn" onClick={() => open(t.id)}>{t.title}</button>
-                <span className="m" style={needsAction(t, now) ? { color: "var(--amber)" } : undefined}>{t.done ? "Done" : t.due ? formatDue(t.due, now) : ""}</span>
+                <span className="m" style={needsAction(t, now) ? { color: "var(--amber-text)" } : undefined}>{t.done ? "Done" : t.due ? formatDue(t.due, now) : ""}</span>
                 <MoveMenu task={t} project={project} />
               </li>
             ))}

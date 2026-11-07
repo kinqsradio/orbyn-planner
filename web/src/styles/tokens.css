@@ -1,0 +1,132 @@
+/*
+ * Orbyn Planner design tokens.
+ *
+ * Every value here is taken from the Planner Designs, Motion Designs and Components sources (Planner v14, Components v3). Nothing
+ * else in web/src may hard-code a colour, font, font size, spacing or size length, radius, shadow, duration or easing: use these.
+ * The values the JS needs (motion durations, the hour height, the phone breakpoint) are mirrored in tokens.ts, and a test keeps the
+ * two files equal.
+ *
+ * Ink for everything including selected, live and in-progress states; amber only when the person must act (due, overdue); red only for
+ * failures and removals. A person's list and calendar colours (--c1..--c4) are content. Weights stay at 400 and 500.
+ *
+ * Not tokens, by necessity: @media breakpoints (a custom property cannot be used in a media query; 767px is PHONE_MAX_PX in tokens.ts),
+ * and the percentages, unitless line heights and z-index layers that are layout rules and not design values.
+ */
+
+/* ---- Colour: light, dark and dim (the .app sets of the designs) ---- */
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f6f6f6; --main: #fff; --raise: rgba(0,0,0,.035); --sel: rgba(0,0,0,.065);
+  --line: rgba(0,0,0,.07); --line2: rgba(0,0,0,.12);
+  --t1: rgba(0,0,0,.92); --t2: rgba(0,0,0,.74); --t3: rgba(0,0,0,.56); --t4: rgba(0,0,0,.44);
+  --btn: #111; --btnt: #fff;
+  /* --amber: fills, dots, borders, icons and large text. --amber-text: every small amber text (5.62:1 on #fff, 5.20:1 on #f6f6f6). */
+  --amber: #c2710a; --amber-text: #9a5705; --amber-bg: rgba(245,158,11,.07); --amber-line: rgba(217,119,6,.32);
+  --red: #d42a2a; --red-bg: rgba(239,68,68,.07);
+  --green: #047857; --green-bg: rgba(16,185,129,.09); --blue: #1d4ed8; --blue-bg: rgba(59,130,246,.09);
+  --amber-solid: #f59e0b; --green-solid: #10b981; --blue-solid: #3b82f6; --red-solid: #ef4444;
+  --c1: #3b82f6; --c2: #16a34a; --c3: #a855f7; --c4: #f97316;
+  /* The filled red button (.danger): white text on each fill, 5.04, 6.47 and 8.31 to 1. */
+  --danger-bg: #d42a2a; --danger-bg-hover: #b91c1c; --danger-bg-press: #991b1b;
+  --on-red: #fff;
+  --scrim: rgba(0,0,0,.16);
+  --sh-pop: 0 10px 30px rgba(0,0,0,.14), 0 0 0 1px var(--line2);
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #000; --main: #0a0a0a; --raise: rgba(255,255,255,.05); --sel: rgba(255,255,255,.085);
+  --line: rgba(255,255,255,.075); --line2: rgba(255,255,255,.14);
+  --t1: rgba(255,255,255,.94); --t2: rgba(255,255,255,.74); --t3: rgba(255,255,255,.56); --t4: rgba(255,255,255,.42);
+  --btn: #fff; --btnt: #000;
+  --amber: #fbbf24; --amber-text: #fbbf24; --amber-bg: rgba(245,158,11,.08); --amber-line: rgba(251,191,36,.3);
+  --red: #f05252; --red-bg: rgba(239,68,68,.1);
+  --green: #34d399; --green-bg: rgba(16,185,129,.12); --blue: #60a5fa; --blue-bg: rgba(59,130,246,.13);
+  --c1: #60a5fa; --c2: #4ade80; --c3: #c084fc; --c4: #fb923c;
+  --danger-bg: #dc2626; --danger-bg-hover: #c81e1e; --danger-bg-press: #b91c1c; /* white on each: 4.83, 5.74 and 6.47 to 1 */
+  --scrim: rgba(0,0,0,.5);
+  --sh-pop: 0 10px 30px rgba(0,0,0,.6), 0 0 0 1px var(--line2);
+}
+:root[data-theme="dim"] {
+  color-scheme: dark;
+  --bg: #101010; --main: #161616; --raise: rgba(255,255,255,.04); --sel: rgba(255,255,255,.08);
+  --line: rgba(255,255,255,.08); --line2: rgba(255,255,255,.14);
+  --t1: rgba(255,255,255,.92); --t2: rgba(255,255,255,.78); --t3: rgba(255,255,255,.62); --t4: rgba(255,255,255,.48);
+  --btn: #f2f2f2; --btnt: #101010;
+  --amber: hsl(40 78% 63%); --amber-text: hsl(40 78% 63%); --amber-bg: hsl(40 72% 50% / .1); --amber-line: hsl(40 68% 54% / .32);
+  --red: hsl(4 82% 67%); --red-bg: hsl(4 72% 54% / .14);
+  --green: #6ee7b7; --green-bg: rgba(16,185,129,.12); --blue: #93c5fd; --blue-bg: rgba(59,130,246,.13);
+  --c1: #60a5fa; --c2: #4ade80; --c3: #c084fc; --c4: #fb923c;
+  --danger-bg: #c93a33; --danger-bg-hover: #b8322b; --danger-bg-press: #a82a24; /* white on each: 5.08, 5.95 and 6.95 to 1 */
+  --scrim: rgba(0,0,0,.5);
+  --sh-pop: 0 10px 30px rgba(0,0,0,.6), 0 0 0 1px var(--line2);
+}
+
+/* ---- Fonts ---- */
+:root {
+  --sans: "Geist Variable", "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  --fw-regular: 400; --fw-medium: 500;
+  --ls-title: -.015em; --ls-heading: -.02em; --ls-code: .12em;
+}
+
+/* ---- A QR code is dark on light in every theme, because that is what scanners read ---- */
+:root { --qr-ink: #000; --qr-paper: #fff; }
+
+/* ---- Shadows and rings (box-shadow values the components use) ---- */
+:root {
+  --ring-1: 0 0 0 1px var(--line);
+  --ring-2: 0 0 0 1px var(--line2);
+  --ring-amber: inset 0 0 0 1px var(--amber-line);
+  --ring-sel: inset 0 0 0 1.5px var(--t1);
+}
+
+/* ---- Font sizes (px) ---- */
+:root {
+  --fs-10-5: 10.5px; --fs-11: 11px; --fs-11-5: 11.5px; --fs-12: 12px; --fs-12-5: 12.5px; --fs-13: 13px; --fs-13-5: 13.5px; --fs-14: 14px; --fs-16: 16px; --fs-18: 18px; --fs-20: 20px; --fs-22: 22px; --fs-24: 24px; --fs-30: 30px;
+}
+/* ---- Radii ---- */
+:root {
+  --r-3: 3px; --r-5: 5px; --r-6: 6px; --r-7: 7px; --r-8: 8px; --r-9: 9px; --r-10: 10px; --r-12: 12px; --r-16: 16px;
+  --r-pill: 999px; --r-round: 50%;
+}
+/* ---- Border and outline widths ---- */
+:root {
+  --bw: 1px; --bw-1-5: 1.5px; --bw-1-6: 1.6px; --bw-2: 2px; --bw-3: 3px;
+}
+/* ---- Spacing and sizes (px): gaps, padding, margins, offsets, widths, heights ---- */
+:root {
+  --sp-1: 1px; --sp-2: 2px; --sp-3: 3px; --sp-4: 4px; --sp-5: 5px; --sp-6: 6px;
+  --sp-7: 7px; --sp-8: 8px; --sp-9: 9px; --sp-10: 10px; --sp-11: 11px; --sp-12: 12px;
+  --sp-13: 13px; --sp-14: 14px; --sp-15: 15px; --sp-16: 16px; --sp-18: 18px; --sp-20: 20px;
+  --sp-22: 22px; --sp-24: 24px; --sp-26: 26px; --sp-28: 28px; --sp-29: 29px; --sp-30: 30px;
+  --sp-32: 32px; --sp-36: 36px; --sp-38: 38px; --sp-40: 40px; --sp-44: 44px; --sp-48: 48px;
+  --sp-56: 56px; --sp-60: 60px; --sp-64: 64px; --sp-70: 70px; --sp-76: 76px;
+  --sp-78: 78px; --sp-84: 84px; --sp-90: 90px; --sp-110: 110px; --sp-120: 120px; --sp-140: 140px;
+  --sp-160: 160px; --sp-200: 200px; --sp-176: 176px; --sp-220: 220px; --sp-224: 224px; --sp-260: 260px; --sp-320: 320px;
+  --sp-340: 340px; --sp-360: 360px; --sp-420: 420px; --sp-440: 440px; --sp-480: 480px; --sp-520: 520px;
+  --sp-620: 620px; --sp-640: 640px;
+  --sp-n14: -14px; --sp-n4-5: -4.5px; --sp-n4: -4px; --sp-n2: -2px; --sp-n1: -1px;
+  /* The height of one hour in the time grid (also HOUR_PX in tokens.ts). */
+  --hour: 52px;
+}
+
+/* ---- Motion (Motion Designs): durations, easings, and --k, the multiplier ----
+   --k is 1; adding the class "slow" to <html> makes it 4 (the designs' "Slow x4" review switch). Reduced motion is the media rule
+   below: no transforms, and only colour and opacity change, at --m-fast. Only transform, opacity and colour animate. */
+:root {
+  --k: 1;
+  --m-fast: calc(150ms * var(--k)); --m-base: calc(200ms * var(--k)); --m-slow: calc(300ms * var(--k)); --m-page: calc(240ms * var(--k));
+  --m-fast-out: calc(105ms * var(--k)); --m-base-out: calc(140ms * var(--k)); --m-slow-out: calc(210ms * var(--k)); --m-page-out: calc(170ms * var(--k));
+  --m-wait: calc(400ms * var(--k)); --m-hover: calc(500ms * var(--k)); --m-stag: calc(60ms * var(--k));
+  --m-out: cubic-bezier(.2, .8, .2, 1); --m-io: cubic-bezier(.4, 0, .2, 1);
+  /* The loading spinner's turn, from the designs' .spin rule (not one of the 13 motion tokens). */
+  --spin: .9s;
+}
+html.slow { --k: 4; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-property: opacity, color, background-color, border-color, box-shadow, fill, stroke !important;
+    transition-duration: var(--m-fast) !important; transition-delay: 0s !important; transition-timing-function: var(--m-io) !important;
+  }
+}

@@ -39,7 +39,7 @@ export function AgendaView({ days, occurrences, today }: { days: string[]; occur
                   className="row"
                   data-row-id={o.event.id}
                   key={`${o.event.id}-${o.date}-${g.day}`}
-                  style={ui.eventKey?.id === o.event.id && ui.eventKey.date === o.date ? { background: "var(--sel)", borderRadius: 8, padding: "0 8px" } : undefined}
+                  style={ui.eventKey?.id === o.event.id && ui.eventKey.date === o.date ? { background: "var(--sel)", borderRadius: "var(--r-8)", padding: "0 var(--sp-8)" } : undefined}
                 >
                   <span className="time">{o.allDay ? "All day" : formatTime(parseDue(o.start).date)}</span>
                   <span className="sw" style={{ background: colourOf(calendars, o.event) }} aria-hidden="true" />
