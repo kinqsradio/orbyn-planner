@@ -81,6 +81,9 @@ const place = (index: number, of: number) => (of > FIRST_ROWS ? { index, of } : 
 
 const clock = (iso: string) => formatTime(parseDue(iso).date);
 
+/** A timed event that began before today and ends after it fills the whole day, so it sits in the All day group like a multi-day event. */
+const coversDay = (o: Occurrence, day: string) => !o.allDay && o.start.slice(0, 10) < day && lastDayOf(o.start, o.end, false) > day;
+
 function EventRow({ occ, day, phone, at }: { occ: Occurrence; day: string; phone: boolean; at?: { index: number; of: number } }) {
   const { calendars } = usePlanner();
   const ui = useUi();
@@ -93,10 +96,17 @@ function EventRow({ occ, day, phone, at }: { occ: Occurrence; day: string; phone
   const startedEarlier = !occ.allDay && occ.start.slice(0, 10) < day;
   const endsLater = !occ.allDay && lastDayOf(occ.start, occ.end, false) > day;
   const dayWord = (d: string) => (daysBetween(day, d) === 1 ? "tomorrow" : daysBetween(day, d) === -1 ? "yesterday" : `${WEEKDAYS[parseDue(d).date.getDay()]!.slice(0, 3)} ${parseDue(d).date.getDate()} ${MONTHS[parseDue(d).date.getMonth()]!.slice(0, 3)}`);
-  const time = occ.allDay ? "All day" : startedEarlier ? `Until ${clock(occ.end)}` : clock(occ.start);
+  const covers = coversDay(occ, day);
+  const time = occ.allDay || covers ? "All day" : startedEarlier ? `Until ${clock(occ.end)}` : clock(occ.start);
   let meta = occ.allDay ? (calendar?.name ?? "") : ["Event", occ.event.place].filter(Boolean).join(" · ");
-  if (startedEarlier) meta = `Started ${dayWord(occ.start.slice(0, 10))} ${clock(occ.start)}`;
-  else if (endsLater) meta = `Until ${clock(occ.end)} ${dayWord(lastDayOf(occ.start, occ.end, false))}`;
+  const range = (d: string) => `${WEEKDAYS[parseDue(d).date.getDay()]!.slice(0, 3)} ${parseDue(d).date.getDate()} ${MONTHS[parseDue(d).date.getMonth()]!.slice(0, 3)}`;
+  if (covers) meta = `${range(occ.start.slice(0, 10))} – ${range(lastDayOf(occ.start, occ.end, false))}`;
+  else if (startedEarlier) meta = `Started ${dayWord(occ.start.slice(0, 10))} ${clock(occ.start)}`;
+  else if (endsLater) {
+    // One day on: "Until 06:00 tomorrow"; further: "Until Fri 13 Nov 06:00".
+    const last = lastDayOf(occ.start, occ.end, false);
+    meta = daysBetween(day, last) === 1 ? `Until ${clock(occ.end)} tomorrow` : `Until ${range(last)} ${clock(occ.end)}`;
+  }
   if (phone) meta = "";
   return (
     <li className="row" data-row-id={occ.event.id} {...(at ? { "aria-posinset": at.index + 1, "aria-setsize": at.of } : {})}>
@@ -175,10 +185,10 @@ export function TodayPage() {
   // By start, then a multi-day event before a single-day one, then by title.
   const allDay = useMemo(() => {
     const span = (o: Occurrence) => daysBetween(o.date, lastDayOf(o.start, o.end, o.allDay));
-    return todayEvents.filter((o) => o.allDay).sort((a, b) => a.start.localeCompare(b.start) || Number(span(b) > 0) - Number(span(a) > 0) || a.event.title.localeCompare(b.event.title));
-  }, [todayEvents]);
+    return todayEvents.filter((o) => o.allDay || coversDay(o, key)).sort((a, b) => a.start.localeCompare(b.start) || Number(span(b) > 0) - Number(span(a) > 0) || a.event.title.localeCompare(b.event.title));
+  }, [todayEvents, key]);
   const entries = useMemo(
-    () => inTimeOrder([...g.today.map((task): Entry => ({ kind: "task", task })), ...todayEvents.filter((o) => !o.allDay).map((occ): Entry => ({ kind: "event", occ }))], key),
+    () => inTimeOrder([...g.today.map((task): Entry => ({ kind: "task", task })), ...todayEvents.filter((o) => !o.allDay && !coversDay(o, key)).map((occ): Entry => ({ kind: "event", occ }))], key),
     [g.today, todayEvents, key],
   );
 

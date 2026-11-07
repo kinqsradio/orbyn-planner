@@ -68,6 +68,8 @@
   --sans: "Geist Variable", "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
   --fw-regular: 400; --fw-medium: 500;
+  /* The body text's line height (as `.sheet` sets it). */
+  --lh-body: 1.45;
   --ls-title: -.015em; --ls-heading: -.02em; --ls-code: .12em;
 }
 
@@ -104,7 +106,6 @@
   --sp-32: 32px; --sp-36: 36px; --sp-38: 38px; --sp-40: 40px; --sp-44: 44px; --sp-48: 48px; --sp-52: 52px;
   --sp-56: 56px; --sp-60: 60px; --sp-64: 64px; --sp-70: 70px; --sp-76: 76px;
   --sp-78: 78px; --sp-84: 84px; --sp-90: 90px; --sp-110: 110px; --sp-120: 120px; --sp-140: 140px;
-  --lh-body: 1.45;
   --sp-160: 160px; --sp-200: 200px; --sp-176: 176px; --sp-220: 220px; --sp-224: 224px; --sp-260: 260px; --sp-320: 320px;
   --sp-340: 340px; --sp-360: 360px; --sp-420: 420px; --sp-440: 440px; --sp-480: 480px; --sp-520: 520px;
   --sp-620: 620px; --sp-640: 640px;

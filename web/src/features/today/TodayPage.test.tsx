@@ -153,6 +153,17 @@ describe("Today page", () => {
     expect(names).toEqual(["Now", "Soon", "Edge"]); // made in another order; Far and Late are out
   });
 
+  it("with fewer than three goals, one 31 days out still does not show: the 30-day bound stands on its own, apart from the cap of three", async () => {
+    await openToday((s) => {
+      s.addProject({ name: "Far", colour: "c1", goal: "2026-12-08" }); // 31 days on
+      s.addProject({ name: "Now", colour: "c3", goal: "2026-11-07" });
+      s.addProject({ name: "Edge", colour: "c2", goal: "2026-12-07" }); // exactly 30 days on
+    });
+    const progress = screen.getByText("Progress", { selector: "b" }).parentElement!.parentElement!;
+    const names = Array.from(progress.querySelectorAll(".kv")).filter((el) => el.textContent?.includes("%")).map((el) => el.firstElementChild!.textContent);
+    expect(names).toEqual(["Now", "Edge"]);
+  });
+
   it("greets by the clock: morning from 05:00, afternoon from 12:00, evening from 18:00, and until 04:59", async () => {
     const { greetingAt } = await import("./TodayPage");
     expect(greetingAt(new Date(2026, 10, 7, 4, 59))).toBe("Good evening");
@@ -208,6 +219,30 @@ describe("events across midnight", () => {
       ["13:00", "Lunch", "Event"],
     ]);
     expect(stat("Today")).toBe("1"); // 10:00: the shift and the swim are over, lunch is to come
+  });
+
+  it("longer events (Wednesday 11 November): one that began two days ago, one that covers the whole day, one that ends two days later", async () => {
+    await openToday((s) => {
+      s.addEvent({ title: "Conference: Lisbon", start: "2026-11-09T09:00", end: "2026-11-13T17:00" });
+      s.addEvent({ title: "On-call: platform", start: "2026-11-08T22:00", end: "2026-11-11T06:00" });
+      s.addEvent({ title: "Team planning", start: "2026-11-11T09:00", end: "2026-11-11T10:00", place: "Room 3" });
+      s.addEvent({ title: "Release freeze", start: "2026-11-11T22:00", end: "2026-11-13T06:00" });
+    }, new Date(2026, 10, 11, 8, 0));
+    // The one that covers all of today is in the All day group, with its date range; the Timed header is there because that group is.
+    expect(screen.getByText("All day", { selector: "b" }).nextElementSibling).toHaveTextContent("1");
+    expect(screen.getByText("Timed", { selector: "b" })).toBeInTheDocument();
+    expect(times()).toEqual([
+      ["All day", "Conference: Lisbon", "Mon 9 Nov – Fri 13 Nov"],
+      ["Until 06:00", "On-call: platform", "Started Sun 8 Nov 22:00"],
+      ["09:00", "Team planning", "Event · Room 3"],
+      ["22:00", "Release freeze", "Until Fri 13 Nov 06:00"],
+    ]);
+  });
+
+  it("there is no Timed header when there is no All day group", async () => {
+    await openToday((s) => s.addEvent({ title: "Lunch", start: "2026-11-07T13:00", end: "2026-11-07T14:00" }));
+    expect(screen.queryByText("Timed", { selector: "b" })).toBeNull();
+    expect(screen.queryByText("All day", { selector: "b" })).toBeNull();
   });
 
   it("while it is still going (02:00) it counts in the Today number", async () => {
