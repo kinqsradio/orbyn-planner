@@ -12,6 +12,11 @@ import { describeError } from "./AuthScreens";
 import { refreshDeletionNotice, useCancelDeletion } from "./DeletionBanner";
 
 const digits = (value: string) => value.replace(/\D/g, "").slice(0, 6);
+/** A recovery code as the engine prints it, `XXXXX-XXXXX`: capitals and digits, ten at most, with the dash put in. */
+const recoveryCode = (value: string) => {
+  const text = value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
+  return text.length > 5 ? `${text.slice(0, 5)}-${text.slice(5)}` : text;
+};
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 const WEEK_MS = 7 * 86_400_000;
 
@@ -188,8 +193,9 @@ function DeleteDialog({ onClose }: { onClose: () => void }) {
               autoComplete="one-time-code"
               autoCapitalize="characters"
               value={factor}
+              disabled={busy}
               onChange={(e) => {
-                setFactor(e.target.value);
+                setFactor(recovery ? recoveryCode(e.target.value) : e.target.value);
                 setError(null);
               }}
               aria-invalid={error ? true : undefined}

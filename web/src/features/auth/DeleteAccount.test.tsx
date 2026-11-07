@@ -83,10 +83,15 @@ describe("the Delete account row and its dialog", () => {
     await userEvent.click(await within(dialog).findByRole("button", { name: "Use a recovery code" }));
     const field = within(dialog).getByLabelText("Recovery code");
     const confirm = within(dialog).getByRole("button", { name: "Delete account" });
-    await userEvent.type(field, "ABCDE-FGH");
+    await userEvent.type(field, "abcde-fgh");
+    expect(field).toHaveValue("ABCDE-FGH"); // capitals, the dash where the engine prints it
     expect(confirm).toBeDisabled();
-    await userEvent.type(field, "JK");
+    await userEvent.type(field, "jk");
+    expect(field).toHaveValue("ABCDE-FGHJK");
     expect(confirm).toBeEnabled();
+    await userEvent.clear(field);
+    await userEvent.type(field, "abcdefghij");
+    expect(field).toHaveValue("ABCDE-FGHIJ");
   });
 
   it("while it works the button reads Deleting… (after 400 ms), is disabled and keeps its place", async () => {
@@ -103,6 +108,7 @@ describe("the Delete account row and its dialog", () => {
     const busy = within(dialog).getByRole("button", { name: "Deleting…" });
     expect(busy).toBeDisabled();
     expect(busy.querySelector(".spin")).not.toBeNull();
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeDisabled();
   });
 });
 
