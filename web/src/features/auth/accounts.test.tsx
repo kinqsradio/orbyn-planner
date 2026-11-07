@@ -1711,7 +1711,7 @@ describe("while a deletion is scheduled", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Privacy" }));
     const choose = await within(await screen.findByLabelText("Protection")).findByRole("button", { name: "Choose" });
     expect(choose).toBeDisabled();
-    expect(choose).toHaveAttribute("title", "Cancel deletion to change this");
+    expect(choose).toHaveAttribute("title", "Cancel deletion to change protection");
   });
 
   it("a change the engine refuses with deletion_scheduled shows the paused state", async () => {

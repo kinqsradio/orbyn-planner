@@ -85,8 +85,11 @@ export const cancelFailure = {
 
 export const CANCEL_FAILED_TEXT = "Couldn’t cancel deletion. Nothing changed, so it is still scheduled.";
 
-/** What a paused control says on hover or focus while an account is scheduled for deletion. */
+/** What a paused device or two-factor control says on hover or focus while an account is scheduled for deletion. */
 export const PAUSED_HINT = "Cancel deletion to change this";
+
+/** The same on protection's Choose, as the designs word it (del-frozen). */
+export const PAUSED_PROTECTION_HINT = "Cancel deletion to change protection";
 
 /** True while a deletion is scheduled: adding or removing devices, changing protection or two-factor, and signing out everywhere are paused. */
 export function useDeletionPaused(): boolean {
