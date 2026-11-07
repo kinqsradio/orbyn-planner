@@ -129,5 +129,4 @@ html.slow { --k: 4; }
     transition-property: opacity, color, background-color, border-color, box-shadow, fill, stroke !important;
     transition-duration: var(--m-fast) !important; transition-delay: 0s !important; transition-timing-function: var(--m-io) !important;
   }
-  .spin { animation: none; }
 }

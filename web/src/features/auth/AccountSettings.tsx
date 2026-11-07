@@ -124,9 +124,9 @@ function SignOutDialog({ onClose }: { onClose: () => void }) {
       <p className="t3 small">Remove deletes its lists, tasks and any changes not yet sent from this browser; your other devices keep theirs. Keep leaves them here, and they open again only when this same account signs in. It stays on this browser unencrypted.</p>
       <OnlyDeviceNote />
       <div className="dialog-actions">
-        <button type="button" className="ghost" onClick={onClose}>Cancel</button>
+        <button type="button" className="ghost" data-autofocus onClick={onClose}>Cancel</button>
         <button type="button" className="ghost" onClick={() => go(false)}>Keep on this browser</button>
-        <button type="button" className="danger" data-autofocus onClick={() => go(true)}>Remove</button>
+        <button type="button" className="danger" onClick={() => go(true)}>Remove</button>
       </div>
     </Modal>
   );
@@ -155,7 +155,7 @@ function RemoveDialog({ device, onClose, onDone }: { device: Device; onClose: ()
       <p className="t3 small">It is signed out at once and can’t open your planner until you approve it again.</p>
       {error && <p className="err" role="alert">{error}</p>}
       <div className="dialog-actions">
-        <button type="button" className="ghost" onClick={onClose}>Cancel</button>
+        <button type="button" className="ghost" data-autofocus onClick={onClose}>Cancel</button>
         <button type="button" className="danger" disabled={busy} onClick={() => void remove()}>Remove</button>
       </div>
     </Modal>

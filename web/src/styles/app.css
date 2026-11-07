@@ -88,6 +88,8 @@ button { cursor: pointer; }
 .pillx button { padding: 0; border: 0; background: none; font-weight: var(--fw-medium); text-decoration: underline; text-underline-offset: var(--sp-2); color: inherit; }
 .spin { width: var(--sp-11); height: var(--sp-11); border-radius: var(--r-round); border: var(--bw-1-6) solid var(--line2); border-top-color: var(--t2); display: inline-block; animation: sp var(--spin) linear infinite; }
 @keyframes sp { to { transform: rotate(360deg); } }
+/* Under reduced motion the spinner stands still (here, after its own rule, so it wins: tokens.css is loaded first). */
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
 
 .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-12); }
 .grid4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-12); }

@@ -56,6 +56,29 @@ describe("tokens.ts and tokens.css say the same", () => {
     expect(app).toContain(".danger:active:not(:disabled) { background: var(--danger-bg-press); }");
   });
 
+  it("under reduced motion the spinner stops, and that rule comes after the rule that spins it (so it wins)", () => {
+    const spins = app.indexOf(".spin {");
+    const stops = app.search(/@media \(prefers-reduced-motion: reduce\) \{ \.spin \{ animation: none; \} \}/);
+    expect(spins).toBeGreaterThan(-1);
+    expect(app.slice(spins, app.indexOf("}", spins))).toContain("animation: sp var(--spin) linear infinite");
+    expect(stops).toBeGreaterThan(spins);
+    // tokens.css is loaded first, so a stop written there would lose to the app's own rule.
+    expect(css).not.toMatch(/\.spin\s*\{/);
+  });
+
+  it("the colour sets are the designs': light, dark and dim keep their values", () => {
+    const block = (theme: string) => {
+      const start = theme === "light" ? css.indexOf(":root,\n:root[data-theme=\"light\"]") : css.indexOf(`:root[data-theme="${theme}"]`);
+      return css.slice(start, css.indexOf("\n}", start));
+    };
+    const expected: Record<string, string[]> = {
+      light: ["--bg: #f6f6f6;", "--main: #fff;", "--t1: rgba(0,0,0,.92);", "--red: #d42a2a;", "--amber: #c2710a;", "--amber-text: #9a5705;", "--btn: #111;"],
+      dark: ["--bg: #000;", "--main: #0a0a0a;", "--t1: rgba(255,255,255,.94);", "--red: #f05252;", "--amber: #fbbf24;", "--amber-text: #fbbf24;", "--btn: #fff;"],
+      dim: ["--bg: #101010;", "--main: #161616;", "--t1: rgba(255,255,255,.92);", "--red: hsl(4 82% 67%);", "--amber: hsl(40 78% 63%);", "--amber-text: hsl(40 78% 63%);", "--btn: #f2f2f2;"],
+    };
+    for (const [theme, values] of Object.entries(expected)) for (const v of values) expect(block(theme), `${theme} ${v}`).toContain(v);
+  });
+
   it("small amber text has its own token, darker than --amber in light and equal to it in dark and dim", () => {
     expect(css).toMatch(/--amber: #c2710a; --amber-text: #9a5705;/);
     expect(css).toMatch(/:root\[data-theme="dark"\][\s\S]*--amber: #fbbf24; --amber-text: #fbbf24;/);
